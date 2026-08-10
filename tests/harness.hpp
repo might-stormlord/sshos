@@ -33,6 +33,20 @@ inline void fail(const char* file, int line, const std::string& what) {
   std::fprintf(stderr, "  FAIL %s:%d  %s\n", file, line, what.c_str());
 }
 
+// Un test qui lève au lieu d'échouer proprement (helper mal nourri, ressource
+// système indisponible pendant le run...) ne doit pas abattre le binaire
+// entier : tous les cas qui suivent dans le registre ne tourneraient jamais
+// et aucune ligne de résumé ne serait imprimée. main() encadre chaque
+// c.fn() d'un try/catch et route ici plutôt que vers fail(file, line, ...) :
+// une exception qui a remonté toute la pile du test n'a pas de site
+// __FILE__/__LINE__ pertinent, seulement le nom du cas qui l'a laissée
+// s'échapper.
+inline void fail_uncaught(const char* test_name, const std::string& what) {
+  ++failures();
+  std::fprintf(stderr, "  FAIL %s  exception non interceptee : %s\n",
+               test_name, what.c_str());
+}
+
 // Les chaînes attendues contiennent des octets de contrôle : sans échappement,
 // un diff de sortie ANSI est illisible et le test ne sert à rien.
 inline std::string show(const std::string& v) {
@@ -98,6 +112,9 @@ inline std::string show<sshos::Color>(const sshos::Color& v) {
   static th::Registrar reg_##name(#name, &test_##name);   \
   static void test_##name()
 
+// CHECK / CHECK_EQ enregistrent un échec et laissent le test continuer :
+// c'est voulu, ça permet de voir toutes les assertions en défaut d'un seul
+// coup plutôt qu'une seule à la fois. Utiliser CHECK/CHECK_EQ par défaut.
 #define CHECK(cond)                                                    \
   do {                                                                 \
     if (!(cond)) th::fail(__FILE__, __LINE__, "CHECK(" #cond ")");     \
@@ -111,5 +128,41 @@ inline std::string show<sshos::Color>(const sshos::Color& v) {
       th::fail(__FILE__, __LINE__,                                          \
                "CHECK_EQ(" #a ", " #b ")\n       obtenu = " + th::show(_a) + \
                    "\n       attendu = " + th::show(_b));                   \
+    }                                                                       \
+  } while (0)
+
+// REQUIRE / REQUIRE_EQ enregistrent un échec exactement comme CHECK/CHECK_EQ,
+// puis font `return;` : le reste du test n'est pas exécuté. À réserver aux
+// cas où continuer serait non seulement redondant mais dangereux — typiquement
+// juste avant de déréférencer quelque chose dont l'assertion qui précède
+// vient de prouver l'absence (un `.at(0)` sur un vecteur dont on vient de
+// vérifier la taille, par exemple). Ne pas les utiliser par défaut : elles
+// cachent les assertions suivantes si la condition échoue, alors que
+// CHECK/CHECK_EQ les montrent toutes.
+//
+// Le `return;` est nu : REQUIRE/REQUIRE_EQ ne compilent que dans une
+// fonction de retour void, en pratique le corps d'un TEST(...). Elles ne
+// conviennent pas à une fonction utilitaire qui retourne une valeur (ex. un
+// helper `KeyEvent one_key(...)` — voir tests/test_input.cpp) ; dans ce cas
+// la seule protection possible reste CHECK_EQ suivi d'un déréférencement qui
+// peut lever, ce que le catch-all de tests/main.cpp transforme désormais en
+// un échec propre au lieu de faire tomber tout le binaire.
+#define REQUIRE(cond)                                                  \
+  do {                                                                 \
+    if (!(cond)) {                                                     \
+      th::fail(__FILE__, __LINE__, "REQUIRE(" #cond ")");              \
+      return;                                                          \
+    }                                                                  \
+  } while (0)
+
+#define REQUIRE_EQ(a, b)                                                     \
+  do {                                                                       \
+    auto&& _a = (a);                                                        \
+    auto&& _b = (b);                                                        \
+    if (!(_a == _b)) {                                                      \
+      th::fail(__FILE__, __LINE__,                                          \
+               "REQUIRE_EQ(" #a ", " #b ")\n       obtenu = " + th::show(_a) + \
+                   "\n       attendu = " + th::show(_b));                   \
+      return;                                                               \
     }                                                                       \
   } while (0)
