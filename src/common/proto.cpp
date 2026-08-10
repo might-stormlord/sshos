@@ -47,13 +47,6 @@ struct Reader {
   }
 };
 
-// Taille de l'enveloppe fixe (1 octet de tag + 4 octets de longueur).
-// Nommée pour que l'arithmétique de next() se fasse explicitement en
-// size_t : additionner ce `5` littéral (int) à `len` (uint32_t) sans
-// passer par size_t calculerait en 32 bits et boucle pour len proche de
-// 0xFFFFFFFF — exactement le bogue corrigé dans cette révision.
-inline constexpr size_t kHeaderSize = 5;
-
 std::string body_of(const Msg& m, Tag& tag) {
   std::string b;
   if (const auto* h = std::get_if<Hello>(&m)) {
@@ -191,7 +184,7 @@ std::optional<Msg> Decoder::next() {
 
     // Toute l'arithmétique qui suit se fait en size_t (64 bits ici) :
     // `len` est un uint32_t, jamais mélangé à un littéral `int` avant
-    // d'avoir été élargi. Voir kHeaderSize et kMaxMessageBytes.
+    // d'avoir été élargi. Voir kHeaderSize et kMaxMessageBytes (proto.hpp).
     const size_t declared = kHeaderSize + static_cast<size_t>(len);
 
     // Un pair qui annonce un message plus gros que ce que le pire cas

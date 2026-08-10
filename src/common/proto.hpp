@@ -61,11 +61,29 @@ std::string encode(const Msg& m);
 // jalon — voir le rapport de relecture.)
 inline constexpr size_t kMaxMessageBytes = 32ull * 1024 * 1024;
 
+// Taille de l'enveloppe fixe qui précède le corps de CHAQUE message : 1
+// octet de tag + 4 octets de longueur (voir Decoder::next(), proto.cpp,
+// qui la consomme pour parser cette enveloppe). Définie ici plutôt que
+// gardée en détail d'implémentation dans proto.cpp : kMaxBufferBytes
+// (juste en dessous) et Decoder::next() ont chacun besoin d'EXACTEMENT
+// cette même valeur pour deux calculs différents (dimensionner la marge
+// du tampon de réassemblage ici, retrancher l'enveloppe déjà lue
+// là-bas) -- deux copies entretenues à la main auraient pu diverger sans
+// qu'aucun avertissement du compilateur ne le signale (c'était le cas
+// avant ce correctif : un `5` littéral ici, kHeaderSize séparément dans
+// proto.cpp, reliés seulement par de la prose qui se renvoyait d'un
+// fichier à l'autre). Nommée aussi pour que l'arithmétique qui s'en sert
+// se fasse explicitement en size_t : additionner un `5` littéral (int) à
+// une longueur uint32_t sans passer par size_t calculerait en 32 bits et
+// boucle pour une longueur proche de 0xFFFFFFFF -- un bogue déjà corrigé
+// une fois pour cette raison précise (voir Decoder::next()).
+inline constexpr size_t kHeaderSize = 5;
+
 // Plafond de l'extent NON CONSOMMÉ du tampon de réassemblage (buf_.size()
 // - pos_ : les octets déjà consommés en tête ne comptent pas), pas de son
 // allocation physique. Doit rester assez grand pour qu'un message légal
 // de taille maximale puisse s'assembler même arrivé fragmenté sur de très
-// nombreux feed() : l'en-tête (5 octets) + le corps maximal
+// nombreux feed() : l'en-tête (kHeaderSize) + le corps maximal
 // (kMaxMessageBytes), plus 1 Mio de marge pour ce qui peut être mis en
 // file juste à côté (fin d'un message précédent pas encore consommé,
 // début du suivant arrivé dans la même salve).
@@ -80,7 +98,7 @@ inline constexpr size_t kMaxMessageBytes = 32ull * 1024 * 1024;
 // — voir le commentaire de compact() (proto.cpp) pour l'analyse complète
 // de ce compromis.
 inline constexpr size_t kMaxBufferBytes =
-    kMaxMessageBytes + 5 + (1ull * 1024 * 1024);
+    kMaxMessageBytes + kHeaderSize + (1ull * 1024 * 1024);
 
 // Décodeur incrémental : les messages arrivent découpés n'importe comment.
 //
