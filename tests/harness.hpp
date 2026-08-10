@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdio>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "render/cell.hpp"
 
 namespace th {
 
@@ -55,6 +58,34 @@ template <class T>
 std::string show(const T& v) {
   std::ostringstream os;
   os << v;
+  return os.str();
+}
+
+template <>
+inline std::string show<char32_t>(const char32_t& v) {
+  if (v < 0x20 || v == 0x7f) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "U+%04X", static_cast<unsigned>(v));
+    return buf;
+  }
+  char buf[8];
+  std::snprintf(buf, sizeof buf, "U'%c'", static_cast<char>(v));
+  return buf;
+}
+
+template <>
+inline std::string show<sshos::Color>(const sshos::Color& v) {
+  std::ostringstream os;
+  os << "Color(kind=";
+  switch (v.kind) {
+    case sshos::ColorKind::Default: os << "Default"; break;
+    case sshos::ColorKind::Indexed: os << "Indexed(" << static_cast<int>(v.idx) << ")"; break;
+    case sshos::ColorKind::Rgb:
+      os << "Rgb(" << static_cast<int>(v.r) << ","
+         << static_cast<int>(v.g) << "," << static_cast<int>(v.b) << ")";
+      break;
+  }
+  os << ")";
   return os.str();
 }
 
