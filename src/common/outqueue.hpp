@@ -90,6 +90,18 @@ class OutQueue {
   // récupérables. L'information exacte n'existe qu'à un seul instant, dans
   // push() au moment du rejet, juste avant que off_ ne soit remis à zéro --
   // c'est là, et seulement là, qu'elle est capturée.
+  //
+  // État accumulé, PAS état du dernier rejet : entre deux appels à
+  // take_overflow(), plusieurs push() peuvent déborder. La sévérité
+  // rendue est celle du PIRE rejet survenu depuis le dernier appel, jamais
+  // moins -- un rejet Clean qui suit un rejet Dirty ne dégrade pas l'état
+  // en attente (release_buffer() remet off_ à zéro à chaque rejet, donc un
+  // second rejet isolé serait toujours vu comme Clean s'il écrasait plutôt
+  // que fusionnait). Ne redescend que quand take_overflow() le consomme et
+  // le remet à None -- même discipline que Decoder::failed() (tâche 7),
+  // qui ne se répare pas non plus tout seul. Défaut Critical de ce round :
+  // corrigé après avoir été trouvé par sondage sur le code fusionné, voir
+  // le commentaire de push().
   Overflow take_overflow();
 
   // Diagnostic réservé aux tests : capacité physique actuelle du tampon
