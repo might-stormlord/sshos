@@ -178,7 +178,20 @@ size_t utf8_decode(std::string_view s, size_t pos, char32_t& out) {
     cp = (cp << 6) | (bk & 0x3F);
   }
 
-  out = cp;
+  // Valider le scalaire Unicode : rejeter les surrogates [D800, DFFF],
+  // les valeurs > 10FFFF, et les séquences trop longues (ex: E0 80 80 → 0).
+  // Utiliser la règle "maximal subpart" : consommer la séquence complète
+  // même si le codepoint est invalide.
+  const bool is_surrogate = (cp >= 0xD800 && cp <= 0xDFFF);
+  const bool is_out_of_range = (cp > 0x10FFFF);
+  const bool is_overlong = (need == 1 && cp < 0x80) || (need == 2 && cp < 0x800) ||
+                           (need == 3 && cp < 0x10000);
+
+  if (is_surrogate || is_out_of_range || is_overlong) {
+    out = 0xFFFD;  // Caractère de remplacement
+  } else {
+    out = cp;
+  }
   return static_cast<size_t>(need + 1);
 }
 
