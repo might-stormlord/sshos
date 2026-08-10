@@ -222,3 +222,45 @@ TEST(surface_fill_half_wide_glyph) {
   CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
   CHECK_EQ(s.at(1, 0).bg, sshos::Color::def());  // bg non changé
 }
+
+// Le deuxième appel cleanup_orphan(ox+1,oy) ne peut être testé que quand
+// l'orpheline qu'il nettoie est *hors du clip* du view qui fait l'écriture.
+// Reproduire : Surface(8,1), placer paire large aux cols 4-5 via root.
+// V_left = root.sub({0,0,5,1}) couvre cols 0-4, col 5 est dehors.
+// V_left.put(3,0,'中') écrit ox=3,4 -> écrase tête col 4 -> col 5 orpheline.
+// Seul le deuxième cleanup peut la trouver (première call cleans ox=3 neighbours).
+TEST(surface_second_cleanup_orphan_outside_clip) {
+  Surface s(8, 1);
+  View root = s.root();
+  // Placer paire large aux cols 4-5 via root
+  root.put(4, 0, U'日', Style{});
+  CHECK_EQ(s.at(4, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(5, 0).width), 0);
+
+  // Créer sub-view qui couvre cols 0-4, col 5 est hors du clip
+  View v_left = root.sub(Rect{0, 0, 5, 1});
+
+  // V_left.put(3,0,'中') -> ox=3, écrit ox=3 et ox+1=4
+  // Clobbered: col 4 était tête de la paire, devient continuation de '中'
+  // Résultat: col 5 (ancienne continuation) est orpheline, hors du clip
+  v_left.put(3, 0, U'中', Style{});
+
+  // Vérifier la grille entière : toute continuation doit avoir tête à gauche,
+  // toute tête doit avoir continuation à droite (invariant global)
+  for (int x = 0; x < 8; ++x) {
+    const int w = static_cast<int>(s.at(x, 0).width);
+    if (w == 0) {
+      // Continuation : vérifier tête immédiatement à gauche
+      if (x > 0) {
+        CHECK_EQ(static_cast<int>(s.at(x - 1, 0).width), 2);
+      }
+    } else if (w == 2) {
+      // Tête : vérifier continuation immédiatement à droite
+      if (x + 1 < 8) {
+        CHECK_EQ(static_cast<int>(s.at(x + 1, 0).width), 0);
+      }
+    } else {
+      // Largeur 1 : pas de contrainte
+    }
+  }
+}
