@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -38,6 +39,11 @@ class Surface {
   }
 
   View root();
+
+  // Ligne rendue en UTF-8, cellules de continuation omises. Support des
+  // assertions de propriété : `CHECK(s.text_row(3).find("Terminal") != npos)`
+  // résiste à un changement de thème, un golden d'octets non.
+  std::string text_row(int y) const;
 
  private:
   int w_ = 0;

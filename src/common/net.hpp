@@ -132,4 +132,8 @@ struct AcceptResult {
 
 AcceptResult accept_peer(int listen_fd, uid_t expected_uid);
 
+// Pid du pair. C'est ainsi que `--kill` trouve le démon : pas de fichier
+// de pid à maintenir, l'information est déjà dans le socket.
+pid_t peer_pid(int fd);
+
 }  // namespace sshos
