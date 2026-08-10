@@ -11,6 +11,13 @@ namespace sshos {
 // processus des autres fenêtres.
 class OutQueue {
  public:
+  // Résultat de take_overflow() : distingue un débordement qui n'a rien
+  // envoyé sur le fil (Clean) d'un débordement survenu après qu'un flush()
+  // avait déjà émis une partie de la trame jetée (Dirty) -- voir le
+  // commentaire de take_overflow() ci-dessous pour ce que chaque valeur
+  // implique côté appelant.
+  enum class Overflow { None, Clean, Dirty };
+
   explicit OutQueue(size_t ceiling) : ceiling_(ceiling) {}
 
   void push(std::string_view bytes);
@@ -34,33 +41,82 @@ class OutQueue {
 
   size_t size() const { return buf_.size() - off_; }
 
-  // Vrai une seule fois après un dépassement de plafond : l'appelant doit
-  // alors repartir sur un repaint complet, mais ce repaint ne suffit pas
-  // toujours à remettre le pair d'aplomb. Deux cas, à distinguer par
-  // l'appelant :
-  //  - rien n'était encore parti pour cette frame (aucun flush() partiel
-  //    depuis le dernier push() qui a débordé) : le pair n'a rien reçu de la
-  //    séquence jetée, un repaint complet la remplace proprement ;
-  //  - un flush() antérieur avait déjà écrit une partie du tampon quand le
-  //    push() suivant a dépassé le plafond (push() vide tout, y compris ce
-  //    qui restait à envoyer d'un flush() précédent) : le pair a alors déjà
-  //    reçu un préfixe -- potentiellement une séquence d'échappement coupée
-  //    en deux. Le repaint qui suit ne resynchronise pas ce flux : il
-  //    s'ajoute après un fragment inachevé que le terminal du pair
-  //    interprétera de travers. La vraie correction (émettre un préfixe de
-  //    resynchronisation avant le repaint) revient à l'appelant, pas à cette
-  //    classe. Cette interface ne donne toutefois pas à l'appelant de quoi
-  //    distinguer les deux cas : take_overflow() rend un simple bool, sans
-  //    dire si le tampon jeté avait déjà un préfixe parti.
-  bool take_overflow();
+  // Rend l'état de débordement accumulé depuis le dernier appel, puis le
+  // remet à None (drapeau qui se consomme). Un dépassement du plafond jette
+  // TOUJOURS tout le tampon (voir push()) : l'appelant doit repartir sur un
+  // repaint complet dans les deux cas. Mais un repaint seul ne suffit pas
+  // toujours à remettre le pair d'aplomb -- deux cas, distingués par la
+  // valeur rendue :
+  //
+  //  - Clean : rien de ce qui vient d'être jeté n'était encore parti sur le
+  //    fil (aucun flush() n'avait entamé ce tampon depuis le dernier push()
+  //    qui a débordé). Le pair est aligné sur les frontières de trame ; un
+  //    repaint complet le répare proprement.
+  //
+  //  - Dirty : un flush() antérieur avait déjà émis une partie du tampon
+  //    quand le push() suivant a dépassé le plafond (push() jette tout, y
+  //    compris ce qui restait à envoyer d'un flush() précédent). Le pair a
+  //    donc déjà reçu un préfixe de trame binaire préfixée par sa longueur.
+  //    Ce n'est PAS un problème d'affichage : OutQueue ne transporte pas de
+  //    l'ANSI brut vers un terminal, mais des trames que Decoder consomme
+  //    AVANT toute interprétation (voir proto.hpp). Le Decoder du pair
+  //    attend alors les octets manquants d'un message fantôme et ne produira
+  //    plus jamais rien, sans jamais passer en échec (failed()) -- un gel
+  //    silencieux et définitif, pas un écran abîmé. Aucun repaint, si
+  //    complet soit-il, ne le débloque : la vraie correction (fermer la
+  //    connexion, ou émettre un préfixe de resynchronisation que le pair
+  //    sache reconnaître) revient à l'appelant, pas à cette classe -- voir
+  //    la tâche 13.
+  //
+  // Imprécision assumée, documentée plutôt que prétendue résolue : Dirty
+  // signifie « une émission partielle a eu lieu avant ce rejet », pas
+  // « une trame précise a été coupée en deux ». off_ pourrait tomber pile
+  // sur une frontière de trame, auquel cas le pair serait en réalité aligné
+  // et ce code déclarerait Dirty à tort (faux positif). OutQueue ignore
+  // délibérément où sont les frontières de trame -- ce n'est pas son rôle.
+  // Le sur-signalement (Dirty pour un cas qui était en fait propre) est le
+  // bon côté où se tromper : au pire l'appelant est trop prudent (il ferme
+  // une connexion en réalité récupérable), jamais l'inverse (déclarer Clean
+  // un cas réellement sale, qui gèlerait le pair en silence).
+  //
+  // Ne PAS reconstituer cette distinction à partir de wants_write() lu
+  // avant chaque push() : wants_write() (off_ < buf_.size()) est vrai dès
+  // qu'il reste des octets en attente, y compris quand le tout premier
+  // send() d'un flush() a pris EAGAIN sans avoir rien émis -- off_ vaut
+  // alors 0, le pair n'a rien reçu de partiel, et le débordement serait
+  // Clean. Cette implication ne vaut que dans un sens (off_ != 0 implique
+  // wants_write(), jamais l'inverse) : l'utiliser en substitut classerait à
+  // tort ce cas en sale et ferait tuer des connexions parfaitement
+  // récupérables. L'information exacte n'existe qu'à un seul instant, dans
+  // push() au moment du rejet, juste avant que off_ ne soit remis à zéro --
+  // c'est là, et seulement là, qu'elle est capturée.
+  Overflow take_overflow();
+
+  // Diagnostic réservé aux tests : capacité physique actuelle du tampon
+  // interne (buf_.capacity()), pour vérifier que la mémoire est bien rendue
+  // après un pic qui l'a fait grossir -- que ce pic ait été suivi d'un
+  // vidage complet (flush()) ou d'un rejet (push() au-delà du plafond).
+  // N'existe que pour ça -- aucun code de production ne doit lire cette
+  // valeur.
+  size_t buffer_capacity_for_tests() const { return buf_.capacity(); }
+
+  // Diagnostic réservé aux tests : longueur physique du tampon interne
+  // (buf_.size()), acomptes déjà envoyés compris. Sert à vérifier que la
+  // branche de décalage de compact() (off_ au-delà d'un flush() partiel
+  // important) a bien réclamé le préfixe mort plutôt que de le laisser
+  // traîner : une fois cette branche exécutée, cette valeur redevient
+  // égale à size() (plus aucun octet déjà envoyé en tête). N'existe que
+  // pour ça -- aucun code de production ne doit lire cette valeur.
+  size_t raw_buffer_size_for_tests() const { return buf_.size(); }
 
  private:
   void compact();
+  void release_buffer();
 
   std::string buf_;
   size_t off_ = 0;
   size_t ceiling_;
-  bool overflowed_ = false;
+  Overflow overflow_ = Overflow::None;
 };
 
 }  // namespace sshos
