@@ -47,6 +47,13 @@ struct Reader {
   }
 };
 
+// Taille de l'enveloppe fixe (1 octet de tag + 4 octets de longueur).
+// Nommée pour que l'arithmétique de next() se fasse explicitement en
+// size_t : additionner ce `5` littéral (int) à `len` (uint32_t) sans
+// passer par size_t calculerait en 32 bits et boucle pour len proche de
+// 0xFFFFFFFF — exactement le bogue corrigé dans cette révision.
+inline constexpr size_t kHeaderSize = 5;
+
 std::string body_of(const Msg& m, Tag& tag) {
   std::string b;
   if (const auto* h = std::get_if<Hello>(&m)) {
@@ -93,46 +100,136 @@ std::string encode(const Msg& m) {
   return out;
 }
 
-std::optional<Msg> Decoder::next() {
-  if (buf_.size() < 5) return std::nullopt;
+void Decoder::fail() {
+  // Le pair a violé le protocole : plus rien de ce qu'il enverra n'est
+  // digne de confiance. On efface le tampon (rien à en tirer) plutôt que
+  // de le laisser grossir en pure perte jusqu'à la fermeture par
+  // l'appelant.
+  failed_ = true;
+  pos_ = 0;
+  buf_.clear();
+  buf_.shrink_to_fit();
+}
 
-  Reader head{buf_, 0, true};
-  const auto tag = static_cast<Tag>(head.u8());
-  const uint32_t len = head.u32();
-  if (buf_.size() < 5 + len) return std::nullopt;
+void Decoder::compact() {
+  if (pos_ == 0) return;
+  // On ne décale que lorsqu'au moins la moitié du tampon est du
+  // gaspillage déjà consommé. Le coût du décalage est proportionnel à ce
+  // qui reste (<= pos_ dans ce cas), donc toujours borné par ce qui vient
+  // d'être consommé : le coût amorti sur tout un drain est linéaire,
+  // quel que soit son découpage en feed(). Un seuil fixe ne suffirait
+  // pas : près du plafond du tampon (kMaxBufferBytes) il redonnerait un
+  // comportement proche du quadratique de l'origine — voir le rapport de
+  // relecture pour la mesure (128 000 messages, 3,4 s).
+  // En dessous de quelques kilooctets, décaler le reste coûte moins que
+  // l'intérêt de le faire : pas la peine de compacter des miettes.
+  constexpr size_t kCompactMinSize = 4096;
+  if (buf_.size() < kCompactMinSize || pos_ * 2 < buf_.size()) return;
+  buf_.erase(0, pos_);
+  pos_ = 0;
+}
 
-  Reader r{std::string_view(buf_).substr(5, len), 0, true};
-  std::optional<Msg> out;
-
-  switch (tag) {
-    case Tag::Hello: {
-      Hello h;
-      h.build_id = r.u32();
-      h.cols = r.u16();
-      h.rows = r.u16();
-      h.term = r.str();
-      h.colorterm = r.str();
-      h.utf8 = r.u8() != 0;
-      const uint32_t n = r.u32();
-      for (uint32_t k = 0; k < n && r.ok; ++k) {
-        std::string key = r.str();
-        h.env.emplace_back(std::move(key), r.str());
-      }
-      out = Msg{std::move(h)};
-      break;
-    }
-    case Tag::Welcome: out = Msg{Welcome{}}; break;
-    case Tag::Incompatible: out = Msg{Incompatible{r.str()}}; break;
-    case Tag::Detached: out = Msg{Detached{r.str()}}; break;
-    case Tag::Input: out = Msg{Input{r.str()}}; break;
-    case Tag::Resize: { Resize z; z.cols = r.u16(); z.rows = r.u16(); out = Msg{z}; break; }
-    case Tag::Frame: out = Msg{FrameMsg{r.str()}}; break;
-    default: break;  // tag inconnu : message consommé et ignoré
+void Decoder::feed(std::string_view bytes) {
+  if (failed_) return;  // pair déjà félon : ignorer, ne pas agrandir le tampon
+  if (bytes.empty()) return;
+  if (buf_.size() - pos_ + bytes.size() > kMaxBufferBytes) {
+    fail();
+    return;
   }
+  buf_.append(bytes);
+}
 
-  buf_.erase(0, 5 + len);
-  if (!r.ok) return std::nullopt;
-  return out;
+std::optional<Msg> Decoder::next() {
+  if (failed_) return std::nullopt;
+
+  for (;;) {
+    if (buf_.size() - pos_ < kHeaderSize) return std::nullopt;
+
+    Reader head{std::string_view(buf_).substr(pos_), 0, true};
+    const auto tag = static_cast<Tag>(head.u8());
+    const uint32_t len = head.u32();
+
+    // Toute l'arithmétique qui suit se fait en size_t (64 bits ici) :
+    // `len` est un uint32_t, jamais mélangé à un littéral `int` avant
+    // d'avoir été élargi. Voir kHeaderSize et kMaxMessageBytes.
+    const size_t declared = kHeaderSize + static_cast<size_t>(len);
+
+    // Un pair qui annonce un message plus gros que ce que le pire cas
+    // légitime exige (kMaxMessageBytes) ment ou attaque : on ne prend
+    // même pas la peine d'accumuler les octets pour le découvrir plus
+    // tard, on coupe tout de suite — sans attendre que le tampon entier
+    // atteigne son propre plafond.
+    if (len > kMaxMessageBytes) {
+      fail();
+      return std::nullopt;
+    }
+
+    if (buf_.size() - pos_ < declared) return std::nullopt;  // pas encore tout arrivé
+
+    Reader r{std::string_view(buf_).substr(pos_ + kHeaderSize, len), 0, true};
+    std::optional<Msg> out;
+    bool known_tag = true;
+
+    switch (tag) {
+      case Tag::Hello: {
+        Hello h;
+        h.build_id = r.u32();
+        h.cols = r.u16();
+        h.rows = r.u16();
+        h.term = r.str();
+        h.colorterm = r.str();
+        h.utf8 = r.u8() != 0;
+        const uint32_t n = r.u32();
+        for (uint32_t k = 0; k < n && r.ok; ++k) {
+          std::string key = r.str();
+          h.env.emplace_back(std::move(key), r.str());
+        }
+        out = Msg{std::move(h)};
+        break;
+      }
+      case Tag::Welcome: out = Msg{Welcome{}}; break;
+      case Tag::Incompatible: out = Msg{Incompatible{r.str()}}; break;
+      case Tag::Detached: out = Msg{Detached{r.str()}}; break;
+      case Tag::Input: out = Msg{Input{r.str()}}; break;
+      case Tag::Resize: { Resize z; z.cols = r.u16(); z.rows = r.u16(); out = Msg{z}; break; }
+      case Tag::Frame: out = Msg{FrameMsg{r.str()}}; break;
+      default:
+        // Tag inconnu : sauté-et-continué, pas une violation. La
+        // compatibilité ascendante est voulue (une version future peut
+        // ajouter un message que ce décodeur ne connaît pas encore). La
+        // tension symétrique — une version future ajoutant un CHAMP à un
+        // message CONNU — n'est pas résolue ici : elle l'est déjà par
+        // kBuildId au handshake (Hello/Incompatible), qui refuse
+        // proprement une session trop récente au lieu de laisser un
+        // vieux décodeur deviner ce qu'il ne comprend pas. Ce n'est donc
+        // pas ce commentaire qu'il faut modifier pour « permettre » un
+        // champ de plus sur un tag connu : c'est le tag connu qui doit
+        // rester strict, et kBuildId qui absorbe l'évolution.
+        known_tag = false;
+        break;
+    }
+
+    pos_ += declared;
+
+    if (!known_tag) {
+      compact();
+      continue;  // ne pas s'arrêter sur un message délibérément ignoré
+    }
+
+    // Un tag connu dont le corps ment sur ses propres longueurs internes
+    // (r.ok == false), ou qui laisse des octets non consommés dans
+    // l'enveloppe qu'il a lui-même déclarée (r.i != len — la « queue »
+    // silencieusement avalée par l'ancien `buf_.erase`), est un pair qui
+    // viole le protocole qu'il prétend parler. Ce n'est pas un trou de
+    // compatibilité : on ne devine pas ce qu'il voulait dire, on ferme.
+    if (!r.ok || r.i != len) {
+      fail();
+      return std::nullopt;
+    }
+
+    compact();
+    return out;
+  }
 }
 
 }  // namespace sshos
