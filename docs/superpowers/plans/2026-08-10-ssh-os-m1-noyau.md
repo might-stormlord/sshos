@@ -3266,10 +3266,19 @@ git commit -m "feat(client): TtyGuard reversible, boucle d'attache, delta d'envi
 - Create: `src/daemon/daemonize.hpp`, `src/daemon/daemonize.cpp`
 - Create: `tests/test_daemonize.cpp`
 
+> **PÉRIMÉ — ne pas transcrire les commentaires de cette tâche tels quels.** Le plan affirme à deux
+> endroits (ici et dans `daemonize.hpp` ci-dessous) que « le petit-enfant est chef de session ». C'est
+> l'inverse de ce que fait le code, vérifié empiriquement : après `setsid()` dans l'intermédiaire puis
+> un second `fork()`, c'est **l'intermédiaire** qui a `pid == sid` ; le petit-enfant appartient à la
+> session sans en être le chef. C'est précisément la raison d'être du second fork — un processus qui
+> n'est pas chef de session ne peut jamais acquérir de terminal de contrôle. Corriger le commentaire
+> pour décrire cette garantie-là ; « réparer » le code pour qu'il corresponde au commentaire actuel
+> supprimerait le second fork et détruirait la propriété recherchée.
+
 **Interfaces:**
 - Consumes: rien.
 - Produces:
-  - `pid_t sshos::spawn_detached(const std::vector<std::string>& argv)` — rend le pid de l'enfant **intermédiaire**, que l'appelant doit récolter avec `waitpid`. Le petit-enfant est chef de session, réparenté, sans terminal de contrôle.
+  - `pid_t sshos::spawn_detached(const std::vector<std::string>& argv)` — rend le pid de l'enfant **intermédiaire**, que l'appelant doit récolter avec `waitpid`. Le petit-enfant est réparenté et sans terminal de contrôle ; il n'est **pas** chef de session (l'intermédiaire l'est), et c'est bien ce qu'on veut.
   - `void sshos::become_daemon()` — appelée par le processus déjà détaché, en tête de `--daemon` : `chdir("/")`, redirection de 0/1/2 vers `/dev/null`, assainissement des signaux.
 
 - [ ] **Step 1: Écrire le test qui échoue**
@@ -3382,10 +3391,14 @@ Créer `src/daemon/daemonize.hpp` :
 
 namespace sshos {
 
-// Double fork + setsid : le petit-enfant est chef de session, sans
-// terminal de contrôle, réparenté à init. Aucun PR_SET_PDEATHSIG — il
-// tuerait le démon à la mort du client, ce qui est exactement l'inverse
-// de la fonctionnalité recherchée.
+// Double fork + setsid. L'intermédiaire appelle setsid() et devient chef
+// de session ; le petit-enfant, forké ensuite, appartient à cette session
+// SANS en être le chef — et c'est tout l'intérêt du second fork, car un
+// processus qui n'est pas chef de session ne peut jamais acquérir de
+// terminal de contrôle. Il est en outre réparenté à init.
+//
+// Aucun PR_SET_PDEATHSIG — il tuerait le démon à la mort du client, ce qui
+// est exactement l'inverse de la fonctionnalité recherchée.
 //
 // Rend le pid de l'enfant intermédiaire ; l'appelant DOIT le récolter,
 // sinon il reste zombie.
