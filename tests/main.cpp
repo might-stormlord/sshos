@@ -64,7 +64,7 @@ extern "C" const char* __ubsan_default_options() {
 // boucle simple -- un seul appel à std::exit() pour tout le lot, donc le
 // scan LeakSanitizer ne coûte plus qu'une fois pour toute la suite, comme
 // avant ce round. Le superviseur ne fork() une seconde fois QUE si l'ouvrier
-// dépasse son délai ou meurt anormalement (crash, signal) : sur les 166 cas
+// dépasse son délai ou meurt anormalement (crash, signal) : sur les 168 cas
 // qui passent aujourd'hui, un seul fork() a lieu pour toute l'exécution.
 //
 // Superviseur et ouvrier se coordonnent via DEUX sémaphores POSIX anonymes
@@ -128,11 +128,67 @@ extern "C" const char* __ubsan_default_options() {
 //     garde-temps abandonne après une seconde de récolte infructueuse
 //     plutôt que de reproduire le blocage qu'il corrige ;
 //   - un ouvrier qui plante (crash, signal, abort ASan) est détecté au plus
-//     tard après `timeout_ms` : sem_timedwait() ne réveille le superviseur
-//     qu'à l'échéance ou sur un post, il n'y a pas de chemin rapide type
-//     SIGCHLD ici (voir le rapport de cette tâche, section incertitudes).
-//     C'est strictement mieux que l'ancien comportement (un crash abattait
-//     tout le binaire, sans recouvrement du tout), juste pas instantané.
+//     tard après kDeathPollMs (50 ms), pas après `timeout_ms` -- voir la
+//     section "Suivi" ci-dessous ; la marge encore non recouverte est cette
+//     fenêtre de sondage elle-même, pas la totalité du délai.
+//
+// --- Suivi : détection lente d'un ouvrier mort (corrigé) --------------
+//
+// Le premier jet de ce garde-temps utilisait un unique sem_timedwait()
+// jusqu'à l'échéance complète du cas : un ouvrier qui plantait (SIGSEGV,
+// abort ASan...) au lieu de bloquer n'était donc constaté qu'à l'échéance,
+// pas immédiatement -- prédit dans la première version de cette note
+// ("pas de chemin rapide type SIGCHLD"), puis mesuré en revue : une suite
+// contenant un cas plantant sous `::raise(SIGSEGV)`, garde au défaut
+// (30 s), prenait 38 s de bout en bout au lieu de la poignée de secondes
+// de la suite normale -- inutilisable pendant un développement où les
+// crashs sont justement fréquents.
+//
+// Corrigé en tranchant l'attente : wait_for_case() ne fait plus un seul
+// sem_timedwait(case_deadline), mais une boucle de sem_timedwait() bornés
+// à kDeathPollMs (50 ms) chacun, entrecoupés d'un waitpid(worker,
+// WNOHANG) -- suggestion reçue en revue, retenue plutôt qu'un gestionnaire
+// SIGCHLD : ce dernier réintroduirait exactement la classe de problème que
+// ce fichier évite déjà pour SIGALRM (une fenêtre de course entre "armer"
+// et "attendre", plus un état process-wide à restaurer autour de chaque
+// fork() de reprise). Le sondage, lui, ne touche à aucun gestionnaire
+// global et reste local à wait_for_case().
+//
+// L'échéance globale du cas (case_deadline, calculée une seule fois par
+// compute_absolute_deadline avant la boucle) n'est JAMAIS recalculée par
+// ce tranchage -- next_poll_slice() ne renvoie jamais une échéance plus
+// tardive que case_deadline, donc un vrai blocage (ouvrier toujours
+// vivant) est encore détecté exactement à timeout_ms, ni plus tôt ni plus
+// tard qu'avant ce correctif ; seul un ouvrier déjà MORT est désormais vu
+// plus tôt.
+//
+// Coût nominal : toujours nul en pratique. Voir le commentaire de
+// wait_for_case() pour le détail, mais en résumé -- un cas qui rend la
+// main avant la fin de sa propre première tranche (le cas de toute la
+// suite aujourd'hui) ne fait qu'UN SEUL sem_timedwait(), jamais de
+// waitpid(WNOHANG) superflu : la boucle ne boucle que si la tranche a
+// expiré. Mesuré en alternance stricte (voir le rapport de ce round) pour
+// éviter de comparer contre un chiffre mémorisé sous une charge machine
+// différente.
+//
+// --- Suivi : un crash n'est pas une exception C++ (corrigé) -----------
+//
+// Un ouvrier mort (branche kWorkerDead ci-dessous) était rapporté via
+// th::fail_uncaught(), dont le message affirme "exception non
+// interceptee" -- faux ici : rien n'a été lancé ni capturé dans une pile
+// C++, le PROCESSUS entier a disparu. Repéré en revue sur un cas concret :
+// un ::raise(SIGSEGV) sous ASan/Debug se termine en pratique par un
+// _exit(1) déclenché par le sanitizer après son propre rapport, pas par le
+// signal lui-même (WIFSIGNALED false, code de sortie 1) -- describe_exit()
+// rapportait donc, à raison, "code de sortie 1", mais fail_uncaught()
+// l'encadrait quand même d'un "exception non interceptee" mensonger,
+// imputant la panne à la mauvaise cause. Corrigé en ajoutant
+// th::fail_worker_died() (harness.hpp), une étiquette neutre qui ne
+// prétend ni exception ni cause précise -- describe_exit() continue de
+// distinguer "signal X (N)" (mort réellement par signal, cas d'un build
+// Release sans sanitizer pour intercepter) de "code de sortie N" (sortie
+// explicite, sanitizer ou non) sans que l'appelant ait besoin de deviner
+// laquelle des deux s'est produite.
 namespace {
 
 // Lit SSHOS_TEST_TIMEOUT_MS. 0 (ou negatif) desactive explicitement le
@@ -202,12 +258,22 @@ void run_case_inline(const th::Case& c) {
   }
 }
 
+// Decrit un statut waitpid() en distinguant explicitement mort par SIGNAL et
+// sortie par CODE -- les deux causes existent reellement et ne doivent pas
+// etre confondues : un SIGSEGV non intercepte tue par signal (WIFSIGNALED),
+// mais sous ASan/UBSan le sanitizer intercepte souvent le signal lui-meme,
+// imprime son rapport, puis termine par un _exit(code) explicite -- ce que
+// waitpid() rapporte alors comme une sortie par CODE, pas par signal, meme
+// si la cause racine etait bien un crash. Ce n'est pas ce site d'appel qui
+// peut lever cette ambiguite (le rapport du sanitizer, lui, est deja sur
+// stderr juste au-dessus) ; le but ici est seulement de ne jamais AFFIRMER
+// la mauvaise des deux causes -- voir fail_worker_died() dans harness.hpp
+// pour la raison de ne pas non plus l'appeler une exception C++.
 std::string describe_exit(int status) {
   if (WIFSIGNALED(status)) {
     const int sig = WTERMSIG(status);
     const char* name = ::strsignal(sig);
-    return "processus interrompu par le signal " +
-           std::string(name != nullptr ? name : "?") + " (" +
+    return "signal " + std::string(name != nullptr ? name : "?") + " (" +
            std::to_string(sig) + ")";
   }
   return "code de sortie " + std::to_string(WEXITSTATUS(status));
@@ -228,6 +294,105 @@ struct timespec compute_absolute_deadline(long timeout_ms) {
     ts.tv_sec += 1;
   }
   return ts;
+}
+
+bool same_instant(const struct timespec& a, const struct timespec& b) {
+  return a.tv_sec == b.tv_sec && a.tv_nsec == b.tv_nsec;
+}
+
+// Echeance de la PROCHAINE tranche de sondage : au plus tot entre
+// `case_deadline` (fixe, calculee une seule fois par compute_absolute_
+// deadline pour tout le cas) et maintenant + poll_ms. Ne modifie jamais
+// `case_deadline` -- c'est ce qui garantit que boucler en tranches ne change
+// PAS le delai total avant un vrai timeout par rapport a un unique
+// sem_timedwait(case_deadline) : la derniere tranche, quand la marge
+// restante est inferieure a poll_ms, est exactement case_deadline lui-meme.
+struct timespec next_poll_slice(const struct timespec& case_deadline,
+                                 long poll_ms) {
+  struct timespec slice {};
+  ::clock_gettime(CLOCK_REALTIME, &slice);
+  slice.tv_sec += poll_ms / 1000;
+  slice.tv_nsec += (poll_ms % 1000) * 1000000L;
+  if (slice.tv_nsec >= 1000000000L) {
+    slice.tv_nsec -= 1000000000L;
+    slice.tv_sec += 1;
+  }
+  if (slice.tv_sec > case_deadline.tv_sec ||
+      (slice.tv_sec == case_deadline.tv_sec &&
+       slice.tv_nsec > case_deadline.tv_nsec)) {
+    return case_deadline;
+  }
+  return slice;
+}
+
+// Granularite de sondage entre deux verifications waitpid(WNOHANG) pendant
+// l'attente d'un cas -- voir wait_for_case() pour le detail du cout. 50 ms
+// est largement "une fraction de seconde" pour la detection d'un ouvrier
+// mort, tout en restant assez large pour qu'un cas legitime plus lent qu'une
+// tranche (les attentes bornees de daemonize, jusqu'a plusieurs secondes) ne
+// paie qu'une poignee de sondages par seconde plutot qu'un flot continu.
+constexpr long kDeathPollMs = 50;
+
+// Issue de l'attente d'un seul cas cote superviseur -- voir wait_for_case().
+enum class CaseWait {
+  kFinished,      // case_done poste : le cas a rendu la main a temps
+  kWorkerDead,    // ouvrier trouve mort par un sondage, avant l'echeance
+  kWaitpidError,  // waitpid() a echoue de facon inattendue pendant un sondage
+  kTimedOut,      // echeance globale du cas atteinte, ouvrier toujours vivant
+};
+
+// Attend le prochain case_done jusqu'a l'echeance absolue `case_deadline`,
+// mais en sondant l'etat de l'ouvrier par tranches de `poll_ms` plutot qu'en
+// un seul sem_timedwait(case_deadline) direct : un ouvrier mort (crash,
+// signal, abort sanitizer) est ainsi constate a la PROCHAINE TRANCHE plutot
+// qu'a l'echeance complete du cas (jusqu'a 30 s par defaut) -- c'etait le
+// trou signale en suivi de ce round : un crash sous ASan en cours de
+// developpement faisait payer l'integralite de timeout_ms a chaque
+// execution avant de rapporter quoi que ce soit.
+//
+// Cout nominal : NUL tant qu'un cas rend la main avant la fin de sa propre
+// premiere tranche -- ce qui couvre tous les cas de la suite aujourd'hui
+// (micro- a milli-secondes chacun). sem_timedwait() est reveille par le
+// sem_post() de l'ouvrier bien avant sa propre echeance de tranche, la
+// boucle ci-dessous ne boucle alors jamais et ne fait qu'UN SEUL appel
+// systeme, exactement comme avant ce round. Le waitpid(WNOHANG)
+// supplementaire n'est paye QUE par un cas qui dure deja plus longtemps
+// qu'une tranche (poll_ms) -- negligeable face a sa propre duree (les
+// attentes bornees de daemonize, jusqu'a plusieurs secondes, paient au plus
+// quelques dizaines de sondages a quelques microsecondes chacun).
+CaseWait wait_for_case(SharedState* shared, pid_t worker,
+                        const struct timespec& case_deadline, long poll_ms,
+                        int* death_status, int* waitpid_errno) {
+  for (;;) {
+    const struct timespec slice = next_poll_slice(case_deadline, poll_ms);
+    const int rc = ::sem_timedwait(&shared->case_done, &slice);
+    if (rc == 0) return CaseWait::kFinished;
+    if (errno == EINTR) continue;  // signal etranger : reboucle, meme echeance globale
+    if (errno != ETIMEDOUT) {
+      // Erreur inattendue (EINVAL...) : aucun cas connu aujourd'hui, mais
+      // aussi grave qu'un vrai timeout -- ne pas boucler indefiniment
+      // dessus.
+      return CaseWait::kTimedOut;
+    }
+
+    // Cette tranche a expire : l'ouvrier est-il deja mort ? C'est le chemin
+    // rapide qui remplace l'attente complete de timeout_ms sur un crash.
+    int wstatus = 0;
+    const pid_t reaped = ::waitpid(worker, &wstatus, WNOHANG);
+    if (reaped > 0) {
+      *death_status = wstatus;
+      return CaseWait::kWorkerDead;
+    }
+    if (reaped < 0) {
+      *waitpid_errno = errno;
+      return CaseWait::kWaitpidError;
+    }
+    // reaped == 0 : toujours vivant. Si cette tranche etait deja
+    // l'echeance globale du cas (voir next_poll_slice), c'est un vrai
+    // depassement de delai ; sinon ce n'etait qu'un sondage intermediaire,
+    // reboucle.
+    if (same_instant(slice, case_deadline)) return CaseWait::kTimedOut;
+  }
 }
 
 // Tourne dans l'OUVRIER : execute sequentiellement cases[start..end) et
@@ -391,15 +556,16 @@ int main(int argc, char** argv) {
 
       bool worker_lost = false;
       for (std::size_t i = next; i < cases.size(); ++i) {
-        const struct timespec deadline = compute_absolute_deadline(timeout_ms);
-        int rc;
-        for (;;) {
-          rc = ::sem_timedwait(&shared->case_done, &deadline);
-          if (rc == 0 || errno != EINTR) break;
-        }
+        const struct timespec case_deadline =
+            compute_absolute_deadline(timeout_ms);
+        int death_status = 0;
+        int waitpid_errno = 0;
+        const CaseWait outcome =
+            wait_for_case(shared, worker, case_deadline, kDeathPollMs,
+                          &death_status, &waitpid_errno);
         ++ran;
 
-        if (rc == 0) {
+        if (outcome == CaseWait::kFinished) {
           th::failures() += shared->case_new_failures;
           if (shared->case_new_failures > 0) ++failed_cases;
           // Libere l'ouvrier pour le cas suivant -- voir le protocole en
@@ -415,12 +581,22 @@ int main(int argc, char** argv) {
         // garantit que l'ouvrier n'a pas pu avancer au-dela de ce cas
         // sans que le superviseur l'y autorise, ce qu'il n'a justement
         // pas encore fait ici.
-        int status = 0;
-        const pid_t reaped_now = ::waitpid(worker, &status, WNOHANG);
-        if (reaped_now == 0) {
-          // Toujours vivant : vrai depassement de delai. SIGKILL est
-          // imparable mais ne deroule aucun destructeur -- voir la note
-          // de conception en tete de fichier. Vise le groupe entier
+        if (outcome == CaseWait::kWorkerDead) {
+          // Crash/signal, constate en au plus kDeathPollMs plutot qu'a
+          // l'echeance complete -- voir wait_for_case(). fail_worker_died,
+          // pas fail_uncaught : rien n'a ete "lance", le processus entier a
+          // disparu (voir harness.hpp pour la distinction).
+          th::fail_worker_died(shared->case_name, describe_exit(death_status));
+        } else if (outcome == CaseWait::kWaitpidError) {
+          th::fail_worker_died(shared->case_name,
+                                std::string("waitpid a echoue de facon "
+                                            "inattendue : ") +
+                                    std::strerror(waitpid_errno));
+        } else {
+          // kTimedOut : l'ouvrier est toujours vivant a l'echeance globale
+          // du cas -- vrai depassement de delai. SIGKILL est imparable
+          // mais ne deroule aucun destructeur -- voir la note de
+          // conception en tete de fichier. Vise le groupe entier
           // (-worker), pas seulement `worker`.
           ::kill(-worker, SIGKILL);
 
@@ -429,6 +605,7 @@ int main(int argc, char** argv) {
           // l'ignorer indefiniment -- aucun mecanisme utilisateur ne peut
           // forcer ca. Mieux vaut abandonner apres 1 s et continuer la
           // suite que de reproduire le blocage qu'on corrige.
+          int status = 0;
           bool reaped = false;
           for (int attempt = 0; attempt < 100; ++attempt) {
             if (::waitpid(worker, &status, WNOHANG) > 0) {
@@ -445,16 +622,6 @@ int main(int argc, char** argv) {
                          shared->case_name, static_cast<int>(worker));
           }
           th::fail_timeout(shared->case_name, timeout_ms);
-        } else if (reaped_now > 0) {
-          // Deja mort : crash/signal plutot qu'un blocage. Detecte au
-          // plus tard a l'echeance -- voir la note de conception en tete
-          // de fichier sur cette limite acceptee.
-          th::fail_uncaught(shared->case_name, describe_exit(status));
-        } else {
-          th::fail_uncaught(shared->case_name,
-                             std::string("waitpid a echoue de facon "
-                                         "inattendue : ") +
-                                 std::strerror(errno));
         }
         ++failed_cases;
         worker_lost = true;

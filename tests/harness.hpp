@@ -61,6 +61,22 @@ inline void fail_timeout(const char* test_name, long timeout_ms) {
                test_name, timeout_ms);
 }
 
+// Pour un cas dont le PROCESSUS ouvrier a disparu de facon anormale (signal,
+// code de sortie non nul) avant d'avoir poste son achevement -- crash,
+// SIGSEGV, abort ASan/UBSan... Deliberement DISTINCTE de fail_uncaught : ce
+// dernier dit "exception non interceptee", ce qui serait faux ici (rien n'a
+// ete lance ni capture dans une pile C++ ; le processus entier a disparu, pas
+// une fonction). Sous ASan en particulier, un crash reel se termine souvent
+// par un _exit(1) que le sanitizer declenche APRES avoir imprime son propre
+// rapport -- ni un signal ni une exception -- et le dire induirait en erreur
+// qui lit le resume sur la vraie cause. Le detail (signal nomme ou code de
+// sortie) vient de describe_exit() dans tests/main.cpp.
+inline void fail_worker_died(const char* test_name, const std::string& what) {
+  ++failures();
+  std::fprintf(stderr, "  FAIL %s  processus ouvrier interrompu : %s\n",
+               test_name, what.c_str());
+}
+
 // Les chaînes attendues contiennent des octets de contrôle : sans échappement,
 // un diff de sortie ANSI est illisible et le test ne sert à rien.
 inline std::string show(const std::string& v) {
