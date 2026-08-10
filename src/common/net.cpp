@@ -4,6 +4,7 @@
 #include <sys/un.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <system_error>
@@ -13,6 +14,34 @@ namespace {
 
 [[noreturn]] void throw_errno(const char* what) {
   throw std::system_error(errno, std::generic_category(), what);
+}
+
+// Classe une erreur de accept4()/getsockopt() (identifiée par son errno)
+// comme transitoire (vaut la peine d'être retentée, typiquement après une
+// pression sur les ressources qui a de bonnes chances de se résorber toute
+// seule) ou permanente (le même appel, refait à l'identique sur le même
+// descripteur, échouera indéfiniment).
+//
+// EMFILE/ENFILE sont des limites de descripteurs (processus / système) ;
+// ENOBUFS/ENOMEM sont regroupées par accept(2) lui-même sous une seule
+// entrée ("Not enough free memory") -- même condition de fond, la mémoire
+// disponible peut varier d'un appel au suivant. Tout le reste (ENOTSOCK,
+// EBADF, EINVAL en tête -- l'écouteur lui-même mal formé ou fermé) est
+// permanent par défaut : un errno non reconnu ici est délibérément classé
+// permanent plutôt que transitoire, parce qu'une boucle qui s'arrête à tort
+// laisse une ligne dans le journal, alors qu'une boucle qui retente à tort
+// une condition inconnue reproduit la boucle chaude que cette classification
+// existe pour éliminer.
+bool is_transient_errno(int err) {
+  switch (err) {
+    case EMFILE:
+    case ENFILE:
+    case ENOBUFS:
+    case ENOMEM:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // Rend la longueur d'adresse à passer à bind/connect. Pour une adresse
@@ -34,29 +63,18 @@ Fd make_socket() {
   return Fd(fd);
 }
 
-// Repli déterministe pour read_boot_id() : l'heure de démarrage du noyau
-// (secondes depuis l'époque), telle que rapportée par la ligne "btime" de
-// /proc/stat. Ce n'est pas un uuid, mais c'est lu à l'identique par tout
-// processus du même boot -- exactement la propriété qui compte ici, puisque
-// le nom du socket est recalculé indépendamment par le démon et par chaque
-// client. Un préfixe distingue ce repli d'un vrai boot_id, par hygiène,
-// même si rien n'en dépend fonctionnellement.
-std::string read_btime_fallback(std::string_view proc_stat_path) {
-  std::ifstream in{std::string(proc_stat_path)};
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.rfind("btime ", 0) == 0) {
-      const std::string value = line.substr(6);
-      if (!value.empty()) return "btime-" + value;
-      break;
-    }
-  }
-  return {};
-}
-
 }  // namespace
 
-std::string read_boot_id(std::string_view boot_id_path, std::string_view proc_stat_path) {
+std::string read_boot_id(std::string_view boot_id_path) {
+  // Échappatoire explicite en premier : voir le contrat documenté sur
+  // kBootIdEnvVar dans net.hpp. Une variable définie mais vide est traitée
+  // comme absente plutôt que comme un identifiant valide -- un export raté
+  // (`SSHOS_BOOT_ID=`) ne doit pas produire silencieusement un identifiant
+  // partagé par toute la machine.
+  if (const char* forced = std::getenv(kBootIdEnvVar); forced != nullptr && *forced != '\0') {
+    return forced;
+  }
+
   std::string id;
   {
     std::ifstream in{std::string(boot_id_path)};
@@ -64,18 +82,36 @@ std::string read_boot_id(std::string_view boot_id_path, std::string_view proc_st
   }
   if (!id.empty()) return id;
 
-  id = read_btime_fallback(proc_stat_path);
-  if (!id.empty()) return id;
-
-  // Aucune des deux sources n'est exploitable (conteneur très restreint,
-  // /proc masqué...). Une constante fixe serait pire que l'échec : elle
-  // serait identique à chaque redémarrage et réintroduirait exactement la
-  // confusion de référence périmée que boot_id existe pour éviter -- au
-  // pire endroit possible, puisque c'est précisément là que cette lecture
-  // est susceptible d'échouer.
+  // Ancienne version de cette fonction : repli sur le "btime" de
+  // /proc/stat, retiré. La justification écrite à l'époque ("lu à
+  // l'identique par tout processus du même boot") est fausse -- btime n'est
+  // pas une valeur stockée une fois pour toutes au démarrage, le noyau le
+  // recalcule à chaque lecture comme CLOCK_REALTIME - CLOCK_BOOTTIME. Tout
+  // pas d'horloge murale entre le démarrage du démon et l'attache d'un
+  // client (resynchronisation NTP, absence d'horloge matérielle fiable au
+  // premier démarrage...) déplace donc btime pour tous les processus de la
+  // machine, et le démon comme chaque client recalculent le nom du socket
+  // indépendamment : un déplacement fait chercher au client un nom que
+  // personne n'écoute, indiscernable du cas ordinaire "pas de démon". La
+  // session en cours est perdue en silence -- exactement ce que ce
+  // sous-système existe pour permettre de retrouver.
+  //
+  // Aucun autre repli ambiant ne remplace celui-ci (l'inode de l'espace de
+  // noms réseau, notamment, a été envisagée et écartée : immunisée contre
+  // les sauts d'horloge, mais assignée par une séquence d'initialisation du
+  // noyau qui la rend très probablement identique après un simple
+  // redémarrage sur la machine hôte -- elle échouerait alors à chaque
+  // redémarrage plutôt que seulement quand l'horloge saute). Une constante
+  // fixe serait pire encore : identique à chaque redémarrage, elle
+  // réintroduirait la confusion de référence périmée que boot_id existe
+  // pour éviter -- au pire endroit possible, puisque c'est précisément là
+  // que cette lecture est susceptible d'échouer. Échec bruyant à la place ;
+  // kBootIdEnvVar reste l'unique échappatoire, et son identité entre le
+  // démon et les clients est un contrat explicite porté par l'opérateur qui
+  // la définit, pas une propriété ambiante supposée.
   throw std::runtime_error("aucun identifiant de demarrage stable disponible (" +
-                            std::string(boot_id_path) + " et " +
-                            std::string(proc_stat_path) + " inaccessibles)");
+                            std::string(boot_id_path) + " inaccessible, et la variable " +
+                            std::string(kBootIdEnvVar) + " n'est pas definie)");
 }
 
 std::string socket_name(uid_t uid, std::string_view boot_id) {
@@ -125,17 +161,27 @@ AcceptResult accept_peer(int listen_fd, uid_t expected_uid) {
     // Appel interrompu par un signal : ni "rien en attente" (une connexion
     // peut très bien être là), ni une erreur réelle. On refait l'appel.
     if (errno == EINTR) continue;
+    // Pair qui a rompu la connexion après être entré dans la file d'écoute
+    // mais avant d'être accepté : bénin et attendu (voir net.hpp), pas un
+    // signe que l'écouteur est cassé. D'autres connexions peuvent être
+    // derrière dans la file, donc on refait l'appel plutôt que de rendre
+    // Empty ou une erreur.
+    if (errno == ECONNABORTED) continue;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       return AcceptResult{AcceptOutcome::Empty, Fd(), {}, 0};
     }
-    return AcceptResult{AcceptOutcome::Error, Fd(), {}, errno};
+    const AcceptOutcome outcome =
+        is_transient_errno(errno) ? AcceptOutcome::TransientError : AcceptOutcome::FatalError;
+    return AcceptResult{outcome, Fd(), {}, errno};
   }
   Fd fd(raw);
 
   ucred cred{};
   socklen_t len = sizeof cred;
   if (::getsockopt(fd.get(), SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) {
-    return AcceptResult{AcceptOutcome::Error, Fd(), {}, errno};
+    const AcceptOutcome outcome =
+        is_transient_errno(errno) ? AcceptOutcome::TransientError : AcceptOutcome::FatalError;
+    return AcceptResult{outcome, Fd(), {}, errno};
   }
 
   const PeerCredentials peer{cred.pid, cred.uid, cred.gid};
