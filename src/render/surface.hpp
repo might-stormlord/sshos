@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <string_view>
 #include <vector>
@@ -20,8 +21,20 @@ class Surface {
   void resize(int w, int h);
   void clear(Style s);
 
-  const Cell& at(int x, int y) const { return cells_[static_cast<size_t>(y) * w_ + x]; }
-  Cell& at(int x, int y) { return cells_[static_cast<size_t>(y) * w_ + x]; }
+  // Les vérifications de bornes sont en assert() plutôt que lancées en temps
+  // d'exécution, car at() est appelée serrée dans la boucle du diffeur sur
+  // chaque cellule de chaque trame (des millions de fois par seconde). Une
+  // vérification permanente serait un goulot. En Release (NDEBUG), elle
+  // disparaît ; en Debug sous AddressSanitizer, elle détecte les accès
+  // illégaux au stade du développement.
+  const Cell& at(int x, int y) const {
+    assert(x >= 0 && x < w_ && y >= 0 && y < h_);
+    return cells_[static_cast<size_t>(y) * static_cast<size_t>(w_) + static_cast<size_t>(x)];
+  }
+  Cell& at(int x, int y) {
+    assert(x >= 0 && x < w_ && y >= 0 && y < h_);
+    return cells_[static_cast<size_t>(y) * static_cast<size_t>(w_) + static_cast<size_t>(x)];
+  }
 
   View root();
 
@@ -47,6 +60,7 @@ class View {
 
  private:
   bool map(int x, int y, int& ox, int& oy) const;
+  void cleanup_orphan(int ox, int oy);
 
   Surface* s_;
   Rect clip_;

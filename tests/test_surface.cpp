@@ -98,3 +98,52 @@ TEST(utf8_decode_handles_truncated_input) {
   CHECK_EQ(used, static_cast<size_t>(2));
   CHECK_EQ(cp, U'�');
 }
+
+// Écrire par-dessus la tête d'une paire large orpheline la continuation
+TEST(surface_overwrite_wide_glyph_head) {
+  Surface s(4, 1);
+  View v = s.root();
+  v.put(0, 0, U'日', Style{});
+  CHECK_EQ(s.at(0, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 0);
+
+  // Écrire à la position 0 (la tête) orpheline la continuation
+  v.put(0, 0, U'A', Style{});
+  CHECK_EQ(s.at(0, 0).ch, U'A');
+  CHECK_EQ(static_cast<int>(s.at(0, 0).width), 1);
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
+}
+
+// Écrire par-dessus la continuation d'une paire large orpheline la tête
+TEST(surface_overwrite_wide_glyph_continuation) {
+  Surface s(4, 1);
+  View v = s.root();
+  v.put(0, 0, U'日', Style{});
+  CHECK_EQ(s.at(0, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 0);
+
+  // Écrire à la position 1 (la continuation) orpheline la tête
+  v.put(1, 0, U'B', Style{});
+  CHECK_EQ(s.at(0, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(0, 0).width), 1);
+  CHECK_EQ(s.at(1, 0).ch, U'B');
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
+}
+
+// Remplir une zone qui traverse une paire large orpheline les deux moitiés
+TEST(surface_fill_wide_glyph_pair) {
+  Surface s(4, 1);
+  View v = s.root();
+  v.put(0, 0, U'日', Style{});
+  CHECK_EQ(s.at(0, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 0);
+
+  // Remplir depuis 0 à 2 (couvre la tête et la continuation)
+  Style empty;
+  v.fill(Rect{0, 0, 2, 1}, empty);
+  CHECK_EQ(s.at(0, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(0, 0).width), 1);
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
+}

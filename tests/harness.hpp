@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdio>
-#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -63,13 +62,16 @@ std::string show(const T& v) {
 
 template <>
 inline std::string show<char32_t>(const char32_t& v) {
-  if (v < 0x20 || v == 0x7f) {
-    char buf[16];
-    std::snprintf(buf, sizeof buf, "U+%04X", static_cast<unsigned>(v));
+  // Afficher les caractères ASCII imprimables tels quels, sinon en notation
+  // hex. Éviter static_cast<char> qui tronque et rend illisible les
+  // codepoints non-ASCII (日 → garbage, U+FFFD → garbage).
+  if (v >= 0x20 && v < 0x7f && v != '\'') {
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "U'%c'", static_cast<char>(v));
     return buf;
   }
-  char buf[8];
-  std::snprintf(buf, sizeof buf, "U'%c'", static_cast<char>(v));
+  char buf[16];
+  std::snprintf(buf, sizeof buf, "U+%04X", static_cast<unsigned>(v));
   return buf;
 }
 

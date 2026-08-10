@@ -31,6 +31,40 @@ bool View::map(int x, int y, int& ox, int& oy) const {
   return ox >= 0 && oy >= 0 && ox < s_->w() && oy < s_->h();
 }
 
+void View::cleanup_orphan(int ox, int oy) {
+  // Quand une écriture détruit une moitié de paire large, l'autre moitié
+  // devient orpheline. Cette méthode maintient l'invariante de la grille :
+  // pas de continuation sans tête, pas de tête sans continuation.
+  //
+  // Sémantique retenue : nettoyer toujours, même hors du clip.
+  // Raison : le diffeur du rendu (tâche 6) remonte d'une continuation vers
+  // sa tête pour réémettre la paire. Une paire à moitié écrasée produit une
+  // sortie ANSI incorrecte. Maintenir la cohérence globale de la grille est
+  // prioritaire sur le clip d'une View, car la grille est partagée.
+
+  // Si la cellule à gauche est la tête d'un glyphe large de 2 colonnes,
+  // notre écriture détruit sa continuation. Blanch la tête pour rétablir
+  // l'invariante.
+  if (ox > 0) {
+    const Cell& left = s_->at(ox - 1, oy);
+    if (left.width == 2) {
+      Cell& orphan = s_->at(ox - 1, oy);
+      orphan = Cell{};
+    }
+  }
+
+  // Si la cellule à droite est une continuation, notre écriture détruit sa
+  // tête. Blanchis la continuation orpheline.
+  if (ox + 1 < s_->w()) {
+    const Cell& right = s_->at(ox + 1, oy);
+    if (right.width == 0) {  // width==0 signifie continuation
+      Cell& orphan = s_->at(ox + 1, oy);
+      orphan = Cell{};
+    }
+  }
+}
+
+
 void View::put(int x, int y, char32_t ch, Style st) {
   int ox = 0;
   int oy = 0;
@@ -40,6 +74,8 @@ void View::put(int x, int y, char32_t ch, Style st) {
   if (cw == 0) return;
   // Règle 2 du §4.1 : jamais de glyphe large en dernière colonne.
   if (cw == 2 && (x + 1 >= clip_.w || ox + 1 >= s_->w())) return;
+
+  cleanup_orphan(ox, oy);
 
   Cell& c = s_->at(ox, oy);
   c.ch = ch;
@@ -81,6 +117,7 @@ void View::fill(Rect r, Style st) {
       int ox = 0;
       int oy = 0;
       if (!map(x, y, ox, oy)) continue;
+      cleanup_orphan(ox, oy);
       Cell& c = s_->at(ox, oy);
       c = Cell{};
       c.fg = st.fg;
