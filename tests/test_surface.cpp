@@ -147,3 +147,78 @@ TEST(surface_fill_wide_glyph_pair) {
   CHECK_EQ(s.at(1, 0).ch, U' ');
   CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
 }
+
+// Reproduire la corruption d'orpheline par décalage de colonne : la seconde
+// paire devient orpheline si cleanup_orphan() n'est appelé que pour ox
+TEST(surface_wide_glyph_shift_orphan) {
+  Surface s(6, 1);
+  View v = s.root();
+  // Colonne 2 et 3 forment une paire large
+  v.put(2, 0, U'日', Style{});
+  CHECK_EQ(s.at(2, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(3, 0).width), 0);
+
+  // Écrire une nouvelle paire large à la colonne 1 : elle écrase la tête de
+  // l'ancienne paire à la colonne 2. Si on ne nettoie que col1, col3 reste
+  // orpheline (continuation sans tête valide).
+  v.put(1, 0, U'中', Style{});
+
+  // Vérifier l'état final : col1-2 = paire, col3-4 = blancs (pas d'orpheline)
+  CHECK_EQ(s.at(1, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(2, 0).width), 0);
+  CHECK_EQ(s.at(3, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(3, 0).width), 1);
+  CHECK_EQ(s.at(4, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(4, 0).width), 1);
+}
+
+// Paire large qui chevauche le clip de deux sub-views : vérifier que le
+// nettoyage d'orpheline fonctionne même hors du clip. Créer une paire qui
+// s'étend depuis col 1 à col 2, où col 1 est dans une vue et col 2 dans une autre.
+TEST(surface_wide_orphan_outside_clip) {
+  Surface s(6, 1);
+  View v_right = s.root().sub(Rect{2, 0, 4, 1});  // cols 2-5 dans surface
+
+  // Place la tête d'une paire large en col 1 (surface coords),
+  // continuation en col 2. Ceci ne peut se faire qu'avec root ou via une
+  // écriture qui place le premier caractère à la bonne position. Faire via
+  // l'écriture directe sur la surface grâce au root view
+  View root = s.root();
+  root.put(1, 0, U'日', Style{});
+  CHECK_EQ(s.at(1, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(2, 0).width), 0);
+
+  // Maintenant v_right écrit dans son clip (surface col 2, qui est col 0
+  // dans son clip). Cela écrase la continuation de la paire. Le cleanup
+  // d'orpheline doit nettoyer la tête en col 1 même si elle est hors du
+  // clip de v_right (c'est-à-dire hors de v_right's sub-view).
+  v_right.put(0, 0, U'A', Style{});
+
+  // Col 1 doit être nettoyé (tête orpheline) et col 2 contient 'A'
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
+  CHECK_EQ(s.at(2, 0).ch, U'A');
+  CHECK_EQ(static_cast<int>(s.at(2, 0).width), 1);
+}
+
+// Vérifier que fill() nettoie les orphelines même partiellement : remplir
+// seulement une moitié d'une paire laisse l'autre en blanc
+TEST(surface_fill_half_wide_glyph) {
+  Surface s(4, 1);
+  View v = s.root();
+  v.put(0, 0, U'日', Style{});
+  CHECK_EQ(s.at(0, 0).width, 2);
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 0);
+
+  // Remplir seulement la colonne 0 (la tête) : col 1 doit devenir blanc
+  Style red;
+  red.bg = sshos::Color::indexed(1);
+  v.fill(Rect{0, 0, 1, 1}, red);
+
+  CHECK_EQ(s.at(0, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(0, 0).width), 1);
+  CHECK_EQ(s.at(0, 0).bg, sshos::Color::indexed(1));
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(static_cast<int>(s.at(1, 0).width), 1);
+  CHECK_EQ(s.at(1, 0).bg, sshos::Color::def());  // bg non changé
+}

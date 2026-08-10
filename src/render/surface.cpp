@@ -76,6 +76,14 @@ void View::put(int x, int y, char32_t ch, Style st) {
   if (cw == 2 && (x + 1 >= clip_.w || ox + 1 >= s_->w())) return;
 
   cleanup_orphan(ox, oy);
+  // Quand cw==2, on écrit sur deux colonnes : ox et ox+1. Il faut nettoyer
+  // les orphelins autour de ox+1 aussi, sinon une paire à droite reste
+  // orpheline. Exemple : put(2,0,'日') crée col2=head, col3=continuation.
+  // Puis put(1,0,'中') : cleanup(1,0) ne voit pas col3. On écrit col1=head,
+  // col2=continuation, orphelinage col3 sans garder la tête valide.
+  if (cw == 2) {
+    cleanup_orphan(ox + 1, oy);
+  }
 
   Cell& c = s_->at(ox, oy);
   c.ch = ch;
