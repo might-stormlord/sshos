@@ -23,6 +23,9 @@ struct OutputProfile {
 std::string sgr_transition(const Style& from, const Style& to,
                            const OutputProfile& p);
 
-std::string encode_utf8(char32_t cp);
+// encode_utf8() a déménagé dans common/utf8.hpp, aux côtés d'utf8_decode()
+// qu'elle complète (voir le commentaire là-bas pour la raison). Ce
+// header ne la ré-exporte pas : un appelant qui l'obtenait ici
+// transitivement doit désormais inclure common/utf8.hpp explicitement.
 
 }  // namespace sshos

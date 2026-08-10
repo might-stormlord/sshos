@@ -114,30 +114,10 @@ std::string sgr_transition(const Style& from, const Style& to,
   return out;
 }
 
-std::string encode_utf8(char32_t cp) {
-  // Valider que cp est un scalaire Unicode valide.
-  // Les surrogates [D800, DFFF] et les valeurs > 10FFFF doivent être rejetées.
-  if ((cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
-    cp = 0xFFFD;  // Caractère de remplacement
-  }
-
-  std::string out;
-  if (cp < 0x80) {
-    out += static_cast<char>(cp);
-  } else if (cp < 0x800) {
-    out += static_cast<char>(0xC0 | (cp >> 6));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
-  } else if (cp < 0x10000) {
-    out += static_cast<char>(0xE0 | (cp >> 12));
-    out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
-  } else {
-    out += static_cast<char>(0xF0 | (cp >> 18));
-    out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-    out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-    out += static_cast<char>(0x80 | (cp & 0x3F));
-  }
-  return out;
-}
+// encode_utf8() a déménagé, byte pour byte, dans common/utf8.cpp (aux
+// côtés d'utf8_decode() qu'elle complète — voir le commentaire de
+// common/utf8.hpp pour la raison du regroupement). Ce fichier ne
+// l'appelait pas lui-même ; aucun comportement de sgr_transition() ou de
+// color_code() n'a changé.
 
 }  // namespace sshos

@@ -1,5 +1,6 @@
 #include <string>
 
+#include "common/utf8.hpp"
 #include "harness.hpp"
 #include "render/profile.hpp"
 

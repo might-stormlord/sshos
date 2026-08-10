@@ -1,5 +1,7 @@
 #include "render/diff.hpp"
 
+#include "common/utf8.hpp"
+
 namespace sshos {
 namespace {
 
