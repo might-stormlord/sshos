@@ -93,13 +93,31 @@ void clear_nonblock(int fd) {
 }  // namespace
 
 Fd connect_with_timeout(std::string_view socket_name, int timeout_ms) {
+  // timeout_ms <= 0 : la deadline calculée ci-dessous tombe immédiatement
+  // (au plus tôt, dans le passé). Comportement obtenu, volontairement non
+  // spécial-casé : une tentative de connexion est toujours faite avant tout
+  // contrôle de délai -- si elle réussit du premier coup (place libre), le
+  // résultat est un succès malgré un délai nul ou négatif ; si elle échoue
+  // avec EAGAIN, le test `now >= deadline` plus bas est déjà vrai et la
+  // fonction échoue sans jamais appeler poll(), donc sans jamais attendre.
+  // Convention raisonnable ("délai nul ou négatif" == "une chance, pas
+  // deux"), mais rien dans la signature ne la suggère : voir
+  // client_connect_with_timeout_zero_fails_immediately_without_waiting dans
+  // tests/test_tty.cpp.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   for (;;) {
-    // Un socket neuf à chaque tentative : une fois qu'un connect() non
-    // bloquant a échoué avec EAGAIN sur un socket UNIX abstrait, ce même
-    // descripteur ne redeviendra jamais connectable (vérifié : un second
-    // connect() sur le même fd échoue immédiatement, pas d'état "en cours"
-    // à réessayer contrairement à TCP/EINPROGRESS).
+    // Un socket neuf à chaque tentative. Ce n'est PAS parce qu'un socket
+    // UNIX abstrait ayant essuyé un EAGAIN sur connect() ne redeviendrait
+    // jamais connectable -- affirmation fausse, sondée à part de ce dépôt
+    // (3 essais sur 3, sur ce noyau) : backlog saturé jusqu'à EAGAIN, file
+    // entièrement vidée côté serveur, puis connect() rappelé sur CE MÊME
+    // descripteur -- succès, et la connexion transporte réellement des
+    // données (aller-retour write/read vérifié). La vraie raison est POSIX :
+    // si connect() échoue, l'état du socket devient non spécifié, et une
+    // application portable doit donc fermer le descripteur et en ouvrir un
+    // neuf avant de retenter, plutôt que de compter sur un comportement de
+    // fait -- aussi reproductible soit-il sur ce noyau précis -- que la
+    // norme ne garantit pas.
     const int raw = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (raw < 0) throw_errno("socket");
     Fd fd(raw);
@@ -125,8 +143,15 @@ Fd connect_with_timeout(std::string_view socket_name, int timeout_ms) {
         remaining_ms < kConnectRetryIntervalMs ? remaining_ms : kConnectRetryIntervalMs);
     // poll(nullptr, 0, wait_ms) : minuteur POSIX portable, sans descripteur
     // à surveiller -- il n'y en a aucun qui vaille la peine ici, voir
-    // ci-dessus.
-    ::poll(nullptr, 0, wait_ms);
+    // ci-dessus. Retour ignoré à dessein plutôt que par oubli : un retour
+    // prématuré (EINTR) ferait juste boucler un peu plus tôt sur le calcul
+    // de `remaining_ms` ci-dessus, qui repose sur l'horloge et se recale
+    // donc de lui-même au tour suivant -- sans conséquence réelle ici,
+    // puisqu'aucun gestionnaire de signal n'est encore installé à ce stade
+    // (TtyGuard::install_crash_handlers() et le gestionnaire SIGWINCH
+    // n'arrivent qu'après une connexion réussie, dans run_client()).
+    const int wait_rc = ::poll(nullptr, 0, wait_ms);
+    (void)wait_rc;
   }
 }
 
@@ -175,7 +200,16 @@ int run_client(std::string_view socket_name) {
       Resize r;
       r.cols = static_cast<uint16_t>(s.w);
       r.rows = static_cast<uint16_t>(s.h);
-      if (!write_all(sock.get(), encode(Msg{r}))) break;
+      if (!write_all(sock.get(), encode(Msg{r}))) {
+        // Écriture vers un démon peut-être mort : même ambiguïté qu'un
+        // rc=0 muet pour les autres pannes d'écriture/lecture ci-dessous --
+        // indiscernable d'un détachement propre pour l'utilisateur comme
+        // pour un script qui inspecte le code de retour.
+        std::fprintf(stderr, "\r\nsshos: envoi du redimensionnement au demon impossible : %s\r\n",
+                     std::strerror(errno));
+        rc = 1;
+        break;
+      }
     }
 
     pollfd fds[2] = {{STDIN_FILENO, POLLIN, 0}, {sock.get(), POLLIN, 0}};
@@ -201,8 +235,16 @@ int run_client(std::string_view socket_name) {
       // propre tampon de sortie est plein : un blocage mutuel est possible
       // dans les deux sens. Contre-pression et cadence de rendu (tâche 12) :
       // hors sujet ici, délibérément non traité par cette tâche.
-      if (!write_all(sock.get(), encode(Msg{Input{in_buf.substr(0, static_cast<size_t>(n))}})))
+      const bool sent = write_all(
+          sock.get(), encode(Msg{Input{in_buf.substr(0, static_cast<size_t>(n))}}));
+      if (!sent) {
+        // Même panne, même traitement que le redimensionnement ci-dessus :
+        // un rc=0 muet se confondrait avec un détachement propre.
+        std::fprintf(stderr, "\r\nsshos: envoi de l'entree au demon impossible : %s\r\n",
+                     std::strerror(errno));
+        rc = 1;
         break;
+      }
     }
 
     if ((fds[1].revents & (POLLIN | POLLHUP)) != 0) {

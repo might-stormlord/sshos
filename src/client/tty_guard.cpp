@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 
@@ -22,9 +23,17 @@ volatile sig_atomic_t g_crash_fd = -1;
 
 // Copie du termios d'origine, à restaurer par le gestionnaire de plantage.
 // Écrite une seule fois dans TtyGuard::TtyGuard, avant que g_crash_fd ne
-// soit rendu visible au gestionnaire (l'ordre des deux affectations
-// ci-dessous est significatif) : au moment où le gestionnaire peut la lire,
-// elle est déjà stable et ne bouge plus jusqu'au destructeur.
+// soit armé. Cet ordre n'est PAS garanti par la seule position du code
+// source : deux écritures vers deux variables sans dépendance apparente
+// entre elles peuvent être entrelacées par l'optimiseur (confirmé : GCC
+// -O2 le fait réellement pour ce constructeur, voir le désassemblage cité
+// dans tty_guard.cpp). Il est imposé par une paire de
+// std::atomic_signal_fence -- release ici dans le constructeur, acquire
+// dans crash_restore() -- qui interdit ce réordonnancement sans émettre la
+// moindre instruction. Grâce à elle, au moment où le gestionnaire peut lire
+// g_crash_fd >= 0, cette copie est garantie complète et visible ; ne
+// jamais la déclarer `volatile` pour "corriger" ça : une copie de struct
+// volatile n'est ni atomique ni ordonnée, ça ne remplace pas la barrière.
 termios g_crash_saved{};
 
 // Littéral de restauration, écrit directement par le gestionnaire de signal
@@ -75,6 +84,13 @@ void write_literal(int fd, const char* data, size_t len) {
 // l'utilisateur ne peut sortir qu'en connaissant `stty sane`.
 void crash_restore(int fd) {
   if (fd < 0) return;
+  // Barrière acquire, symétrique de la release posée dans
+  // TtyGuard::TtyGuard : sans elle rien n'empêche le compilateur de faire
+  // remonter la lecture de g_crash_saved (dans le tcsetattr() ci-dessous)
+  // avant le test `fd < 0` qui précède -- côté gestionnaire aussi
+  // l'ordonnancement doit être imposé explicitement, pas seulement supposé
+  // depuis la position du code source.
+  std::atomic_signal_fence(std::memory_order_acquire);
   write_literal(fd, kCrashRestoreLiteral, sizeof(kCrashRestoreLiteral) - 1);
   ::tcsetattr(fd, TCSANOW, &g_crash_saved);
 }
@@ -118,23 +134,47 @@ TtyGuard::TtyGuard(int fd) : fd_(fd) {
   raw.c_cc[VTIME] = 0;
   if (::tcsetattr(fd_, TCSANOW, &raw) != 0) return;
   armed_ = true;
-  // g_crash_saved avant g_crash_fd : le gestionnaire de signal ne doit
-  // jamais voir un descripteur "armé" pointant vers un termios pas encore
-  // écrit.
   g_crash_saved = saved_;
+  // Barrière release : impose que l'écriture complète de g_crash_saved
+  // ci-dessus soit visible avant que g_crash_fd ne soit armé ci-dessous --
+  // le gestionnaire de signal ne doit jamais voir un descripteur "armé"
+  // pointant vers un termios pas encore (ou pas entièrement) écrit.
+  // std::atomic_signal_fence est l'outil prévu pour ordonner du code
+  // normal face à un gestionnaire de signal du MÊME thread (contrairement à
+  // std::atomic_thread_fence, pensé pour plusieurs threads) : il n'émet
+  // aucune instruction, donc aucun coût, et reste utilisable depuis un
+  // gestionnaire de signal lui-même (voir crash_restore() ci-dessus, qui
+  // pose la barrière acquire symétrique).
+  std::atomic_signal_fence(std::memory_order_release);
   g_crash_fd = fd_;
   write_all(fd_, tty_setup_sequence());
 }
 
 TtyGuard::~TtyGuard() {
   if (!armed_) return;
-  // Désarmer le gestionnaire de signal avant de commencer notre propre
-  // restauration : un plantage survenant pendant cette restauration ne doit
-  // pas faire écrire le gestionnaire par-dessus une séquence déjà à moitié
-  // envoyée.
-  g_crash_fd = -1;
+  // Restaurer d'abord, désarmer ensuite. Arbitrage entre deux défauts face
+  // à un signal arrivant PENDANT cette restauration (SIGTERM d'un
+  // orchestrateur, un second Ctrl-C, un write_all() bloqué sur un tty en
+  // contrôle de flux...) :
+  //   - désarmer après (ici) : le gestionnaire rejoue la séquence de
+  //     restauration puis refait tcsetattr(). Les deux sont idempotents
+  //     (remise à zéro de modes déjà à zéro, même termios réappliqué) :
+  //     au pire un flux d'octets dupliqué, mais le terminal EST restauré.
+  //   - désarmer avant (l'ordre précédent) : le gestionnaire voit fd < 0 et
+  //     ne fait rien ; si le processus meurt au milieu de la restauration,
+  //     plus personne ne la termine -- l'utilisateur reste en mode brut,
+  //     sans écho ni édition de ligne, et doit connaître `stty sane` à
+  //     l'aveugle pour s'en sortir.
+  // Une duplication idempotente est un défaut cosmétique ; une
+  // non-restauration est exactement le défaut que cette classe existe pour
+  // empêcher -- d'où le choix ici.
   write_all(fd_, tty_restore_sequence());
   ::tcsetattr(fd_, TCSANOW, &saved_);
+  // Barrière release : empêche le compilateur de faire remonter le
+  // désarmement ci-dessous avant les deux appels de restauration qui
+  // précèdent (voir crash_restore() pour la barrière acquire symétrique).
+  std::atomic_signal_fence(std::memory_order_release);
+  g_crash_fd = -1;
 }
 
 void TtyGuard::install_crash_handlers() {

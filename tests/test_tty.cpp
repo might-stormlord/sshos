@@ -344,3 +344,49 @@ TEST(client_connect_with_timeout_succeeds_quickly_when_room_is_available) {
   const sshos::AcceptResult r = sshos::accept_peer(listener.get(), ::getuid());
   CHECK(r.outcome == sshos::AcceptOutcome::Accepted);
 }
+
+// --- Point mineur 1 : timeout_ms <= 0 doit se comporter comme documenté
+// --- dans connect_with_timeout() -- une seule tentative de connexion, puis
+// --- un échec immédiat sans jamais passer par poll() en attente. Ce n'est
+// --- pas une correction de comportement (celui-ci était déjà celui-là,
+// --- simplement non documenté ni testé) : ce test passe donc aussi bien
+// --- avant qu'après la tâche 10, il caractérise et verrouille un
+// --- comportement déjà correct plutôt que d'en prouver la correction.
+
+TEST(client_connect_with_timeout_zero_fails_immediately_without_waiting) {
+  const std::string name = unique_socket_name("zerotimeout");
+  Fd listener = sshos::bind_abstract(name);
+
+  // Même remplissage de backlog que le test "gives_up_promptly" ci-dessus :
+  // connect_with_timeout() ne doit trouver aucune place libre.
+  std::vector<Fd> queued;
+  for (int i = 0; i < 64; ++i) {
+    Fd c = queue_pending_connection(name);
+    if (!c.valid()) break;
+    queued.push_back(std::move(c));
+  }
+  CHECK(!queued.empty());  // sinon le reste du test ne prouve rien
+
+  const auto t0 = std::chrono::steady_clock::now();
+  bool threw = false;
+  std::string what;
+  try {
+    Fd fd = sshos::connect_with_timeout(name, 0);
+    (void)fd;
+  } catch (const std::exception& e) {
+    threw = true;
+    what = e.what();
+  }
+  const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count();
+
+  CHECK(threw);
+  CHECK(what.find("0") != std::string::npos);
+  // Discriminant : si la première tentative échouée attendait quand même un
+  // tour de kConnectRetryIntervalMs (25 ms) avant de revérifier la
+  // deadline, ce test le verrait -- 15 ms est une marge large pour un seul
+  // socket()+connect() sans jamais toucher poll(), mais sans commune mesure
+  // avec un délai d'au moins 25 ms.
+  CHECK(elapsed_ms < 15);
+}
