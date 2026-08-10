@@ -203,3 +203,20 @@ TEST(diff_does_not_repaint_an_unchanged_tail_when_content_changes) {
   CHECK_EQ(d.frame(s, std::nullopt),
            std::string("\033[?25l\033[0m\033[1;1HZ\033[1;1H"));
 }
+
+// Symétrique du test précédent : la tête est byte-identique à la frame
+// précédente, et c'est la queue qui change seule — ici en s'allongeant
+// jusqu'à franchir kMinErasableTail. La tête ne doit pas être repeinte,
+// et le seul CUP émis doit sauter directement à tail_start. Ce test
+// échouerait si une future simplification de la comptabilité du curseur
+// en venait à réémettre "ab" avant d'atteindre la queue.
+TEST(diff_erases_tail_alone_when_prefix_is_unchanged) {
+  Surface s(6, 1);
+  s.root().text(0, 0, "abXY", Style{});
+  Differ d(tc());
+  d.frame(s, std::nullopt);
+
+  s.root().text(2, 0, "  ", Style{});
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;3H\033[K\033[1;1H"));
+}

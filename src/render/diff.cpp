@@ -14,11 +14,19 @@ Style style_of(const Cell& c) { return Style{c.fg, c.bg, c.attrs}; }
 // par défaut en entrant dans la queue, donc aucune transition SGR n'est
 // nécessaire ni pour l'effacement ni pour les espaces — N espaces coûtent
 // N octets : égalité à N=3, l'effacement gagne strictement à partir de
-// N=4. Dans tout autre cas (pinceau sur un fond ou des attributs non
-// défaut) l'effacement ne peut que gagner davantage : il ignore fg/attrs
-// (rien n'est dessiné) là où des espaces littérales exigeraient en plus
-// une transition complète vers Style{}. Ce seuil est donc un minorant
-// sûr : jamais pire que les espaces, potentiellement bien mieux.
+// N=4. Ce que ce seuil garantit réellement : l'effacement n'est jamais
+// pire que les espaces littérales — une égalité reste possible dès que le
+// pinceau porte un fond ou des attributs non défaut. Exemple à N=4 :
+// pinceau Bold + fond non défaut. Les espaces doivent rejoindre Style{},
+// et aucun code SGR n'éteint Bold isolément (cf. sgr_transition), donc
+// `\033[0m` (4 octets) puis 4 espaces : 8 octets. L'effacement ne
+// réinitialise que le fond, `\033[49m` (5 octets) puis `\033[K` (3
+// octets) : 8 octets aussi — l'octet d'écart entre les deux resets
+// compense exactement la marge du seuil. On ne réinitialise que le fond,
+// pas tout via `\033[0m` (un octet de moins ici) : un reset complet
+// effacerait aussi fg et les attributs, que le reste de la frame devrait
+// ensuite rétablir par une transition SGR — l'économie locale se
+// paierait ailleurs.
 constexpr int kMinErasableTail = 4;
 
 }  // namespace
