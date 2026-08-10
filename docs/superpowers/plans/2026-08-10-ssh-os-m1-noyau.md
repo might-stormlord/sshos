@@ -24,7 +24,7 @@ Ces contraintes valent pour **toutes** les tâches et ne sont pas répétées da
 - Adresse du socket : abstraite, `\0sshos/<uid>/<boot_id>`.
 - Plafond de rendu : **33 ms** (30 fps). Plafond de contre-pression : **1 Mo**. Plafond de fenêtres : **64**.
 - Délai d'ambiguïté `ESC` : **50 ms**. Touche leader par défaut : `Ctrl+A`.
-- Le français est la langue des messages destinés à l'utilisateur ; le code, les identifiants et les commentaires sont en anglais.
+- Le français est la langue des messages destinés à l'utilisateur **et des commentaires** ; le code et les identifiants sont en anglais. (Les commentaires portent le *pourquoi* d'une décision, souvent gagné à la revue de conception : ils sont écrits dans la langue de travail du projet.)
 
 ## Commandes de référence
 
