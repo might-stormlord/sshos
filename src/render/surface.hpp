@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/utf8.hpp"
 #include "render/cell.hpp"
 
 namespace sshos {
@@ -66,9 +67,8 @@ class View {
   Rect clip_;
 };
 
-// Rend le nombre d'octets consommés. `out` vaut U+FFFD sur séquence
-// invalide ou tronquée, et la consommation avance toujours d'au moins 1 :
-// un décodeur qui n'avance pas boucle indéfiniment.
-size_t utf8_decode(std::string_view s, size_t pos, char32_t& out);
+// utf8_decode() vit désormais dans common/utf8.hpp (partagé avec input/,
+// cf. son commentaire) ; il reste visible ici sous sshos::utf8_decode via
+// l'include ci-dessus, sans changement pour les appelants de ce header.
 
 }  // namespace sshos

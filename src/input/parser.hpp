@@ -37,6 +37,12 @@ class InputParser {
   std::deque<InputEvent> ready_;
   bool in_paste_ = false;
   bool esc_pending_ = false;
+  // I4 : position jusqu'où buf_ a déjà été scanné sans y trouver kPasteEnd,
+  // pour ne pas rescanner tout le collage à chaque octet livré. Remise à 0
+  // chaque fois que buf_ est tronqué en tête (terminateur trouvé, ou
+  // fragment évacué par le plafond C2) : les positions qu'elle désignait ne
+  // veulent plus rien dire une fois le préfixe supprimé.
+  size_t paste_scanned_ = 0;
 };
 
 }  // namespace sshos
