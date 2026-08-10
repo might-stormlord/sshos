@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -6,6 +7,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <sstream>
@@ -68,6 +70,68 @@ Fd try_queue_connection(const std::string& name) {
   CHECK(false);  // connect() a echoue de facon inattendue
   return Fd();
 }
+
+// Restaure une variable d'environnement à sa valeur d'avant le test, qu'elle
+// ait été définie ou non. Tous les test_*.cpp sont liés dans le même binaire
+// et tournent dans le même processus (voir tests/main.cpp) : sans ça, un
+// test qui appelle setenv() sur SSHOS_BOOT_ID ferait fuiter cette valeur
+// vers tous les cas suivants du run, et l'ordre d'exécution se mettrait à
+// compter pour le résultat.
+class EnvVarGuard {
+ public:
+  explicit EnvVarGuard(const char* name) : name_(name) {
+    if (const char* v = std::getenv(name)) {
+      had_value_ = true;
+      value_ = v;
+    }
+  }
+  ~EnvVarGuard() {
+    if (had_value_) {
+      ::setenv(name_, value_.c_str(), 1);
+    } else {
+      ::unsetenv(name_);
+    }
+  }
+  EnvVarGuard(const EnvVarGuard&) = delete;
+  EnvVarGuard& operator=(const EnvVarGuard&) = delete;
+
+ private:
+  const char* name_;
+  bool had_value_ = false;
+  std::string value_;
+};
+
+// Abaisse RLIMIT_NOFILE le temps du test pour forcer un EMFILE déterministe
+// sur un accept4() par ailleurs sain (vrai écouteur, vrai pair en attente),
+// puis restaure la limite d'origine à la sortie de portée -- y compris si
+// une assertion échoue en cours de route, pour ne pas laisser un test suivant
+// hériter d'une limite de descripteurs anormalement basse.
+class RlimitNofileGuard {
+ public:
+  RlimitNofileGuard() { ::getrlimit(RLIMIT_NOFILE, &original_); }
+  ~RlimitNofileGuard() { ::setrlimit(RLIMIT_NOFILE, &original_); }
+  RlimitNofileGuard(const RlimitNofileGuard&) = delete;
+  RlimitNofileGuard& operator=(const RlimitNofileGuard&) = delete;
+
+  // Fixe rlim_cur au prochain numéro de descripteur que le noyau attribuerait
+  // (le plus petit libre, trouvé en ouvrant puis refermant /dev/null) : le
+  // tout prochain appel qui a besoin d'un nouveau descripteur -- ici
+  // accept4() -- échoue alors avec EMFILE, sans toucher aux descripteurs déjà
+  // ouverts (setrlimit n'en ferme aucun rétroactivement).
+  bool lower_to_force_emfile() {
+    const int probe = ::open("/dev/null", O_RDONLY);
+    if (probe < 0) return false;
+    const int next_fd = probe;
+    ::close(probe);
+
+    rlimit lim = original_;
+    lim.rlim_cur = static_cast<rlim_t>(next_fd);
+    return ::setrlimit(RLIMIT_NOFILE, &lim) == 0;
+  }
+
+ private:
+  rlimit original_{};
+};
 
 }  // namespace
 
@@ -134,16 +198,69 @@ TEST(net_accept_peer_reports_empty_when_nothing_is_pending) {
   CHECK(!r.fd.valid());
 }
 
-TEST(net_accept_peer_reports_a_genuine_error_distinctly) {
+TEST(net_accept_peer_reports_a_fatal_error_distinctly) {
   // Un descripteur qui n'est pas un socket en écoute : accept4() échoue
-  // réellement (ENOTSOCK). Ni "rien en attente", ni un refus d'uid : la
-  // troisième case que l'ancien code écrasait aussi sous un Fd() invalide.
+  // réellement (ENOTSOCK). Ni "rien en attente", ni un refus d'uid, et une
+  // erreur qu'aucune nouvelle tentative ne corrigera jamais -- l'écouteur
+  // lui-même est mal formé, pas temporairement indisponible.
   Fd not_a_listener(::open("/dev/null", O_RDONLY));
   CHECK(not_a_listener.valid());
   const AcceptResult r = sshos::accept_peer(not_a_listener.get(), ::getuid());
-  CHECK(r.outcome == AcceptOutcome::Error);
+  CHECK(r.outcome == AcceptOutcome::FatalError);
   CHECK(!r.fd.valid());
-  CHECK(r.err != 0);
+  CHECK_EQ(r.err, ENOTSOCK);
+}
+
+TEST(net_accept_peer_reports_a_transient_error_distinctly) {
+  // Un vrai écouteur avec un vrai pair déjà en attente dans le backlog,
+  // mais RLIMIT_NOFILE abaissé juste avant l'appel pour forcer un EMFILE
+  // déterministe : accept4() trouve bien la connexion en attente mais
+  // échoue à lui allouer un descripteur. Rien n'est cassé dans l'écouteur
+  // lui-même -- une nouvelle tentative après que de la place se soit
+  // libérée ailleurs dans le processus a une vraie chance de réussir.
+  const std::string name = unique_name() + "-emfile";
+  Fd listener = sshos::bind_abstract(name);
+  Fd pending = try_queue_connection(name);
+  CHECK(pending.valid());
+
+  RlimitNofileGuard rlimit_guard;
+  CHECK(rlimit_guard.lower_to_force_emfile());
+
+  const AcceptResult r = sshos::accept_peer(listener.get(), ::getuid());
+  CHECK(r.outcome == AcceptOutcome::TransientError);
+  CHECK(!r.fd.valid());
+  CHECK_EQ(r.err, EMFILE);
+}
+
+TEST(net_accept_peer_distinguishes_transient_from_fatal_errors) {
+  // Le point du correctif, vérifié ici sans nommer TransientError ni
+  // FatalError : une cause permanente (ENOTSOCK) et une cause transitoire
+  // (EMFILE) doivent produire des `outcome` différents, parce qu'une boucle
+  // "journalise puis continue" au-dessus de accept_peer() doit pouvoir
+  // réagir différemment aux deux -- boucler à froid sur la première (mesuré
+  // contre l'objet compilé : ~144k appels/s en continu) et affamer un
+  // accept qui aurait pu réussir sous la seconde (mesuré : ~48k appels/s,
+  // zéro acceptation). N'utiliser que la comparaison d'`outcome` (plutôt que
+  // les noms des deux nouvelles valeurs) laisse ce cas compiler tel quel
+  // contre net.hpp/net.cpp d'avant ce correctif, où les deux valaient la
+  // même AcceptOutcome::Error : contre cette version-là, ce CHECK échoue.
+  Fd not_a_listener(::open("/dev/null", O_RDONLY));
+  CHECK(not_a_listener.valid());
+  const AcceptResult fatal = sshos::accept_peer(not_a_listener.get(), ::getuid());
+  CHECK_EQ(fatal.err, ENOTSOCK);
+
+  const std::string name = unique_name() + "-classify";
+  Fd listener = sshos::bind_abstract(name);
+  Fd pending = try_queue_connection(name);
+  CHECK(pending.valid());
+
+  RlimitNofileGuard rlimit_guard;
+  CHECK(rlimit_guard.lower_to_force_emfile());
+
+  const AcceptResult transient = sshos::accept_peer(listener.get(), ::getuid());
+  CHECK_EQ(transient.err, EMFILE);
+
+  CHECK(transient.outcome != fatal.outcome);
 }
 
 TEST(net_connect_fails_when_nobody_listens) {
@@ -157,33 +274,75 @@ TEST(net_connect_fails_when_nobody_listens) {
 }
 
 TEST(net_boot_id_prefers_the_kernel_source_when_available) {
+  // Neutralise une SSHOS_BOOT_ID qui traînerait dans l'environnement du run
+  // (peu probable, mais sinon ce test dépendrait de l'invocateur) : on veut
+  // vérifier la source noyau elle-même, pas l'échappatoire.
+  EnvVarGuard env_guard("SSHOS_BOOT_ID");
+  ::unsetenv("SSHOS_BOOT_ID");
+
   const std::string id = sshos::read_boot_id();
   CHECK(!id.empty());
-  // Sur un système normal (pas un conteneur restreint), la source noyau est
-  // lisible : vérifie qu'on ne bascule pas sur le repli alors qu'on n'en a
-  // pas besoin.
-  CHECK(id.rfind("btime-", 0) != 0);
+  // Deux lectures dans le même run doivent s'accorder : boot_id ne change
+  // pas en cours de vie du noyau.
+  CHECK_EQ(id, sshos::read_boot_id());
 }
 
-TEST(net_boot_id_falls_back_to_btime_when_the_kernel_source_is_absent) {
-  // Remplace l'ancien test vacueux ("non vide" est vrai par construction vu
-  // le repli constant qu'on supprime) : ici on force l'absence de la source
-  // primaire, comme le fait un conteneur restreint, et on vérifie que le
-  // repli déterministe prend le relais au lieu d'une constante muette.
-  const std::string id = sshos::read_boot_id("/does/not/exist/boot_id", "/proc/stat");
-  CHECK(id.rfind("btime-", 0) == 0);
-}
+TEST(net_boot_id_throws_when_the_kernel_source_is_absent) {
+  // Remplace l'ancien test "tombe sur le repli btime", supprimé avec le
+  // repli lui-même (voir net.cpp) : la source noyau absente doit maintenant
+  // échouer bruyamment, pas glisser vers une horloge murale qui peut se
+  // faire corriger entre le démarrage du démon et l'attache d'un client.
+  //
+  // Appel à un seul argument délibéré : il reste valide aussi bien contre
+  // la signature à deux paramètres d'avant ce correctif (le second prend
+  // alors la valeur par défaut "/proc/stat", bien réel, et l'ancien code
+  // réussit via le repli qu'on supprime -- ce CHECK échoue) que contre la
+  // signature actuelle à un seul paramètre.
+  EnvVarGuard env_guard("SSHOS_BOOT_ID");
+  ::unsetenv("SSHOS_BOOT_ID");
 
-TEST(net_boot_id_throws_rather_than_inventing_a_constant) {
-  // Aucune des deux sources disponible : l'ancien code aurait rendu
-  // "nobootid" en silence. On veut un échec bruyant à la place.
   bool threw = false;
   try {
-    sshos::read_boot_id("/does/not/exist/boot_id", "/does/not/exist/stat");
+    sshos::read_boot_id("/does/not/exist/boot_id");
   } catch (const std::runtime_error&) {
     threw = true;
   }
   CHECK(threw);
+}
+
+TEST(net_boot_id_treats_an_empty_override_as_absent) {
+  // Un export raté (`SSHOS_BOOT_ID=` sans valeur) ne doit pas être pris pour
+  // un identifiant valide : sinon tout le monde sur la machine se
+  // retrouverait avec la même chaîne vide, silencieusement.
+  EnvVarGuard env_guard("SSHOS_BOOT_ID");
+  ::setenv("SSHOS_BOOT_ID", "", 1);
+
+  bool threw = false;
+  try {
+    sshos::read_boot_id("/does/not/exist/boot_id");
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  CHECK(threw);
+}
+
+TEST(net_boot_id_env_override_takes_priority_over_the_kernel_source) {
+  // L'échappatoire documentée sur kBootIdEnvVar (net.hpp) : une valeur
+  // définie doit gagner même quand la source noyau, elle, est parfaitement
+  // lisible -- sinon un opérateur qui force la valeur pour contourner un
+  // conteneur restreint sur une machine, mais teste d'abord sur une machine
+  // normale, obtiendrait un résultat différent selon la machine.
+  //
+  // "SSHOS_BOOT_ID" est répété en toutes lettres plutôt que via
+  // sshos::kBootIdEnvVar : uniquement pour ce test, c'est voulu -- rendre le
+  // test insensible au nom du symbole (qui n'existe pas dans le net.hpp
+  // d'avant ce correctif) est ce qui permet de le compiler tel quel contre
+  // l'ancien code et de constater, à l'exécution, qu'il ignorait
+  // entièrement la variable : ce CHECK_EQ échoue contre lui.
+  EnvVarGuard env_guard("SSHOS_BOOT_ID");
+  ::setenv("SSHOS_BOOT_ID", "sentinelle-de-test-3c9f", 1);
+
+  CHECK_EQ(sshos::read_boot_id(), std::string("sentinelle-de-test-3c9f"));
 }
 
 TEST(net_listen_backlog_holds_more_than_a_handful_of_pending_clients) {
