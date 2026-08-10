@@ -2078,7 +2078,7 @@ Le `bind()` est le mutex : pas de fichier de verrou, pas de détection d'obsoles
   - `std::string sshos::socket_name(uid_t uid, std::string_view boot_id)`.
   - `Fd sshos::bind_abstract(std::string_view name)` — lève `AddressInUse` si `EADDRINUSE`, `std::system_error` sinon.
   - `Fd sshos::connect_abstract(std::string_view name)`.
-  - `Fd sshos::accept_peer(int listen_fd, uid_t expected_uid)` — rend un `Fd` invalide si le pair a un autre uid.
+  - `sshos::accept_peer(int listen_fd, uid_t expected_uid)` — **la signature de ce plan est perimee** : la revue de la tache 8 a montre qu'un `Fd` invalide confond "rien en attente", "refuse sur uid" et "erreur", ce qui fait tourner un appelant plausible a 144 000 appels/s. L'API reelle rend un `AcceptResult`. Se referer a `src/common/net.hpp`.
 
 - [ ] **Step 1: Écrire le test qui échoue**
 
@@ -2190,6 +2190,9 @@ Fd connect_abstract(std::string_view name);
 
 // Une adresse abstraite n'a pas de permissions : tout processus de la
 // machine peut s'y connecter. SO_PEERCRED est la seule barrière.
+// PERIME - ne pas transcrire. La signature reelle est celle de src/common/net.hpp
+// au HEAD de la branche : accept_peer rend un AcceptResult (issue + Fd + credentials
+// + errno), pas un Fd. Ecrire le brief depuis l'en-tete, jamais depuis ce bloc.
 Fd accept_peer(int listen_fd, uid_t expected_uid);
 
 }  // namespace sshos
@@ -2272,6 +2275,9 @@ Fd connect_abstract(std::string_view name) {
   return fd;
 }
 
+// PERIME - ne pas transcrire. La signature reelle est celle de src/common/net.hpp
+// au HEAD de la branche : accept_peer rend un AcceptResult (issue + Fd + credentials
+// + errno), pas un Fd. Ecrire le brief depuis l'en-tete, jamais depuis ce bloc.
 Fd accept_peer(int listen_fd, uid_t expected_uid) {
   const int raw = ::accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
   if (raw < 0) return Fd();
@@ -4286,6 +4292,9 @@ int run_daemon(std::string_view socket_name) {
       }
 
       if (fd == listener.get()) {
+// PERIME - ne pas transcrire. La signature reelle est celle de src/common/net.hpp
+// au HEAD de la branche : accept_peer rend un AcceptResult (issue + Fd + credentials
+// + errno), pas un Fd. Ecrire le brief depuis l'en-tete, jamais depuis ce bloc.
         Fd fresh = accept_peer(listener.get(), ::getuid());
         if (!fresh.valid()) continue;
         set_nonblock(fresh.get());
@@ -4428,6 +4437,10 @@ namespace {
 constexpr int kConnectAttempts = 50;
 constexpr int kConnectDelayUs = 20 * 1000;
 
+// PERIME - ne pas transcrire. read_boot_id() peut desormais lever. Cet appel est la
+// toute premiere ligne de main() et n'est protege par aucun try/catch, alors que
+// tous les autres appels faillibles de cette fonction le sont : en l'etat le binaire
+// mourrait par std::terminate. Voir src/common/net.hpp au HEAD.
 std::string current_socket_name() {
   return sshos::socket_name(::getuid(), sshos::read_boot_id());
 }
