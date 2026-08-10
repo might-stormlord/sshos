@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <fstream>
@@ -112,17 +113,36 @@ struct SigIgnGuard {
 //
 // release() porte la meme logique bornee (O_NONBLOCK + tentatives
 // limitees) que l'ancien code du chemin heureux, qu'elle remplace : elle
-// s'appelle explicitement au bon moment dans le corps du test, et se
-// desarme aussitot apres, qu'elle ait reussi ou non -- un second appel
-// (depuis le destructeur, en filet de securite) ne retente donc rien. Ce
-// desarmement est ce qui evite d'ajouter du delai au chemin heureux :
-// sans lui, le destructeur retenterait aveuglement les tentatives bornees
-// alors que le petit-enfant, deja libere, n'est plus lecteur -- 200 x
-// 20 ms perdues a chaque execution reussie. Reste bornee meme si le
-// petit-enfant n'a jamais demarre (execv en echec, ou spawn_detached() a
-// echoue avant meme de forker) : il n'y aura alors jamais de lecteur, et
-// les tentatives s'epuisent normalement plutot que de bloquer
-// indefiniment.
+// s'appelle explicitement au bon moment dans le corps du test, et ne se
+// desarme QUE si la liberation a reellement abouti (ouverture ET ecriture
+// des deux octets reussies). Un appel qui echoue laisse le garde arme,
+// pour que le destructeur (filet de securite) retente a son tour --
+// c'est deliberement asymetrique avec un desarmement immediat en tete de
+// fonction : desarmer avant meme de connaitre l'issue neutralise
+// precisement le filet que ce garde existe pour tendre. Bug reel de ce
+// fichier, corrige ici : un release() explicite qui echouait (petit-enfant
+// pas encore arrive au rendez-vous, panne transitoire...) desarmait quand
+// meme le garde ; le destructeur, voyant armed_ deja a faux, ne retentait
+// plus rien, et le petit-enfant restait bloque a vie dans open() -- chemins
+// deja effaces par les UnlinkGuard correspondants au moment ou le
+// destructeur s'execute, donc plus aucun moyen de le retrouver. Demontre,
+// mesure a l'appui, par
+// daemonize_fifo_release_guard_retries_after_failed_explicit_release ci-dessous.
+//
+// Consequence assumee : sur un chemin d'echec, la tentative bornee peut
+// etre payee deux fois (l'appel explicite qui echoue, puis le destructeur
+// qui retente) -- jusqu'a 2 x 200 x 20 ms = 8 s dans le pire cas. Un test
+// lent est infiniment preferable a un processus fuite et invisible ; le
+// chemin heureux n'est pas concerne, voir le paragraphe suivant.
+//
+// Le desarmement au succes est ce qui evite d'ajouter du delai au chemin
+// heureux : sans lui, le destructeur retenterait aveuglement les
+// tentatives bornees alors que le petit-enfant, deja libere, n'est plus
+// lecteur -- 200 x 20 ms perdues a chaque execution reussie. Reste bornee
+// meme si le petit-enfant n'a jamais demarre (execv en echec, ou
+// spawn_detached() a echoue avant meme de forker) : il n'y aura alors
+// jamais de lecteur, et les tentatives s'epuisent normalement plutot que
+// de bloquer indefiniment.
 //
 // Ne leve jamais : appelable depuis un destructeur, elle ignore
 // silencieusement un echec d'ouverture ou d'ecriture -- il n'y a de toute
@@ -134,15 +154,19 @@ class FifoReleaseGuard {
 
   bool release() {
     if (!armed_) return true;
-    armed_ = false;
     int fd = -1;
     for (int i = 0; i < 200 && fd < 0; ++i) {
       fd = ::open(path_.c_str(), O_WRONLY | O_NONBLOCK);
       if (fd < 0) ::usleep(20 * 1000);
     }
-    if (fd < 0) return false;
+    if (fd < 0) return false;  // reste arme : le destructeur retentera
     sshos::Fd write_end(fd);
-    return ::write(write_end.get(), "g\n", 2) == 2;
+    const bool ok = ::write(write_end.get(), "g\n", 2) == 2;
+    // Ne desarme que si la liberation a reellement eu lieu (voir le
+    // commentaire de la classe ci-dessus) : sur echec d'ecriture, le
+    // destructeur doit lui aussi retenter.
+    if (ok) armed_ = false;
+    return ok;
   }
 
   FifoReleaseGuard(const FifoReleaseGuard&) = delete;
@@ -150,6 +174,58 @@ class FifoReleaseGuard {
 
  private:
   std::string path_;
+  bool armed_ = true;
+};
+
+// Filet de securite pour la recolte de l'intermediaire, symetrique de
+// FifoReleaseGuard ci-dessus : couvre l'interstice entre le REQUIRE(mid > 0)
+// qui suit spawn_detached() et le waitpid(mid, ...) explicite plus bas. Rien
+// n'occupe cet interstice aujourd'hui dans aucun des trois tests qui
+// l'utilisent -- mais un futur REQUIRE/CHECK qui s'y ajouterait sortirait
+// tot sans jamais recolter `mid`, laissant un zombie a la charge du
+// processus de test. Meme famille de bug que celui qui a motive
+// FifoReleaseGuard : une hypothese d'execution lineaire entre acquisition
+// d'une ressource a nettoyer et sa liberation normale, plus bas dans la
+// fonction. Le chemin actif (le destructeur qui recolte reellement) n'etant
+// exerce par aucun des trois sites d'usage actuels, il est prouve
+// directement par un test dedie qui force cette sortie anticipee :
+// daemonize_waitpid_guard_reaps_the_intermediate_on_early_exit, plus bas.
+//
+// WNOHANG et borne (jusqu'a 200 x 5 ms = 1 s), jamais un waitpid() bloquant :
+// l'intermediaire meurt normalement en tres largement moins d'une
+// milliseconde apres le second fork() (setsid() et le premier fork() ont
+// deja eu lieu quand spawn_detached() rend la main), donc la borne n'est
+// quasi jamais atteinte en pratique -- mais un waitpid() bloquant ici
+// attendrait indefiniment si l'intermediaire ne se terminait jamais. C'est
+// exactement ce qui arrive sous la mutation qui supprime le second fork()
+// (voir le rapport de tache) : l'intermediaire devient lui-meme le
+// processus qui bloque sur la lecture de la FIFO, et `mid` ne se termine
+// jamais tant que personne n'a ouvert la FIFO en ecriture. Ce garde ne doit
+// pas transformer cet echec de mutation (deja detecte par ailleurs, via le
+// waitpid() explicite qui bloque a son tour) en un blocage supplementaire
+// sur le chemin nominal.
+//
+// disarm() s'appelle apres le waitpid() explicite reussi, comme le
+// desarmement au succes de FifoReleaseGuard::release() : evite qu'un
+// destructeur qui n'a rien a faire ne retente quand meme un appel systeme.
+class WaitpidGuard {
+ public:
+  explicit WaitpidGuard(pid_t pid) : pid_(pid) {}
+  ~WaitpidGuard() {
+    if (!armed_) return;
+    for (int i = 0; i < 200; ++i) {
+      if (::waitpid(pid_, nullptr, WNOHANG) > 0) return;
+      ::usleep(5 * 1000);
+    }
+  }
+
+  void disarm() { armed_ = false; }
+
+  WaitpidGuard(const WaitpidGuard&) = delete;
+  WaitpidGuard& operator=(const WaitpidGuard&) = delete;
+
+ private:
+  pid_t pid_;
   bool armed_ = true;
 };
 
@@ -274,8 +350,14 @@ TEST(daemonize_detaches_the_grandchild) {
   // sans rapport.
   REQUIRE(mid > 0);
 
+  // Filet de securite pour la recolte de l'intermediaire (voir
+  // WaitpidGuard ci-dessus) : couvre l'interstice, aujourd'hui vide, entre
+  // ce REQUIRE et le waitpid() explicite qui suit.
+  WaitpidGuard mid_guard(mid);
+
   int status = 0;
   const pid_t reaped = ::waitpid(mid, &status, 0);
+  if (reaped == mid) mid_guard.disarm();
   CHECK_EQ(reaped, mid);
   CHECK(WIFEXITED(status));
   CHECK_EQ(WEXITSTATUS(status), 0);
@@ -347,6 +429,165 @@ TEST(daemonize_detaches_the_grandchild) {
   REQUIRE(hold_release.release());
 }
 
+// Demonstration mesuree du bug ferme dans FifoReleaseGuard::release()
+// (voir son commentaire de classe plus haut) : un release() explicite qui
+// echoue ne doit PAS desarmer le garde, precisement pour que le
+// destructeur puisse retenter avec succes des que les conditions
+// changent. Isole du reste du dispositif de synchronisation du test
+// precedent (marqueurs dedies, aucun partage d'etat) pour rendre la
+// discrimination directement observable :
+//  1. Le garde est construit AVANT que la FIFO n'existe. Le premier
+//     release() explicite ne peut donc que trouver un chemin inexistant --
+//     un echec obtenu par construction, sans avoir a demonter un lecteur
+//     deja en place.
+//  2. Le lecteur n'apparait qu'APRES cet echec, ce qui est le point : sous
+//     le bug, le garde se serait deja desarme avant meme de savoir que la
+//     tentative a echoue, donc avant meme que ce lecteur n'existe.
+//  3. Le destructeur du garde (fin de bloc ci-dessous) doit retenter et
+//     reussir -- c'est CE retenter, et lui seul, qui discrimine. Sous le
+//     bug (armed_ mis a faux des le premier essai, avant de connaitre son
+//     issue), la boucle bornee du premier essai s'execute quand meme
+//     jusqu'a son terme : armed_ ne conditionne que le desarmement, pas
+//     l'entree dans la boucle. Le chronometrage ci-dessous (point 1) est
+//     donc identique avec ou sans le bug -- NE discrimine PAS, seule sa
+//     valeur en dit quelque chose sur le premier essai lui-meme. Seul le
+//     fait que le lecteur soit ensuite debloque -- observe via
+//     l'apparition de `done`, donc via CHECK(unblocked) plus bas --
+//     distingue les deux : sous le bug, armed_ est deja a faux quand le
+//     destructeur s'execute, celui-ci rend `true` immediatement sans rien
+//     retenter, et le lecteur reste bloque a vie. Verifie manuellement en
+//     revertant temporairement le correctif (voir le rapport de tache) :
+//     la suite rend alors un echec unique, precisement sur
+//     CHECK(unblocked) -- jamais sur le chronometrage ci-dessous, qui
+//     passe sans rien detecter dans les deux cas.
+TEST(daemonize_fifo_release_guard_retries_after_failed_explicit_release) {
+  const std::string fifo = unique_marker("proof-fifo");
+  const std::string started = unique_marker("proof-started");
+  const std::string done = unique_marker("proof-done");
+  ::unlink(fifo.c_str());
+  ::unlink(started.c_str());
+  ::unlink(done.c_str());
+  UnlinkGuard fifo_unlink(fifo);
+  UnlinkGuard started_unlink(started);
+  UnlinkGuard done_unlink(done);
+
+  pid_t mid = -1;
+  {
+    // Construit avant mkfifo : voir point 1 ci-dessus.
+    FifoReleaseGuard guard(fifo);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool first_attempt = guard.release();
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count();
+
+    CHECK(!first_attempt);
+    // Plancher a 3500 ms (< 200 x 20 ms = 4000 ms attendus) : marge pour la
+    // granularite de l'horloge, jamais pour un court-circuit -- verifie que
+    // cet appel a bien epuise sa boucle bornee plutot que d'echouer tot pour
+    // une tout autre raison (chemin inattendu, boucle elle-meme regressee).
+    // NE discrimine PAS le bug que ce test existe pour fermer : sous ce bug,
+    // `armed_` passe a faux AVANT la boucle, mais la boucle tourne quand
+    // meme jusqu'au bout ensuite -- armed_ ne conditionne que le
+    // desarmement, pas l'entree dans la boucle. `elapsed_ms` vaut donc
+    // ~4000 ms avec le bug comme sans. La discrimination reelle est plus
+    // bas : CHECK(unblocked), qui observe si le destructeur du garde a
+    // effectivement retente et libere le lecteur (voir le commentaire
+    // au-dessus du corps de ce test).
+    CHECK(elapsed_ms >= 3500);
+
+    // Le lecteur : mkfifo puis un vrai spawn_detached(), comme le test
+    // precedent -- il annonce son pid dans `started` avant de bloquer sur
+    // la FIFO, pour qu'un pid soit connu meme si le rendez-vous echoue
+    // (filet de secours plus bas).
+    REQUIRE(::mkfifo(fifo.c_str(), 0600) == 0);
+    mid = sshos::spawn_detached({"/bin/sh", "-c",
+                                  "echo $$ > " + started + "; read x < " + fifo +
+                                      "; echo ok > " + done});
+    REQUIRE(mid > 0);
+    CHECK(wait_for_file(started, 100));
+
+    // Fin de bloc : le destructeur de `guard` retente ici. C'est la
+    // propriete que ce test existe pour prouver.
+  }
+
+  int status = 0;
+  CHECK_EQ(::waitpid(mid, &status, 0), mid);
+
+  const bool unblocked = wait_for_file(done, 200);
+  CHECK(unblocked);
+  if (!unblocked) {
+    // Filet de secours pour CE test : si le desarmement premature revenait
+    // (regression), le lecteur resterait bloque a vie. Ce bloc l'en sort
+    // explicitement, pour que la suite ne fuite jamais un processus meme
+    // quand ce test lui-meme rapporte un echec.
+    const int fd = ::open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+    if (fd >= 0) {
+      [[maybe_unused]] const ssize_t written = ::write(fd, "g\n", 2);
+      ::close(fd);
+    }
+    wait_for_file(done, 100);  // best effort, ne fait pas echouer une deuxieme fois
+  }
+}
+
+// Demonstration mesuree de l'utilite reelle de WaitpidGuard (voir sa
+// definition plus haut) : sans elle, un REQUIRE qui echouerait entre le
+// REQUIRE(mid > 0) et le waitpid() explicite -- present dans les trois
+// tests qui l'utilisent, mais jamais declenche par leur execution normale
+// -- laisserait `mid` zombie a la charge de ce processus de test. Ce test
+// force ce chemin directement, sans passer par un REQUIRE qui ferait
+// echouer ce test lui-meme : il reproduit la meme forme (garde construit
+// juste apres la validation du pid, puis sortie de portee SANS jamais
+// appeler le waitpid() explicite) dans un bloc imbrique dedie.
+//
+// `mid` est ici le pid de l'INTERMEDIAIRE (premier fork() de
+// spawn_detached()), pas du petit-enfant -- son argv importe donc peu :
+// l'intermediaire meurt de lui-meme moins d'une milliseconde apres le
+// second fork(), quel que soit le sort de l'exec qui le suit (voir
+// WaitpidGuard ci-dessus et daemonize.cpp). Le seul travail que le
+// destructeur du garde a a accomplir ici est de recolter ce zombie de tres
+// courte duree de vie.
+//
+// Discrimination : une fois `mid` reellement recolte, le noyau libere
+// entierement son entree de table des processus -- /proc/<mid> cesse
+// d'exister (ENOENT). Un zombie NON recolte, a l'inverse, garde une entree
+// /proc/<mid> (State: Z) tant que personne n'appelle waitpid() dessus. Si
+// le garde est retire ou son destructeur rendu no-op, le bloc ci-dessous ne
+// recolte plus jamais `mid`, et le CHECK_EQ plus bas echoue -- verifie
+// manuellement en vidant temporairement le corps du destructeur de
+// WaitpidGuard (voir le rapport de tache).
+//
+// Borne et sans effet sur le chemin nominal des autres tests : le
+// destructeur de WaitpidGuard s'execute de facon synchrone a la fermeture
+// du bloc ci-dessous, donc le temps qu'il passe a boucler (jusqu'a
+// 200 x 5 ms = 1 s au pire, si `mid` ne se terminait jamais) est deja
+// ecoule au moment ou ce test continue -- ici, l'intermediaire etant deja
+// mort ou sur le point de l'etre, la boucle se termine en pratique en une
+// ou deux iterations.
+TEST(daemonize_waitpid_guard_reaps_the_intermediate_on_early_exit) {
+  const pid_t mid = sshos::spawn_detached({"/bin/true"});
+  REQUIRE(mid > 0);
+
+  {
+    // Reproduit exactement la forme que WaitpidGuard existe pour couvrir :
+    // le garde est construit juste apres la validation de `mid`, puis la
+    // portee se termine SANS jamais appeler le waitpid() explicite -- comme
+    // le ferait un REQUIRE echoue entre les deux, sans faire echouer CE
+    // test par un REQUIRE qui, lui, romprait reellement son execution.
+    WaitpidGuard guard(mid);
+  }
+
+  const std::string proc_status = "/proc/" + std::to_string(mid) + "/status";
+  CHECK_EQ(::access(proc_status.c_str(), F_OK), -1);
+
+  // Filet de secours pour CE test : si le garde n'a pas recolte (regression),
+  // `mid` reste zombie a notre charge. Le recolter ici, en WNOHANG, evite que
+  // ce test ne fuite lui-meme un processus meme quand il rapporte un echec.
+  int status = 0;
+  ::waitpid(mid, &status, WNOHANG);
+}
+
 // Le masque de signaux survit à execve : un SIGCHLD encore bloqué casse
 // tout enfant qui attend ses propres processus (make -j8, par exemple).
 TEST(daemonize_clears_the_signal_mask_before_exec) {
@@ -375,8 +616,12 @@ TEST(daemonize_clears_the_signal_mask_before_exec) {
   // waitpid(-1, ...).
   REQUIRE(mid > 0);
 
+  // Meme filet de securite qu'au test precedent (voir WaitpidGuard) pour
+  // le meme interstice, aujourd'hui vide egalement.
+  WaitpidGuard mid_guard(mid);
+
   int status = 0;
-  ::waitpid(mid, &status, 0);
+  if (::waitpid(mid, &status, 0) == mid) mid_guard.disarm();
   CHECK(wait_for_file(marker, 100));
 
   CHECK_EQ(extract_field(marker, "SigBlk:"), std::string("0000000000000000"));
@@ -401,8 +646,12 @@ TEST(daemonize_clears_signal_dispositions_before_exec) {
       {"/bin/sh", "-c", "grep SigIgn /proc/self/status > " + marker});
   REQUIRE(mid > 0);
 
+  // Meme filet de securite que les deux tests precedents (voir
+  // WaitpidGuard) pour le meme interstice, aujourd'hui vide egalement.
+  WaitpidGuard mid_guard(mid);
+
   int status = 0;
-  ::waitpid(mid, &status, 0);
+  if (::waitpid(mid, &status, 0) == mid) mid_guard.disarm();
   CHECK(wait_for_file(marker, 100));
 
   std::ifstream in(marker);
