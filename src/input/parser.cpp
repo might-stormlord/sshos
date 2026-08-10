@@ -193,6 +193,12 @@ size_t InputParser::step() {
     const size_t rescan_from = paste_scanned_ > kPasteEnd.size() - 1
                                     ? paste_scanned_ - (kPasteEnd.size() - 1)
                                     : 0;
+    // I4 : la fenêtre réellement soumise à find() — buf_.size() moins le
+    // point de reprise — est ce que le compteur de test somme, appel après
+    // appel, pour prouver que le scan reste borné par appel au lieu de
+    // rescanner tout le collage depuis 0 (cf. paste_scan_bytes_for_tests()
+    // dans parser.hpp et le test qui l'exploite dans test_input.cpp).
+    paste_scan_bytes_ += buf_.size() - rescan_from;
     const size_t end = buf_.find(kPasteEnd, rescan_from);
 
     if (end != std::string::npos) {
@@ -264,8 +270,11 @@ size_t InputParser::step() {
 
   if (buf_[1] == 'O') {
     if (buf_.size() < 3) return 0;
-    const Key k = key_from_final(buf_[2]);
-    if (k != Key::None) ready_.push_back(InputEvent{KeyEvent{k, 0, 0}});
+    // M1 : key_from_final ne rend plus jamais Key::None (voir son
+    // commentaire) — un octet final SS3 absent de sa table donne Unknown,
+    // jamais rien. La garde "!= Key::None" qui vivait ici était donc
+    // devenue structurellement toujours vraie ; retirée.
+    ready_.push_back(InputEvent{KeyEvent{key_from_final(buf_[2]), 0, 0}});
     return 3;
   }
 
@@ -346,19 +355,16 @@ size_t InputParser::step() {
       paste_scanned_ = 0;
       return used;
     }
-    const Key k = key_from_tilde(n);
-    if (k != Key::None) {
-      ready_.push_back(
-          InputEvent{KeyEvent{k, 0, p.size() > 1 ? mods_from_param(p[1]) : uint8_t{0}}});
-    }
+    // M1 : même raisonnement que ci-dessus pour key_from_tilde — la garde
+    // "!= Key::None" était devenue structurellement toujours vraie.
+    ready_.push_back(InputEvent{
+        KeyEvent{key_from_tilde(n), 0, p.size() > 1 ? mods_from_param(p[1]) : uint8_t{0}}});
     return used;
   }
 
-  const Key k = key_from_final(final_byte);
-  if (k != Key::None) {
-    ready_.push_back(
-        InputEvent{KeyEvent{k, 0, p.size() > 1 ? mods_from_param(p[1]) : uint8_t{0}}});
-  }
+  // M1 : même raisonnement — key_from_final ne rend plus jamais Key::None.
+  ready_.push_back(InputEvent{KeyEvent{
+      key_from_final(final_byte), 0, p.size() > 1 ? mods_from_param(p[1]) : uint8_t{0}}});
   return used;
 }
 

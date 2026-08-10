@@ -28,6 +28,16 @@ class InputParser {
 
   bool esc_pending() const { return esc_pending_; }
 
+  // I4 — diagnostic réservé aux tests : cumul des octets examinés par
+  // buf_.find(kPasteEnd, ...) à travers tous les appels à step() en état de
+  // collage. Une preuve algorithmique déterministe (linéaire vs quadratique)
+  // là où un chronomètre ne peut que constater un ordre de grandeur sur une
+  // machine donnée à un instant donné — même principe que
+  // Decoder::buffer_capacity_for_tests() dans src/common/proto.hpp.
+  // N'existe que pour ça — aucun code de production ne doit lire cette
+  // valeur.
+  size_t paste_scan_bytes_for_tests() const { return paste_scan_bytes_; }
+
  private:
   void pump();
   // Rend le nombre d'octets consommés, ou 0 si la séquence est incomplète.
@@ -43,6 +53,9 @@ class InputParser {
   // fragment évacué par le plafond C2) : les positions qu'elle désignait ne
   // veulent plus rien dire une fois le préfixe supprimé.
   size_t paste_scanned_ = 0;
+  // I4 : cumul des octets examinés par buf_.find(kPasteEnd, ...) — voir
+  // paste_scan_bytes_for_tests() ci-dessus pour ce que ça prouve.
+  size_t paste_scan_bytes_ = 0;
 };
 
 }  // namespace sshos

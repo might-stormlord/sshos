@@ -367,12 +367,18 @@ TEST(input_sgr_mouse_zero_coordinate_yields_no_event) {
 // I4 — buf_.find(kPasteEnd) rescannait tout le tampon à chaque step().
 // ---------------------------------------------------------------------
 
-// Seuil volontairement large : mesuré dans cet environnement (Debug,
-// ASan+UBSan — le pire cas, nettement plus lent qu'en Release) à ~810 ms
-// avec le correctif contre ~2814 ms sans, pour 300 Ko livrés octet par
-// octet. Le seuil ci-dessous reste loin des deux bornes pour éviter qu'un
-// test de performance devienne friable sous ASan/UBSan, tout en
-// discriminant clairement un retour au O(n²).
+// Un seuil en millisecondes mesure une machine à un instant donné, pas
+// l'algorithme : sur une machine idle 12 coeurs, le binaire correctement
+// corrigé s'étale déjà de 509 à 911 ms d'une exécution à l'autre (facteur
+// 1.6, sans la moindre charge concurrente) ; sous contention ordinaire
+// (nproc processus en tâche de fond — un simple runner de CI, ou un
+// portable avec autre chose d'ouvert), il grimpe à 1459 ms sur une machine
+// et 1926 ms sur une autre, faisant échouer une borne à 1800 ms sans que le
+// correctif I4 soit en cause. Un code correct qui échoue à son propre test
+// pour des raisons étrangères au défaut qu'il garde n'est pas un test
+// fiable. On lui substitue un compteur d'opérations déterministe : voir
+// paste_scan_bytes_for_tests() dans parser.hpp (même principe que
+// Decoder::buffer_capacity_for_tests() dans src/common/proto.hpp).
 TEST(input_paste_byte_by_byte_is_not_quadratic) {
   InputParser p;
   p.feed("\033[200~");
@@ -383,9 +389,26 @@ TEST(input_paste_byte_by_byte_is_not_quadratic) {
   p.feed("\033[201~");
   const auto t1 = std::chrono::steady_clock::now();
 
+  // Le chrono reste : utile à l'humain qui regarde défiler la sortie CI. Ce
+  // n'est plus lui qui décide du succès du cas — voir le compteur ci-dessous.
   const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
   std::fprintf(stderr, "  [info] collage 300 Ko octet par octet : %.1f ms\n", ms);
-  CHECK(ms < 1800.0);
+
+  // Preuve algorithmique déterministe (I4) : le total d'octets examinés par
+  // buf_.find(kPasteEnd, ...) à travers tous les step() doit rester
+  // linéaire en la taille du collage, pas quadratique. Mesuré sur cet
+  // environnement : ~11 octets examinés par octet de collage avec le
+  // correctif (fenêtre de recul bornée à kPasteEnd.size()-1 par appel, cf.
+  // step()) — indépendant de la taille totale une fois le régime permanent
+  // atteint. Sans le correctif (rescan complet depuis 0 à chaque step(),
+  // cf. 7f336c0), le même calcul sur ce payload de 300 Ko donne un ratio de
+  // ~153 602 (~n/2, la signature du O(n²)). K=64 laisse une marge large
+  // (~6x le ratio linéaire mesuré, pour absorber toute variation
+  // raisonnable d'implémentation) tout en restant à plus de trois ordres de
+  // grandeur sous ce que produirait un retour au rescan complet.
+  constexpr size_t K = 64;
+  const size_t scanned = p.paste_scan_bytes_for_tests();
+  CHECK(scanned <= K * payload.size());
 
   std::vector<InputEvent> v;
   while (auto e = p.next()) v.push_back(*e);
