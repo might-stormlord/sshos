@@ -178,10 +178,13 @@ size_t utf8_decode(std::string_view s, size_t pos, char32_t& out) {
     cp = (cp << 6) | (bk & 0x3F);
   }
 
-  // Valider le scalaire Unicode : rejeter les surrogates [D800, DFFF],
-  // les valeurs > 10FFFF, et les séquences trop longues (ex: E0 80 80 → 0).
-  // Utiliser la règle "maximal subpart" : consommer la séquence complète
-  // même si le codepoint est invalide.
+  // Stratégie : contrôle générique de la forme des continuations (0xC0 == 0x80),
+  // consommation de la longueur nominale complète, puis validation post-hoc
+  // du scalaire Unicode et substitution sur toute la portée si invalide.
+  // Cette validation est charge-portante : elle est la seule défense contre
+  // les surrogates [D800, DFFF], les valeurs > 10FFFF, et les séquences
+  // trop longues (ex: E0 80 80 → 0). Ne pas la retirer : elle rouvrirait
+  // les failles qu'elle ferme. (Différent des rangées par lead-byte du WHATWG.)
   const bool is_surrogate = (cp >= 0xD800 && cp <= 0xDFFF);
   const bool is_out_of_range = (cp > 0x10FFFF);
   const bool is_overlong = (need == 1 && cp < 0x80) || (need == 2 && cp < 0x800) ||
