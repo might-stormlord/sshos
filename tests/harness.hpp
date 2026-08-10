@@ -47,6 +47,20 @@ inline void fail_uncaught(const char* test_name, const std::string& what) {
                test_name, what.c_str());
 }
 
+// Meme raisonnement que fail_uncaught, pour un cas dont le PROCESSUS ouvrier
+// a du etre tue depuis l'exterieur apres avoir depasse le delai imparti
+// (voir le superviseur dans tests/main.cpp) : ni __FILE__ ni __LINE__ ne
+// sont pertinents, le depassement de delai est detecte par un AUTRE
+// processus (le superviseur, via sem_timedwait), jamais dans la pile du cas
+// lui-meme.
+inline void fail_timeout(const char* test_name, long timeout_ms) {
+  ++failures();
+  std::fprintf(stderr,
+               "  FAIL %s  timeout : le cas n'a pas rendu la main en %ld ms "
+               "(reglable via SSHOS_TEST_TIMEOUT_MS)\n",
+               test_name, timeout_ms);
+}
+
 // Les chaînes attendues contiennent des octets de contrôle : sans échappement,
 // un diff de sortie ANSI est illisible et le test ne sert à rien.
 inline std::string show(const std::string& v) {
