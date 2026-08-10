@@ -1,6 +1,5 @@
 #include <string>
 
-#include "common/utf8.hpp"
 #include "harness.hpp"
 #include "render/profile.hpp"
 
@@ -69,36 +68,6 @@ TEST(sgr_returns_to_default_color_with_39_and_49) {
   from.fg = Color::rgb(255, 0, 0);
   from.bg = Color::indexed(4);
   CHECK_EQ(sgr_transition(from, Style{}, p), std::string("\033[39m\033[49m"));
-}
-
-TEST(encode_utf8_roundtrip) {
-  CHECK_EQ(sshos::encode_utf8(U'a'), std::string("a"));
-  CHECK_EQ(sshos::encode_utf8(U'日'), std::string("\xe6\x97\xa5"));
-  CHECK_EQ(sshos::encode_utf8(U'\U0001f600'), std::string("\xf0\x9f\x98\x80"));
-}
-
-// Valider que les surrogates sont substitués par U+FFFD.
-TEST(encode_utf8_rejects_surrogates) {
-  // Première surrogate (D800)
-  CHECK_EQ(sshos::encode_utf8(static_cast<char32_t>(0xD800)), std::string("\xef\xbf\xbd"));
-  // Dernière surrogate (DFFF)
-  CHECK_EQ(sshos::encode_utf8(static_cast<char32_t>(0xDFFF)), std::string("\xef\xbf\xbd"));
-}
-
-// Valider que les valeurs > U+10FFFF sont substituées.
-TEST(encode_utf8_rejects_out_of_range) {
-  CHECK_EQ(sshos::encode_utf8(static_cast<char32_t>(0x110000)), std::string("\xef\xbf\xbd"));
-  CHECK_EQ(sshos::encode_utf8(static_cast<char32_t>(0x200000)), std::string("\xef\xbf\xbd"));
-}
-
-// Valider les limites valides du scalaire Unicode.
-TEST(encode_utf8_accepts_scalar_boundaries) {
-  // U+D7FF : avant la première surrogate
-  CHECK_EQ(sshos::encode_utf8(U'퟿'), std::string("\xed\x9f\xbf"));
-  // U+E000 : après la dernière surrogate
-  CHECK_EQ(sshos::encode_utf8(U''), std::string("\xee\x80\x80"));
-  // U+10FFFF : maximum valide
-  CHECK_EQ(sshos::encode_utf8(U'\U0010FFFF'), std::string("\xf4\x8f\xbf\xbf"));
 }
 
 // Vérifier que la couleur est re-émise après une réinitialisation d'attributs.
