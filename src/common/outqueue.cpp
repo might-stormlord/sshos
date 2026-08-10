@@ -78,7 +78,19 @@ void OutQueue::push(std::string_view bytes) {
     // Dirty impliquent côté appelant, et pourquoi wants_write() ne peut
     // pas s'y substituer).
     const bool had_partial_send = off_ > 0;
-    overflow_ = had_partial_send ? Overflow::Dirty : Overflow::Clean;
+    const Overflow this_rejection =
+        had_partial_send ? Overflow::Dirty : Overflow::Clean;
+    // Fusion, pas affectation : release_buffer() remet TOUJOURS off_ à
+    // zéro, donc un second rejet survenant avant que l'appelant n'ait lu
+    // take_overflow() verrait toujours off_ == 0 et conclurait Clean à
+    // tort, effaçant un Dirty déjà en attente d'un rejet antérieur --
+    // alors que le pair a bien reçu ce préfixe-là. L'état accumulé ne peut
+    // donc que rester ou s'aggraver jusqu'à sa lecture par
+    // take_overflow(), jamais redescendre tout seul -- même discipline que
+    // Decoder::failed() (tâche 7), qui ne se répare pas non plus de
+    // lui-même. Overflow est déclaré dans cet ordre (None < Clean < Dirty)
+    // précisément pour que cette comparaison soit correcte.
+    if (this_rejection > overflow_) overflow_ = this_rejection;
     release_buffer();
     return;
   }

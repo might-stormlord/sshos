@@ -192,6 +192,82 @@ TEST(outqueue_overflow_after_a_partial_send_is_reported_dirty) {
   CHECK_EQ(q.size(), static_cast<size_t>(0));
 }
 
+// Critical trouvé en sondant le code fusionné de ce round : l'affectation
+// overflow_ = ... dans push() est inconditionnelle, et release_buffer()
+// remet off_ à zéro à CHAQUE rejet, y compris un rejet Dirty. Un second
+// rejet survenant avant que l'appelant n'ait lu take_overflow() voit donc
+// toujours off_ == 0 (remis à zéro par le rejet précédent), conclut Clean
+// à tort, et écrase le Dirty en attente -- alors que le pair a bel et bien
+// reçu un préfixe de trame binaire lors du flush() antérieur au premier
+// rejet. C'est exactement le gel silencieux et permanent que ce round
+// visait à éliminer, ressuscité par le correctif lui-même dès que
+// l'appelant ne consulte pas take_overflow() entre deux push() -- et rien
+// dans l'API ne l'y oblige.
+//
+// Corrigé en rendant la sévérité monotone : une fois Dirty posé, il ne
+// redescend plus tout seul, seul take_overflow() peut le consommer (le
+// ramener à None) -- même discipline collante que Decoder::failed()
+// (tâche 7), qui ne se répare pas non plus de lui-même. Un nouveau rejet
+// ne peut donc que maintenir ou aggraver la sévérité en attente, jamais
+// l'adoucir.
+//
+// Compilé contre le code fusionné de ce round (overflow_ affecté sans
+// condition), ce test échoue : le second push() écrase Dirty par Clean,
+// et take_overflow() rend Clean. C'est la preuve recherchée.
+TEST(outqueue_overflow_severity_does_not_downgrade_before_being_consumed) {
+  Pair p;
+  REQUIRE(make_pair(p));
+
+  constexpr int kRequestedBuf = 4096;
+  REQUIRE_EQ(::setsockopt(p.a.get(), SOL_SOCKET, SO_SNDBUF, &kRequestedBuf,
+                           sizeof kRequestedBuf),
+             0);
+  REQUIRE_EQ(::setsockopt(p.a.get(), SOL_SOCKET, SO_RCVBUF, &kRequestedBuf,
+                           sizeof kRequestedBuf),
+             0);
+  REQUIRE_EQ(::setsockopt(p.b.get(), SOL_SOCKET, SO_SNDBUF, &kRequestedBuf,
+                           sizeof kRequestedBuf),
+             0);
+  REQUIRE_EQ(::setsockopt(p.b.get(), SOL_SOCKET, SO_RCVBUF, &kRequestedBuf,
+                           sizeof kRequestedBuf),
+             0);
+
+  int actual_sndbuf = 0;
+  socklen_t len = sizeof actual_sndbuf;
+  REQUIRE_EQ(
+      ::getsockopt(p.a.get(), SOL_SOCKET, SO_SNDBUF, &actual_sndbuf, &len), 0);
+  REQUIRE(actual_sndbuf > 0);
+
+  // Même dimensionnement mesuré que les deux tests précédents : une
+  // première poussée qui sature le tampon noyau, flush()ée partiellement
+  // (off_ > 0 -- preuve directe via size() < first_push, pas seulement
+  // wants_write(), voir le commentaire de take_overflow()).
+  const size_t first_push = static_cast<size_t>(actual_sndbuf) * 8;
+  OutQueue q(first_push * 4);
+  q.push(std::string(first_push, 'a'));
+  CHECK(q.flush(p.a.get()));
+  CHECK(q.size() < first_push);
+
+  // Premier rejet : Dirty, à raison -- le pair a déjà reçu un préfixe.
+  q.push(std::string(first_push * 5, 'b'));
+
+  // Second rejet, SANS lire take_overflow() entre les deux. Pris isolément
+  // celui-ci serait Clean (off_ est retombé à 0 par le rejet précédent,
+  // rien de nouveau n'est parti sur le fil depuis) -- mais il ne doit pas
+  // effacer le Dirty déjà en attente : c'est le pire des deux qui doit
+  // survivre jusqu'à la lecture.
+  q.push(std::string(first_push * 5, 'c'));
+
+  CHECK(q.take_overflow() == OutQueue::Overflow::Dirty);
+
+  // La lecture consomme bien l'état (remise à None) : un rejet Clean
+  // ultérieur, lui, doit se voir normalement une fois l'ardoise effacée --
+  // sinon la correction du défaut aurait pu, par excès, coller Dirty en
+  // permanence.
+  q.push(std::string(first_push * 5, 'd'));
+  CHECK(q.take_overflow() == OutQueue::Overflow::Clean);
+}
+
 TEST(outqueue_reports_a_dead_peer) {
   Pair p;
   REQUIRE(make_pair(p));
