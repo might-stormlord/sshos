@@ -193,4 +193,11 @@ AcceptResult accept_peer(int listen_fd, uid_t expected_uid) {
   return AcceptResult{AcceptOutcome::Accepted, std::move(fd), peer, 0};
 }
 
+pid_t peer_pid(int fd) {
+  ucred cred{};
+  socklen_t len = sizeof cred;
+  if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) return -1;
+  return static_cast<pid_t>(cred.pid);
+}
+
 }  // namespace sshos

@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "common/utf8.hpp"
+#include "render/profile.hpp"
 #include "render/width.hpp"
 
 namespace sshos {
@@ -149,5 +150,16 @@ View View::sub(Rect r) const {
 // input/, corrigée deux fois séparément aurait fini par diverger). Ce
 // fichier l'appelle désormais via l'include de common/utf8.hpp ci-dessus ;
 // aucun comportement de View::text() n'a changé.
+
+std::string Surface::text_row(int y) const {
+  std::string out;
+  if (y < 0 || y >= h_) return out;
+  for (int x = 0; x < w_; ++x) {
+    const Cell& c = at(x, y);
+    if (c.width == 0) continue;  // couverte par sa cellule de tête
+    out += encode_utf8(c.ch);
+  }
+  return out;
+}
 
 }  // namespace sshos

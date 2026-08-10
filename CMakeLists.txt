@@ -20,6 +20,9 @@ list(REMOVE_ITEM CORE_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(sshos_core STATIC ${CORE_SOURCES})
 target_include_directories(sshos_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
+add_executable(sshos src/main.cpp)
+target_link_libraries(sshos PRIVATE sshos_core)
+
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/test_*.cpp)
 add_executable(sshos_tests tests/main.cpp ${TEST_SOURCES})
 target_include_directories(sshos_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
