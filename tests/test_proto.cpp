@@ -375,6 +375,70 @@ TEST(proto_decoder_assembles_max_size_message_across_many_feeds) {
   CHECK(!d.failed());
 }
 
+// Durcissement : le tampon physique peut grossir jusqu'à ~2x
+// kMaxBufferBytes (voir son commentaire, proto.hpp) puis, sans ce
+// correctif, rester figé à cette taille pour le reste de la vie du
+// Decoder — compact() ne fait qu'erase(), qui ne rend jamais la
+// capacité. Ce test construit le scénario que le plafond documente
+// lui-même : un message légal de taille maximale (kMaxMessageBytes)
+// suivi d'un second message qui occupe pile la marge de 1 Mio que
+// kMaxBufferBytes réserve au-delà d'un message maximal, de sorte que le
+// tampon logique atteigne EXACTEMENT kMaxBufferBytes avant le moindre
+// drain. Cela garantit buf_.capacity() >= kMaxBufferBytes par la seule
+// garantie de la norme (capacity() >= size()), sans dépendre d'une
+// marge de croissance propre à l'implémentation. On vide ensuite
+// entièrement le tampon (les deux messages) et on vérifie que la
+// capacité est bien redescendue — pas seulement que size() a diminué.
+// buffer_capacity_for_tests() est l'accesseur de diagnostic ajouté pour
+// ce test (voir son commentaire dans proto.hpp).
+TEST(proto_decoder_releases_capacity_once_fully_drained_past_threshold) {
+  // Message 1 : un Input légal de taille maximale, comme dans
+  // proto_decoder_assembles_max_size_message_across_many_feeds.
+  const uint32_t content1 = static_cast<uint32_t>(kMaxMessageBytes) - 4;
+  std::string msg1 = raw_header(kTagInput, static_cast<uint32_t>(kMaxMessageBytes));
+  msg1 += raw_u32(content1);
+  msg1 += std::string(content1, 'z');
+
+  // Message 2 : un second Input dont la taille totale sur le fil occupe
+  // exactement la marge de 1 Mio réservée par kMaxBufferBytes au-delà
+  // d'un message maximal.
+  constexpr size_t kMargin = 1ull * 1024 * 1024;
+  const uint32_t content2 = static_cast<uint32_t>(kMargin) - 9;  // 5 (en-tête) + 4 (préfixe interne)
+  std::string msg2 = raw_header(kTagInput, content2 + 4);
+  msg2 += raw_u32(content2);
+  msg2 += std::string(content2, 'y');
+
+  CHECK_EQ(msg1.size() + msg2.size(), kMaxBufferBytes);
+
+  Decoder d;
+  const std::string wire = msg1 + msg2;
+  constexpr size_t kChunk = 4ull * 1024 * 1024;
+  size_t off = 0;
+  while (off < wire.size()) {
+    const size_t n = std::min(kChunk, wire.size() - off);
+    d.feed(std::string_view(wire).substr(off, n));
+    off += n;
+  }
+  CHECK(!d.failed());
+
+  const size_t grown_capacity = d.buffer_capacity_for_tests();
+  CHECK(grown_capacity >= kMaxBufferBytes);
+
+  int produced = 0;
+  while (d.next().has_value()) ++produced;
+  CHECK_EQ(produced, 2);
+  CHECK(!d.failed());
+
+  const size_t drained_capacity = d.buffer_capacity_for_tests();
+  // La preuve recherchée : la capacité est redescendue à quelque chose
+  // de proche de zéro (la taille d'un std::string frais), pas
+  // simplement en dessous de grown_capacity — un simple erase() aurait
+  // laissé drained_capacity == grown_capacity (seul size() aurait
+  // changé), ce qui est exactement le comportement de l'ancien code.
+  CHECK(drained_capacity < grown_capacity);
+  CHECK(drained_capacity < 1024u);
+}
+
 // Vérifie aussi le cas Hello complet contre un tag inconnu bâti à la main
 // (et non pas seulement contre un Welcome) : la reprise après un tag
 // inconnu doit fonctionner quel que soit le message qui suit.

@@ -111,8 +111,48 @@ void Decoder::fail() {
   buf_.shrink_to_fit();
 }
 
+namespace {
+
+// Voir Decoder::compact() : seuil de capacité au-delà duquel un tampon
+// entièrement drainé rend sa mémoire au lieu de la garder en réserve.
+// Calé sur kMaxBufferBytes lui-même plutôt qu'une valeur arbitraire : le
+// trafic ordinaire ("recevoir un morceau, le vider, tampon vide" à
+// chaque lecture, voir feed()/compact()) ne fait jamais grossir la
+// capacité physique jusqu'à ce plafond — les messages réels font
+// quelques centaines d'octets à quelques kilooctets. Si la capacité
+// l'atteint ou le dépasse, c'est forcément soit un message légal de
+// taille maximale assemblé sur de nombreux feed() (rare — voir
+// kMaxMessageBytes), soit l'épisode adversarial documenté au commentaire
+// de kMaxBufferBytes (proto.hpp) où buf_.size() a été poussé jusqu'à
+// ~2x ce plafond par un cadencement délibéré côté pair. Dans les deux
+// cas, ce n'est pas le chemin courant, et la mémoire mérite d'être
+// rendue plutôt que de rester figée pour le reste de la vie du Decoder.
+constexpr size_t kReleaseCapacityThreshold = kMaxBufferBytes;
+
+}  // namespace
+
 void Decoder::compact() {
   if (pos_ == 0) return;
+
+  // Ajout à la logique de compaction existante ci-dessous, pour le seul
+  // cas d'un tampon totalement vidé (pos_ == buf_.size() : plus un seul
+  // octet non consommé, rien à préserver). shrink_to_fit() n'est qu'une
+  // requête non contraignante côté norme ; l'échange avec une chaîne
+  // temporaire vide, lui, est l'idiome garanti pour rendre l'allocation
+  // (la capacité de l'ancien buf_ part avec la temporaire, détruite en
+  // fin d'expression). On ne le fait que si la capacité a réellement
+  // explosé (kReleaseCapacityThreshold, voir sa définition) : sur le
+  // chemin ordinaire — vidage complet à chaque lecture — ce garde-fou ne
+  // se déclenche jamais, donc pas de cycle libère/réalloue sur du trafic
+  // normal. La branche pos_*2 >= buf_.size() ci-dessous n'est pas
+  // modifiée : elle continue de régir la compaction "en place" pour
+  // tout ce qui n'est pas ce cas particulier.
+  if (pos_ == buf_.size() && buf_.capacity() >= kReleaseCapacityThreshold) {
+    std::string{}.swap(buf_);
+    pos_ = 0;
+    return;
+  }
+
   // On ne décale que lorsqu'au moins la moitié du tampon est du
   // gaspillage déjà consommé. Le coût du décalage est proportionnel à ce
   // qui reste (<= pos_ dans ce cas), donc toujours borné par ce qui vient

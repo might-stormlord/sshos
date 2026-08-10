@@ -61,13 +61,24 @@ std::string encode(const Msg& m);
 // jalon — voir le rapport de relecture.)
 inline constexpr size_t kMaxMessageBytes = 32ull * 1024 * 1024;
 
-// Plafond du tampon de réassemblage tout entier (les octets non encore
-// consommés, en attente d'un message complet). Doit rester assez grand
-// pour qu'un message légal de taille maximale puisse s'assembler même
-// arrivé fragmenté sur de très nombreux feed() : l'en-tête (5 octets) +
-// le corps maximal (kMaxMessageBytes), plus 1 Mio de marge pour ce qui
-// peut être mis en file juste à côté (fin d'un message précédent pas
-// encore consommé, début du suivant arrivé dans la même salve).
+// Plafond de l'extent NON CONSOMMÉ du tampon de réassemblage (buf_.size()
+// - pos_ : les octets déjà consommés en tête ne comptent pas), pas de son
+// allocation physique. Doit rester assez grand pour qu'un message légal
+// de taille maximale puisse s'assembler même arrivé fragmenté sur de très
+// nombreux feed() : l'en-tête (5 octets) + le corps maximal
+// (kMaxMessageBytes), plus 1 Mio de marge pour ce qui peut être mis en
+// file juste à côté (fin d'un message précédent pas encore consommé,
+// début du suivant arrivé dans la même salve).
+//
+// Conséquence assumée : parce que ce plafond ignore pos_, et que
+// compact() ne décale que lorsque pos_ * 2 >= buf_.size() (voir son
+// commentaire), buf_.size() lui-même peut atteindre jusqu'à ~2x
+// kMaxBufferBytes juste avant qu'un compact() ne se déclenche (pos_ tout
+// juste sous la moitié du tampon, plus kMaxBufferBytes d'octets non
+// consommés en plus). Ce facteur 2 n'est pas une fuite : c'est le prix
+// délibéré d'une compaction à coût amorti linéaire plutôt que quadratique
+// — voir le commentaire de compact() (proto.cpp) pour l'analyse complète
+// de ce compromis.
 inline constexpr size_t kMaxBufferBytes =
     kMaxMessageBytes + 5 + (1ull * 1024 * 1024);
 
@@ -98,6 +109,12 @@ class Decoder {
   // c'est à l'appelant de fermer la connexion, le décodeur n'a pas
   // d'autre moyen de le signaler.
   bool failed() const { return failed_; }
+
+  // Diagnostic réservé aux tests : capacité physique actuelle du tampon
+  // interne (buf_.capacity()), pour vérifier que la mémoire est bien
+  // rendue après un épisode qui l'a fait grossir. N'existe que pour ça —
+  // aucun code de production ne doit lire cette valeur.
+  size_t buffer_capacity_for_tests() const { return buf_.capacity(); }
 
  private:
   void fail();
