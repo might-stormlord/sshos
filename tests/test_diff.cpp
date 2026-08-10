@@ -114,3 +114,92 @@ TEST(diff_resize_forces_a_full_repaint) {
   CHECK_EQ(d.frame(bigger, std::nullopt),
            std::string("\033[?25l\033[0m\033[1;1Habcd\033[1;1H"));
 }
+
+// §4.3 de la spec : « Les fins de ligne à fond par défaut se font en CSI K
+// plutôt qu'en espaces. » Cas emblématique : une ligne entièrement vide,
+// sur une surface bien plus large que son contenu (ici vide), s'effondre
+// en un unique CSI K — et le résultat ne dépend pas de la largeur réelle
+// de la surface, c'est tout l'intérêt (200 colonnes coûtent le même octet
+// que 5).
+TEST(diff_first_frame_collapses_empty_line_to_csi_k) {
+  Surface s(200, 1);
+  Differ d(tc());
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1H\033[K\033[1;1H"));
+}
+
+// Seuil de rentabilité (kMinErasableTail = 4 dans diff.cpp) : à 3 cellules,
+// CSI K (3 octets) ne ferait pas mieux que 3 espaces littérales (3 octets)
+// — la queue reste donc du texte ordinaire.
+TEST(diff_tail_one_cell_short_of_threshold_stays_literal) {
+  Surface s(5, 1);
+  s.root().text(0, 0, "ab", Style{});
+  Differ d(tc());
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1Hab   \033[1;1H"));
+}
+
+// Un cran plus loin (4 cellules, exactement le seuil), l'effacement gagne
+// strictement (3 octets contre 4) : la queue devient un CSI K.
+TEST(diff_tail_at_threshold_becomes_csi_k) {
+  Surface s(6, 1);
+  s.root().text(0, 0, "ab", Style{});
+  Differ d(tc());
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1Hab\033[K\033[1;1H"));
+}
+
+// Le prédicat d'effaçabilité est `cell == Cell{}`, une égalité totale — pas
+// « c'est un espace ». Un espace en Reverse reste visible (barre inversée)
+// malgré son glyphe vide ; l'effacer serait un bug spectaculaire. Ce test
+// échouerait si le prédicat était un jour « simplifié » en un test naïf sur
+// `ch` et la couleur seuls.
+TEST(diff_does_not_erase_a_tail_with_visible_attributes) {
+  Surface s(6, 1);
+  s.root().text(0, 0, "ab", Style{});
+  Style rev;
+  rev.attrs = sshos::attr::Reverse;
+  for (int x = 2; x < 6; ++x) s.root().put(x, 0, U' ', rev);
+  Differ d(tc());
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1Hab\033[7m    \033[1;1H"));
+}
+
+// Piège du fond hérité : CSI K efface avec le fond SGR courant, pas le
+// fond par défaut du terminal. Le pinceau doit revenir au fond par défaut
+// (\033[49m) AVANT le CSI K, sinon on peint une barre colorée jusqu'en
+// bordure droite. On vérifie les octets exacts, dans cet ordre précis.
+TEST(diff_resets_background_before_erasing_the_tail) {
+  Surface s(6, 1);
+  Style colored;
+  colored.bg = Color::rgb(10, 20, 30);
+  s.root().text(0, 0, "AB", colored);
+  Differ d(tc());
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1H\033[48;2;10;20;30mAB\033[49m\033[K\033[1;1H"));
+}
+
+// Propriété « bureau au repos = zéro octet », étendue à une ligne qui
+// possède une queue effaçable : si rien n'a changé, y compris la queue,
+// la deuxième frame ne doit toujours rien émettre.
+TEST(diff_emits_nothing_when_the_erasable_tail_is_unchanged) {
+  Surface s(6, 1);
+  s.root().text(0, 0, "ab", Style{});
+  Differ d(tc());
+  d.frame(s, std::nullopt);
+  CHECK_EQ(d.frame(s, std::nullopt), std::string(""));
+}
+
+// Variante plus fine : quand seul le contenu change, la queue déjà propre
+// ne doit pas être réeffacée pour rien — le drapeau « frame non vide » ne
+// doit pas être mis par une queue qui n'avait pas besoin d'être repeinte.
+TEST(diff_does_not_repaint_an_unchanged_tail_when_content_changes) {
+  Surface s(6, 1);
+  s.root().text(0, 0, "ab", Style{});
+  Differ d(tc());
+  d.frame(s, std::nullopt);
+
+  s.root().put(0, 0, U'Z', Style{});
+  CHECK_EQ(d.frame(s, std::nullopt),
+           std::string("\033[?25l\033[0m\033[1;1HZ\033[1;1H"));
+}
