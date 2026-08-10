@@ -17,12 +17,22 @@ namespace sshos {
 // est exactement l'inverse de la fonctionnalité recherchée.
 //
 // argv est arbitraire, mais le petit-enfant ne démarre PAS avec les fds
-// hérités de l'appelant : 0/1/2 sont inconditionnellement redirigés vers
-// /dev/null juste avant l'execv. Un appelant qui compterait faire hériter
-// un fd précis à argv (tube de disponibilité, journal) via 0/1/2 se le
-// verra donc retiré et remplacé -- et si l'appelant garde de son côté
-// l'autre extrémité d'un tube dont la lecture vient d'être ainsi fermée,
-// un write() ultérieur sur cette extrémité lève SIGPIPE.
+// hérités de l'appelant dans le cas courant : 0/1/2 sont redirigés vers
+// /dev/null juste avant l'execv, dès que /dev/null est ouvrable. Un
+// appelant qui compterait faire hériter un fd précis à argv (tube de
+// disponibilité, journal) via 0/1/2 se le verra donc, dans ce cas, retiré
+// et remplacé -- et si l'appelant garde de son côté l'autre extrémité d'un
+// tube dont la lecture vient d'être ainsi fermée, un write() ultérieur sur
+// cette extrémité lève SIGPIPE.
+//
+// Repli si /dev/null est indisponible (chroot dégradé, par exemple) : voir
+// redirect_std_to_devnull() dans daemonize.cpp. Les fds 0/1/2 restent alors
+// simplement ceux hérités de l'appelant -- ni redirection ni fermeture --
+// donc le risque de SIGPIPE ci-dessus ne se matérialise pas non plus dans
+// ce cas précis (rien n'a été fermé côté petit-enfant). Ce repli est un
+// sans-conséquence de dernier recours, pas une garantie : un appelant ne
+// doit pas en déduire qu'il peut compter sur l'un ou l'autre comportement,
+// seulement que /dev/null indisponible ne fait pas échouer le démon.
 //
 // Rend le pid de l'enfant intermédiaire ; l'appelant DOIT le récolter,
 // sinon il reste zombie. Attention à waitpid(-1, ...) : ce n'est pas une
