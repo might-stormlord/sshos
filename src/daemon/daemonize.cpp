@@ -27,6 +27,9 @@ void reset_signal_state() {
 
 void redirect_std_to_devnull() {
   const int null_fd = ::open("/dev/null", O_RDWR);
+  // Sans consequence si /dev/null est indisponible (chroot degrade, par
+  // exemple) : les fds 0/1/2 restent simplement ceux herites de l'appelant
+  // au lieu d'etre redecouples vers un point mort.
   if (null_fd < 0) return;
   ::dup2(null_fd, STDIN_FILENO);
   ::dup2(null_fd, STDOUT_FILENO);

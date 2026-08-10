@@ -103,6 +103,56 @@ struct SigIgnGuard {
   SigIgnGuard& operator=(const SigIgnGuard&) = delete;
 };
 
+// Filet de securite pour un rendez-vous FIFO : garantit que le lecteur
+// bloque en open() est libere meme si le test sort tot -- un REQUIRE
+// echoue entre le mkfifo et la liberation normale plus loin dans la
+// fonction. Sans ca, le petit-enfant reste bloque a vie dans open(),
+// invisible : aucun fichier residuel (le mkfifo a deja ete efface par
+// l'UnlinkGuard correspondant), et plus aucun moyen de le reveiller.
+//
+// release() porte la meme logique bornee (O_NONBLOCK + tentatives
+// limitees) que l'ancien code du chemin heureux, qu'elle remplace : elle
+// s'appelle explicitement au bon moment dans le corps du test, et se
+// desarme aussitot apres, qu'elle ait reussi ou non -- un second appel
+// (depuis le destructeur, en filet de securite) ne retente donc rien. Ce
+// desarmement est ce qui evite d'ajouter du delai au chemin heureux :
+// sans lui, le destructeur retenterait aveuglement les tentatives bornees
+// alors que le petit-enfant, deja libere, n'est plus lecteur -- 200 x
+// 20 ms perdues a chaque execution reussie. Reste bornee meme si le
+// petit-enfant n'a jamais demarre (execv en echec, ou spawn_detached() a
+// echoue avant meme de forker) : il n'y aura alors jamais de lecteur, et
+// les tentatives s'epuisent normalement plutot que de bloquer
+// indefiniment.
+//
+// Ne leve jamais : appelable depuis un destructeur, elle ignore
+// silencieusement un echec d'ouverture ou d'ecriture -- il n'y a de toute
+// facon personne a qui le rapporter depuis la ou elle peut s'executer.
+class FifoReleaseGuard {
+ public:
+  explicit FifoReleaseGuard(std::string path) : path_(std::move(path)) {}
+  ~FifoReleaseGuard() { release(); }
+
+  bool release() {
+    if (!armed_) return true;
+    armed_ = false;
+    int fd = -1;
+    for (int i = 0; i < 200 && fd < 0; ++i) {
+      fd = ::open(path_.c_str(), O_WRONLY | O_NONBLOCK);
+      if (fd < 0) ::usleep(20 * 1000);
+    }
+    if (fd < 0) return false;
+    sshos::Fd write_end(fd);
+    return ::write(write_end.get(), "g\n", 2) == 2;
+  }
+
+  FifoReleaseGuard(const FifoReleaseGuard&) = delete;
+  FifoReleaseGuard& operator=(const FifoReleaseGuard&) = delete;
+
+ private:
+  std::string path_;
+  bool armed_ = true;
+};
+
 }  // namespace
 
 // Quatre propriétés en un test : l'intermédiaire meurt tout de suite, le
@@ -121,6 +171,23 @@ TEST(daemonize_detaches_the_grandchild) {
   UnlinkGuard marker_guard(marker);
   UnlinkGuard fifo_guard(fifo);
   UnlinkGuard hold_fifo_guard(hold_fifo);
+
+  // Filet de securite pour les deux rendez-vous (voir FifoReleaseGuard
+  // ci-dessus) : si un REQUIRE echoue avant la liberation normale plus
+  // bas, ces destructeurs liberent le petit-enfant a la place. Ordre de
+  // declaration significatif, deux fois :
+  //  - Apres les UnlinkGuard correspondants, pour que la liberation
+  //    (destructeur execute en premier, ordre inverse de declaration) ait
+  //    lieu AVANT que le chemin de la FIFO ne soit efface -- sinon
+  //    l'open() par chemin du destructeur echouerait ENOENT.
+  //  - hold_release avant fifo_release, pour que le destructeur de
+  //    fifo_release s'execute EN PREMIER (toujours l'ordre inverse) :
+  //    le petit-enfant ne peut atteindre `read y < hold_fifo` qu'apres
+  //    avoir franchi `read x < fifo`, donc liberer hold_fifo avant fifo
+  //    dans un scenario ou aucun des deux rendez-vous normaux n'a encore
+  //    eu lieu ne debloquerait rien : le lecteur n'y est pas encore.
+  FifoReleaseGuard hold_release(hold_fifo);
+  FifoReleaseGuard fifo_release(fifo);
 
   // Synchronisation par tube nomme (FIFO) plutot que par sleep + pari
   // d'horloge murale : ce projet a deja retire un tel pari ailleurs pour la
@@ -162,14 +229,44 @@ TEST(daemonize_detaches_the_grandchild) {
   // le temps d'interroger sa session (cf. plus bas) sans deviner de delai.
   REQUIRE(::mkfifo(hold_fifo.c_str(), 0600) == 0);
 
-  // $PPID et $$ tous deux vers le marqueur : $PPID sert aux CHECK de
-  // reparentage ci-dessous (c'est le pid de qui a recueilli le petit-enfant
-  // apres la mort de l'intermediaire, PAS le pid du petit-enfant lui-meme) ;
-  // $$ est le pid du petit-enfant en tant que tel, celui dont la session
-  // doit etre interrogee plus bas.
+  // Le ppid vivant (relu dans /proc/$$/stat, PAS $PPID) et $$ tous deux
+  // vers le marqueur : le premier sert aux CHECK de reparentage ci-dessous
+  // (c'est le pid de qui a recueilli le petit-enfant apres la mort de
+  // l'intermediaire, PAS le pid du petit-enfant lui-meme) ; $$ est le pid
+  // du petit-enfant en tant que tel, celui dont la session doit etre
+  // interrogee plus bas -- lui ne change pas, seul le choix pour le ppid
+  // est en cause ci-dessous.
+  //
+  // $PPID a ete essaye en premier et s'est revele source d'un flake :
+  // reproduit empiriquement a 1 echec sur ~20 executions du seul test
+  // daemonize, toujours sur le CHECK de reparentage plus bas. Cause :
+  // $PPID est FIGE a l'initialisation du shell, il n'est pas relu a chaque
+  // usage. Sonde independante : un /bin/sh dont le parent meurt juste
+  // apres son demarrage rapporte un $PPID qui reste egal au pid deja mort,
+  // alors que le ppid reel lu dans /proc a deja bascule sur 1. Course
+  // precise ici : l'intermediaire fait _exit() un seul syscall apres le
+  // second fork() (daemonize.cpp), pendant que le petit-enfant doit encore
+  // traverser chdir, trois dup2, la boucle de reset_signal_state(), puis
+  // execv, puis l'initialisation de dash -- c'est a ce moment-la que $PPID
+  // se fige. Le plus souvent l'intermediaire gagne largement et $PPID vaut
+  // deja 1, mais pas toujours : un futur lecteur qui verrait $PPID
+  // reapparaitre ici doit savoir que c'est faux, pas juste rare.
+  //
+  // Corrige sans rien ajouter au dispositif existant : le script bloque
+  // sur `read x < fifo` avant d'ecrire le marqueur, et REQUIRE(mid > 0)
+  // puis waitpid(mid, ...) plus haut s'executent avant l'ouverture de
+  // cette FIFO -- donc au moment precis ou le marqueur s'ecrit,
+  // l'intermediaire est deja garanti mort ET recolte. Relire le ppid en
+  // direct dans /proc/$$/stat (quatrieme champ) au lieu de $PPID rend la
+  // propriete exacte par construction, comme le reste de ce test -- meme
+  // raisonnement que celui qui a fait preferer une FIFO a un sleep.
+  // `cut -d' ' -f4` suppose que le champ comm (deuxieme champ, entre
+  // parentheses) ne contient aucune espace : vrai pour "sh" (comm vaut
+  // "(sh)"), donc sur pour ce script precis.
   const pid_t mid = sshos::spawn_detached(
-      {"/bin/sh", "-c", "read x < " + fifo + "; echo $PPID $$ > " + marker +
-                             "; read y < " + hold_fifo});
+      {"/bin/sh", "-c",
+       "read x < " + fifo + "; echo $(cut -d' ' -f4 /proc/$$/stat) $$ > " +
+           marker + "; read y < " + hold_fifo});
 
   // mid <= 0 ne doit jamais atteindre le waitpid ci-dessous : waitpid(-1, ...)
   // n'est pas une erreur, c'est une attente sur N'IMPORTE QUEL enfant, donc
@@ -192,20 +289,14 @@ TEST(daemonize_detaches_the_grandchild) {
 
   // Signal de depart : ouvrir la FIFO en ecriture debloque l'ouverture en
   // lecture du petit-enfant ; ecrire puis fermer lui livre une ligne suivie
-  // d'EOF, que `read` consomme avec succes. O_NONBLOCK + nouvelles
-  // tentatives bornees evite un blocage infini si le petit-enfant n'a
-  // jamais pu demarrer (execv en echec, par exemple) sans pour autant
+  // d'EOF, que `read` consomme avec succes. FifoReleaseGuard::release()
+  // porte la logique bornee (O_NONBLOCK + tentatives limitees, voir sa
+  // definition plus haut) qui evite un blocage infini si le petit-enfant
+  // n'a jamais pu demarrer (execv en echec, par exemple) sans pour autant
   // parier sur un delai d'execution normal -- seul le cas pathologique est
-  // borne, pas le cas nominal.
-  int fifo_fd = -1;
-  for (int i = 0; i < 200 && fifo_fd < 0; ++i) {
-    fifo_fd = ::open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
-    if (fifo_fd < 0) ::usleep(20 * 1000);
-  }
-  REQUIRE(fifo_fd >= 0);
-  sshos::Fd fifo_write(fifo_fd);
-  REQUIRE(::write(fifo_write.get(), "g\n", 2) == 2);
-  fifo_write.reset();
+  // borne, pas le cas nominal. Le meme appel desarme le filet de securite
+  // du destructeur : pas de double tentative.
+  REQUIRE(fifo_release.release());
 
   CHECK(wait_for_file(marker, 100));
 
@@ -249,16 +340,11 @@ TEST(daemonize_detaches_the_grandchild) {
 
   // Libere le petit-enfant : sans ce second signal de depart, il resterait
   // bloque indefiniment sur hold_fifo, reparente a init -- une fuite de
-  // processus que le test ne doit pas causer lui-meme. Meme technique
-  // qu'au premier rendez-vous : O_NONBLOCK + tentatives bornees.
-  int hold_fd = -1;
-  for (int i = 0; i < 200 && hold_fd < 0; ++i) {
-    hold_fd = ::open(hold_fifo.c_str(), O_WRONLY | O_NONBLOCK);
-    if (hold_fd < 0) ::usleep(20 * 1000);
-  }
-  REQUIRE(hold_fd >= 0);
-  sshos::Fd hold_write(hold_fd);
-  REQUIRE(::write(hold_write.get(), "g\n", 2) == 2);
+  // processus que le test ne doit pas causer lui-meme. Meme guard qu'au
+  // premier rendez-vous (FifoReleaseGuard::release(), O_NONBLOCK +
+  // tentatives bornees), et meme desarmement du filet de securite du
+  // destructeur.
+  REQUIRE(hold_release.release());
 }
 
 // Le masque de signaux survit à execve : un SIGCHLD encore bloqué casse

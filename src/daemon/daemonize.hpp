@@ -16,8 +16,20 @@ namespace sshos {
 // Aucun PR_SET_PDEATHSIG — il tuerait le démon à la mort du client, ce qui
 // est exactement l'inverse de la fonctionnalité recherchée.
 //
+// argv est arbitraire, mais le petit-enfant ne démarre PAS avec les fds
+// hérités de l'appelant : 0/1/2 sont inconditionnellement redirigés vers
+// /dev/null juste avant l'execv. Un appelant qui compterait faire hériter
+// un fd précis à argv (tube de disponibilité, journal) via 0/1/2 se le
+// verra donc retiré et remplacé -- et si l'appelant garde de son côté
+// l'autre extrémité d'un tube dont la lecture vient d'être ainsi fermée,
+// un write() ultérieur sur cette extrémité lève SIGPIPE.
+//
 // Rend le pid de l'enfant intermédiaire ; l'appelant DOIT le récolter,
-// sinon il reste zombie.
+// sinon il reste zombie. Attention à waitpid(-1, ...) : ce n'est pas une
+// erreur, c'est une attente sur N'IMPORTE QUEL enfant de l'appelant — un
+// pid non vérifié (notamment le -1 que cette fonction elle-même peut
+// rendre, voir plus bas) qui atteindrait waitpid ferait récolter en
+// silence un processus sans rapport plutôt que de signaler l'échec.
 //
 // Échec : rend -1, sans lever. Deux situations seulement produisent -1 --
 // argv vide (rien à exécuter) et l'échec du premier fork() (EAGAIN/ENOMEM,
