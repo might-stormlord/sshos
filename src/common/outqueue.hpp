@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace sshos {
 
@@ -17,6 +18,32 @@ class OutQueue {
   // commentaire de take_overflow() ci-dessous pour ce que chaque valeur
   // implique côté appelant.
   enum class Overflow { None, Clean, Dirty };
+
+  // GARDE-FOU STRUCTUREL, pas seulement documentaire : l'ordre de
+  // déclaration ci-dessus doit rester None < Clean < Dirty. La fusion
+  // monotone de la sévérité, dans OutQueue::push() (src/common/outqueue.cpp)
+  // -- `if (this_rejection > overflow_) overflow_ = this_rejection;` -- ne
+  // calcule le pire des deux rejets que PARCE QUE les valeurs sous-jacentes
+  // de l'enum croissent dans cet ordre précis ; un simple commentaire à cet
+  // endroit s'est déjà montré insuffisant (voir la relecture de ce round,
+  // qui a réordonné l'enum en { None, Dirty, Clean } et compilé sans le
+  // moindre avertissement sous -Wall -Wextra -Wpedantic -Werror). Si cette
+  // assertion casse : soit tu as réordonné/inséré/retiré une valeur par
+  // erreur et il faut restaurer None, Clean, Dirty, soit c'est volontaire et
+  // il faut alors changer la fusion de push() pour ne plus dépendre de
+  // l'ordre de déclaration (par ex. une fonction de sévérité explicite au
+  // lieu de l'opérateur `>` intégré).
+  static_assert(
+      static_cast<std::underlying_type_t<Overflow>>(Overflow::None) <
+              static_cast<std::underlying_type_t<Overflow>>(Overflow::Clean) &&
+          static_cast<std::underlying_type_t<Overflow>>(Overflow::Clean) <
+              static_cast<std::underlying_type_t<Overflow>>(Overflow::Dirty),
+      "OutQueue::Overflow doit rester déclaré dans l'ordre None < Clean < "
+      "Dirty : OutQueue::push() (src/common/outqueue.cpp) fusionne la "
+      "sévérité accumulée avec `if (this_rejection > overflow_) overflow_ = "
+      "this_rejection;`, une comparaison directe des valeurs de l'enum qui "
+      "n'est correcte que si l'ordre de déclaration encode la sévérité "
+      "croissante.");
 
   explicit OutQueue(size_t ceiling) : ceiling_(ceiling) {}
 
