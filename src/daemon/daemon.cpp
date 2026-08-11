@@ -111,13 +111,33 @@ int run_daemon(std::string_view socket_name) {
     ::epoll_ctl(ep.get(), EPOLL_CTL_DEL, client->fd.get(), nullptr);
     closed_this_batch.push_back(client->fd.get());
     client.reset();
+    // Sans client, plus rien n'est rendable : aucun dirty_ résiduel ne doit
+    // survivre à son départ (voir FrameClock::reset() pour le scénario
+    // précis que ça évite — Input/Resize reçu avant tout Hello, qui a
+    // laissé dirty_ vrai sans jamais être consommé par note_render()).
+    clock.reset();
   };
 
   while (running) {
     closed_this_batch.clear();
 
     epoll_event evs[16];
-    const int timeout = clock.delay_ms(FrameClock::Clock::now());
+    // Invariant : le démon ne doit jamais scruter activement. S'il n'y a
+    // rien de rendable — pas de client, ou un client dont le differ n'est
+    // pas encore construit (avant Hello, cf. la branche Hello plus bas) —
+    // la seule source d'information utile est un évènement epoll : on
+    // bloque indéfiniment (timeout -1) plutôt que de laisser
+    // clock.delay_ms() commander un réveil immédiat qu'aucune composition
+    // ne viendra jamais consommer (le bloc de composition ci-dessous est
+    // lui-même gardé par `client && client->differ`, seul site qui appelle
+    // note_render() et efface dirty_). Posée ici, au site de consommation
+    // du délai — plutôt que seulement en gardant les appels à
+    // mark_dirty() dans les branches Input/Resize ci-dessous — cette garde
+    // protège l'invariant même si un futur appelant de mark_dirty()
+    // oubliait sa propre garde : c'est la panne réellement observée (voir
+    // le rapport de tâche), pas une hypothèse d'école.
+    const bool renderable = client && client->differ;
+    const int timeout = renderable ? clock.delay_ms(FrameClock::Clock::now()) : -1;
     const int n = ::epoll_wait(ep.get(), evs, 16, timeout);
     if (n < 0) {
       if (errno == EINTR) continue;
@@ -185,6 +205,27 @@ int run_daemon(std::string_view socket_name) {
       // A2 : un événement pour un descripteur déjà fermé dans ce lot est
       // périmé par construction, même si son numéro a été redonné à un
       // client tout neuf par l'accept ci-dessus.
+      //
+      // Couverture de test (revue round 1) : un test boîte noire déterministe
+      // a été tenté (geler le démon avec SIGSTOP, faire coexister une
+      // fermeture de descripteur et une connexion entrante en attente dans le
+      // même lot, puis SIGCONT) — voir daemon_handles_client_takeover_with_
+      // reused_fd_in_one_epoll_batch dans tests/test_session.cpp. Une strace
+      // du démon confirme que la réutilisation du numéro de descripteur se
+      // produit bel et bien (accept4() renvoie le même entier que le close()
+      // qui précède, dans le lot). Mais avec la topologie actuelle — un seul
+      // client à la fois, un seul accept() par tour — chaque numéro de
+      // descripteur n'apparaît jamais plus d'une fois dans evs[] pour un même
+      // epoll_wait() : l'entrée périmée que cette garde est censée filtrer
+      // n'a tout simplement aucune occasion d'exister tant que la boucle ne
+      // traite pas plusieurs connexions par tour ni plusieurs clients à la
+      // fois. Remplacer cette condition par `if (false)` ne fait donc échouer
+      // ni la suite existante ni le nouveau test de prise de relais : ce
+      // n'est pas un défaut du test, c'est que le code défensif ici précède
+      // la fonctionnalité qui le rendrait atteignable. Gardée telle quelle
+      // (elle protège correctement une extension future), documentée plutôt
+      // que retirée ou couverte par un test qui simulerait artificiellement
+      // ce qu'epoll ne produit pas dans les faits.
       if (std::find(closed_this_batch.begin(), closed_this_batch.end(), fd) !=
           closed_this_batch.end()) {
         continue;

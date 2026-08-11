@@ -8,12 +8,14 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <optional>
 #include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include "common/fd.hpp"
 #include "common/net.hpp"
@@ -672,4 +674,268 @@ TEST(end_to_end_attach_render_detach_kill) {
     threw = true;
   }
   CHECK(threw);
+}
+
+// ---------------------------------------------------------------------
+// Rond 1 du correctif Critique : le démon ne doit plus jamais scruter
+// activement (voir daemon.cpp ~ligne 125-140 et FrameClock::reset() dans
+// frameclock.hpp pour le mécanisme retenu, et le rapport de tâche pour le
+// diagnostic complet). Les deux tests qui suivent couvrent respectivement
+// le symptôme régressé lui-même (boucle active mesurée en temps CPU réel)
+// et le chemin de câblage qui n'était couvert par aucun test existant
+// (Input reçu sur le fil jusqu'à Session::on_input()).
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Lit utime+stime (champs 14 et 15, indices 1-based du format proc(5)) du
+// processus pid, en jiffies noyau -- même idiome que extract_field() dans
+// tests/test_daemonize.cpp pour lire /proc/*, adapté ici au format
+// espace-séparé de /proc/*/stat plutôt qu'au format « label: valeur » de
+// /proc/*/status. Le champ comm (2e champ, entre parenthèses) peut contenir
+// des espaces ou des parenthèses : on repère la DERNIÈRE ')' de la ligne
+// plutôt que de découper naïvement depuis le début -- même précaution que
+// documentée dans le rapport de tâche.
+long read_cpu_ticks(pid_t pid) {
+  std::ifstream in("/proc/" + std::to_string(pid) + "/stat");
+  const std::string content((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+  const auto paren = content.rfind(')');
+  if (paren == std::string::npos || paren + 2 > content.size()) return -1;
+  std::istringstream rest(content.substr(paren + 2));
+  std::vector<std::string> fields;
+  std::string field;
+  while (rest >> field) fields.push_back(field);
+  if (fields.size() < 13) return -1;
+  return std::stol(fields[11]) + std::stol(fields[12]);
+}
+
+}  // namespace
+
+// Test discriminant exigé par la tâche : observe directement le symptôme
+// régressé (consommation CPU réelle du VRAI processus démon), pas
+// seulement l'absence de plantage. Reproduit le scénario exact du rapport
+// de tâche : un client envoie un seul message Resize, SANS jamais envoyer
+// Hello, puis se déconnecte. Contre le code d'avant ce correctif (avant le
+// rond 1), ce test échoue -- mesuré directement en repartant du commit de
+// base de cette tâche (voir rapport de tâche pour les chiffres complets,
+// de l'ordre de 100 % d'un cœur) ; contre le code corrigé, il passe (0
+// jiffie mesuré sur la même machine).
+//
+// Laisser le démon se réveiller et lire les 9 octets AVANT de fermer le
+// socket client est délibéré, pas accessoire : un close() immédiat ferait
+// courir la fermeture contre epoll_wait() du démon, et le noyau peut alors
+// signaler EPOLLIN|EPOLLHUP en une seule fois. daemon.cpp traite EPOLLHUP
+// avant EPOLLIN (continue anticipé, ~ligne 217) : les octets ne seraient
+// alors jamais lus ni décodés, donc mark_dirty() jamais appelé, donc le
+// bogue jamais exercé -- piège rencontré et documenté dans le rapport de
+// tâche lors de la reproduction manuelle de ce scénario.
+//
+// Le seuil est délibérément lâche plutôt que serré : sysconf(_SC_CLK_TCK)
+// convertit la fenêtre de mesure en un budget de jiffies, et le seuil ne
+// retient qu'un quart de ce que consommerait un cœur occupé en continu sur
+// cette même fenêtre -- alors qu'une boucle active en consomme ~100 %.
+// Cette marge reste confortable sous ASan+UBSan (Debug) comme en Release,
+// y compris sur une machine chargée, sans jamais supposer une fréquence
+// d'horloge noyau particulière (délibérément pas de 100 Hz codé en dur).
+TEST(daemon_does_not_busy_loop_after_resize_without_hello) {
+  const std::string name = unique_name() + "-busyloop";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  const long ticks_per_sec = ::sysconf(_SC_CLK_TCK);
+  REQUIRE(ticks_per_sec > 0);
+
+  // Fenêtre de mesure et seuil : voir commentaire ci-dessus.
+  constexpr int kSampleMs = 600;
+  const long budget_if_pegged = ticks_per_sec * kSampleMs / 1000;
+  const long threshold = std::max<long>(1, budget_if_pegged / 4);
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+
+  REQUIRE(
+      send_all(client.get(), sshos::encode(sshos::Msg{sshos::Resize{80, 24}})));
+  // Voir le commentaire au-dessus du test pour la raison de ce délai avant
+  // fermeture.
+  ::usleep(100 * 1000);
+
+  // Phase 1 : le client sonde reste connecté (fd toujours ouvert côté
+  // test), comme dans la mesure « après Resize seul, sonde déconnectée »
+  // du rapport de tâche -- nommée ainsi côté démon parce que rien n'a
+  // encore été lu de plus sur cette connexion, pas parce que le socket est
+  // fermé à cet instant précis.
+  const long before1 = read_cpu_ticks(daemon.pid());
+  REQUIRE(before1 >= 0);
+  ::usleep(kSampleMs * 1000);
+  const long after1 = read_cpu_ticks(daemon.pid());
+  REQUIRE(after1 >= 0);
+  CHECK(after1 - before1 < threshold);
+
+  // Phase 2 : le client se déconnecte réellement -- le cas que le rapport
+  // de tâche isole explicitement (dirty_ resté vrai côté démon, plus aucun
+  // client pour jamais le consommer). Le correctif doit couvrir aussi bien
+  // la connexion encore ouverte que sa disparition ; voir
+  // FrameClock::reset() et son appel dans drop_client() (daemon.cpp).
+  client.reset();
+  ::usleep(50 * 1000);
+
+  const long before2 = read_cpu_ticks(daemon.pid());
+  REQUIRE(before2 >= 0);
+  ::usleep(kSampleMs * 1000);
+  const long after2 = read_cpu_ticks(daemon.pid());
+  REQUIRE(after2 >= 0);
+  CHECK(after2 - before2 < threshold);
+}
+
+// Second test exigé par la tâche : jusqu'ici, aucun test ne passait par le
+// chemin réel Input sur le fil -> dec.next() -> client->input.feed() ->
+// InputParser::next() -> session.on_input() (daemon.cpp ~ligne 263-266) --
+// le seul test existant pour Ctrl+Q (session_quits_on_ctrl_q, plus haut)
+// appelle Session::on_input() directement, court-circuitant exactement la
+// zone qui portait le bogue Critique du rond 1 (mark_dirty() y est appelé
+// sans garde, tout comme dans la branche Resize). Celui-ci envoie un VRAI
+// message Input encodé sur un VRAI socket vers un VRAI démon, et observe un
+// effet côté démon impossible à obtenir autrement qu'en traversant tout ce
+// chemin : l'arrêt spontané du démon (wants_quit() -> running = false ->
+// sortie propre de run_daemon()), SANS le moindre SIGTERM envoyé par ce
+// test -- seul le Ctrl+Q décodé depuis l'octet brut 0x11 peut produire cet
+// effet (InputParser::step(), input/parser.cpp : tout octet < 0x20 devient
+// Ctrl+lettre, ici 'a' + 0x11 - 1 = 'q').
+//
+// Nature discriminante vérifiée directement (voir rapport de tâche) : en
+// commentant temporairement l'appel à session.on_input() dans la boucle
+// `while (auto e = client->input.next())` de daemon.cpp (tout en laissant
+// InputParser::feed()/next() intacts, pour isoler précisément le dernier
+// maillon du chemin), ce test échoue (délai de 2 s épuisé, le démon ne
+// sort jamais de lui-même) alors que session_quits_on_ctrl_q continue de
+// passer sans changement -- preuve que les deux tests ne couvrent pas la
+// même zone, et que celui-ci couvre bien le maillon jusque-là non testé.
+TEST(daemon_quits_on_ctrl_q_received_over_the_wire) {
+  const std::string name = unique_name() + "-wire-input";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+  CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  REQUIRE(send_all(client.get(),
+                    sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));
+
+  int status = 0;
+  bool exited = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    const pid_t r = ::waitpid(daemon.pid(), &status, WNOHANG);
+    if (r == daemon.pid()) {
+      exited = true;
+      break;
+    }
+    ::usleep(10 * 1000);
+  }
+  REQUIRE(exited);
+  CHECK(WIFEXITED(status));
+  CHECK_EQ(WEXITSTATUS(status), 0);
+}
+
+// ---------------------------------------------------------------------
+// A2 (couverture au meilleur effort, cf. rapport de tâche) : le garde-fou
+// anti-réutilisation de descripteur au sein d'un même lot epoll
+// (closed_this_batch, daemon.cpp ~lignes 103/112/117/208-231) n'avait
+// jusqu'ici aucune couverture -- remplacer sa condition par `if (false)`
+// laissait passer toute la suite.
+//
+// Un test a été tenté pour forcer le scénario que le garde-fou est censé
+// prévenir : un client A enregistré auprès d'epoll sous un descripteur X,
+// fermé PENDANT que le démon est gelé (SIGSTOP), en même temps qu'un
+// client B se connecte (l'écouteur devient prêt) -- de façon à ce qu'un
+// seul epoll_wait() rende les deux évènements dans le MÊME lot. Une
+// strace du démon (voir rapport de tâche) confirme que ce montage
+// fonctionne et produit bien une VRAIE réutilisation de X : quand
+// l'évènement de A (HUP) est traité avant celui de l'écouteur, drop_client
+// ferme X, puis accept4() -- appelé juste après, dans le traitement de
+// l'évènement de l'écouteur -- se voit effectivement redonner X par le
+// noyau (plus petit numéro libre).
+//
+// Mais ce même strace montre aussi pourquoi ce test ne peut pas
+// discriminer le garde-fou avec la boucle telle qu'elle existe
+// aujourd'hui : epoll_wait() ne rend jamais deux entrées pour le même
+// numéro de descripteur au sein d'un seul appel (chaque descripteur prêt
+// n'apparaît qu'une fois par lot), et la boucle du démon n'accepte qu'UNE
+// connexion par tour de la table des évènements (un seul client à la
+// fois : `client` est un pointeur unique, pas une collection). L'entrée
+// périmée que closed_this_batch est censé filtrer -- une DEUXIÈME
+// référence à X, postérieure à sa réutilisation, dans le MÊME evs[] --
+// n'a donc structurellement aucune occasion d'exister : dès que
+// l'évènement de A a été consommé (une seule fois), il ne reste plus rien
+// à filtrer pour ce numéro dans ce lot. Ceci a été vérifié dans les DEUX
+// ordres d'arrivée possibles (écouteur avant X, et X avant écouteur) --
+// aucun des deux ne produit de doublon. Remplacer la condition du
+// garde-fou par `if (false)` ne fait donc échouer ni la suite existante
+// ni le test ci-dessous, qui pourtant force la coexistence des deux
+// évènements dans un seul lot ET la réutilisation réelle du descripteur :
+// ce n'est pas un défaut du test, la fonctionnalité qui rendrait le
+// garde-fou atteignable (vidage de plusieurs connexions en attente par
+// tour, ou plusieurs clients simultanés) n'existe simplement pas encore
+// dans ce jalon. Voir le rapport de tâche pour le détail des deux
+// montages strace qui ont mené à cette conclusion.
+//
+// Le test est conservé malgré cette absence de discrimination : il
+// couvre un scénario réel et non trivial (relais vers un nouveau client
+// dont le descriptor réutilise EXACTEMENT le numéro de l'ancien, y
+// compris le epoll_ctl DEL/ADD et le protocole applicatif qui suit), et
+// sa valeur de non-régression pour ce chemin de relais reste entière même
+// si le garde-fou n'est, pour l'instant, prouvé nécessaire par aucun test
+// boîte noire.
+TEST(daemon_handles_client_takeover_with_reused_fd_in_one_epoll_batch) {
+  const std::string name = unique_name() + "-fdreuse";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client_a = connect_retry(name);
+  REQUIRE(client_a.valid());
+
+  // Laisse le temps au démon d'accepter A et de l'enregistrer auprès
+  // d'epoll (accept4() + epoll_ctl(ADD), synchrone et rapide dans sa
+  // boucle) avant de le geler ci-dessous -- sans quoi SIGSTOP pourrait le
+  // figer avant même que A ne soit un client epoll à part entière.
+  ::usleep(100 * 1000);
+
+  REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
+
+  // Pendant que le démon est gelé (aucune progression possible sur aucun
+  // appel système, quel qu'il soit -- c'est ce qui rend déterministe la
+  // coexistence des deux évènements dans un seul lot, malgré l'ordre
+  // normalement non spécifié d'epoll_wait()) : A ferme d'abord son
+  // descripteur X (devient prêt en HUP), PUIS B se connecte (l'écouteur
+  // devient prêt à son tour). Cet ordre précis est celui qui, vérifié par
+  // strace, fait effectivement réutiliser X par accept4() pour B --
+  // l'ordre inverse (écouteur avant X) laisse le noyau attribuer un
+  // numéro neuf à B et n'exerce donc rien d'intéressant.
+  client_a.reset();
+  sshos::Fd client_b = connect_retry(name);
+  REQUIRE(client_b.valid());
+
+  REQUIRE(::kill(daemon.pid(), SIGCONT) == 0);
+
+  // Preuve retenue : B doit survivre intact et rester pleinement
+  // fonctionnel après ce relais à descripteur réutilisé -- pas seulement
+  // « pas immédiatement fermé ». Un aller Hello/Welcome complet le
+  // démontre.
+  REQUIRE(send_all(client_b.get(),
+                    sshos::encode(sshos::Msg{make_hello(80, 24)})));
+  sshos::Decoder dec;
+  auto welcome = recv_one(client_b.get(), dec, 3000);
+  REQUIRE(welcome.has_value());
+  CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 }
