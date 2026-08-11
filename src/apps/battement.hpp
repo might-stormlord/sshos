@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "app/app.hpp"
 
@@ -18,6 +19,7 @@ class Battement : public App {
   void attach(Host& host) override;
   void render(View v) override;
   IoStatus on_io(uint64_t token, uint32_t events) override;
+  void on_command(std::string_view cmd) override;
   Size min_size() const override { return {16, 2}; }
 
   // Écrit un octet dans le tuyau. Appelée par les tests et par le menu.

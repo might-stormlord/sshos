@@ -342,3 +342,28 @@ TEST(battement_asks_for_a_repaint_when_it_reads) {
   CHECK_EQ(app->beats(), 1);
   CHECK(dirty);
 }
+
+// Les deux commandes du menu. La session ne sait pas ce qu'elles veulent
+// dire -- elle les tend à l'application focalisée, qui les comprend.
+TEST(battement_obeys_its_menu_commands) {
+  FakeRegistrar reg;
+  uint32_t gen = 16;
+  auto w = make_window(9, std::make_unique<Battement>(), reg, gen);
+  w->app->attach(host_of(*w));
+  REQUIRE_EQ(reg.watches.size(), static_cast<size_t>(1));
+  auto* app = static_cast<Battement*>(w->app.get());
+
+  app->on_command("beat");
+  app->on_command("beat");
+  CHECK(host_of(*w).deliver(reg.watches[0].key, EPOLLIN) == IoStatus::Ok);
+  CHECK_EQ(app->beats(), 2);
+
+  // Une commande inconnue ne fait rien, et surtout ne casse rien.
+  app->on_command("bruit");
+  CHECK(app->source_alive());
+
+  app->on_command("cut");
+  CHECK(host_of(*w).deliver(reg.watches[0].key, EPOLLIN | EPOLLHUP) ==
+        IoStatus::Closed);
+  CHECK(!app->source_alive());
+}

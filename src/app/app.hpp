@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "input/events.hpp"
@@ -62,6 +63,12 @@ class App {
   virtual void on_mouse(const MouseEvent& m) { (void)m; }
 
   virtual void on_resize(Size s) { (void)s; }
+
+  // Une commande nommée venue du menu. Le bureau ne connaît pas les
+  // applications ; il leur transmet une chaîne, et celle qui la comprend
+  // agit. C'est ce qui évite au menu d'avoir à connaître le TYPE de
+  // l'application focalisée -- et donc à la session de dépendre de apps/.
+  virtual void on_command(std::string_view cmd) { (void)cmd; }
 
   virtual IoStatus on_io(uint64_t token, uint32_t events) {
     (void)token;

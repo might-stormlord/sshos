@@ -20,6 +20,11 @@ struct Window {
   WindowId id = 0;
   std::string title;
 
+  // L'identifiant de catalogue dont cette fenêtre est née. Le panneau s'en
+  // sert pour donner le focus à une application déjà ouverte plutôt que
+  // d'en lancer une seconde.
+  std::string app_id;
+
   // user_rect est la géométrie VOULUE, en mode Normal, jamais écrasée par
   // une contrainte d'affichage. display_rect en est la projection dans la
   // zone de travail du moment. C'est cette séparation qui rend le

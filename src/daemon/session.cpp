@@ -48,6 +48,190 @@ Session::Session(Platform& plat, FdRegistrar& fds, int, int)
   theme_ = Theme::defaults().for_profile(out_);
 }
 
+std::string Session::take_out_of_band() {
+  std::string out;
+  out.swap(out_of_band_);
+  return out;
+}
+
+bool Session::take_repaint() {
+  const bool r = repaint_;
+  repaint_ = false;
+  return r;
+}
+
+// Ouvre l'application demandée, ou rappelle celle qui l'est déjà : cliquer
+// une épinglée deux fois de suite ne doit pas empiler deux instances.
+void Session::focus_or_open(const std::string& app_id) {
+  for (const auto& up : wm_.stack()) {
+    if (up->app_id != app_id) continue;
+    if (up->mode == WinMode::Minimized) {
+      wm_.set_mode(up->id, WinMode::Normal, last_work_);
+    }
+    wm_.focus(up->id);
+    dirty_ = true;
+    return;
+  }
+  open_from_catalog(app_id);
+  dirty_ = true;
+}
+
+void Session::run_menu(const std::string& id) {
+  menu_.close();
+  dirty_ = true;
+
+  const auto starts = [&id](const char* p) {
+    const std::string pre = p;
+    return id.size() > pre.size() && id.compare(0, pre.size(), pre) == 0;
+  };
+
+  if (starts("app:")) {
+    focus_or_open(id.substr(4));
+    return;
+  }
+  if (starts("panel:")) {
+    const std::string where = id.substr(6);
+    if (where == "top") panel_.set_edge(PanelEdge::Top);
+    if (where == "bottom") panel_.set_edge(PanelEdge::Bottom);
+    if (where == "left") panel_.set_edge(PanelEdge::Left);
+    if (where == "right") panel_.set_edge(PanelEdge::Right);
+    // Le panneau change d'épaisseur avec son bord : tout ce que le client
+    // croyait savoir de l'écran est faux.
+    repaint_ = true;
+    return;
+  }
+  if (starts("cmd:")) {
+    // La session ne sait pas ce que la commande veut dire, et c'est le
+    // but : elle la tend à l'application focalisée, qui la comprend ou
+    // l'ignore.
+    if (Window* w = wm_.find(wm_.focused())) w->app->on_command(id.substr(4));
+    return;
+  }
+  if (id == "session:quit") quit_ = true;
+}
+
+void Session::menu_key(const KeyEvent& k) {
+  switch (k.key) {
+    case Key::Escape:
+      menu_.close();
+      break;
+    case Key::Enter:
+      if (const MenuItem* it = menu_.selected()) {
+        run_menu(it->id);
+        return;
+      }
+      menu_.close();
+      break;
+    case Key::Up:
+      menu_.move(-1);
+      break;
+    case Key::Down:
+      menu_.move(1);
+      break;
+    case Key::Backspace:
+      menu_.backspace();
+      break;
+    case Key::Char:
+      if ((k.mods & mod::Ctrl) != 0) {
+        menu_.close();
+      } else {
+        menu_.type(k.ch);
+      }
+      break;
+    default:
+      break;
+  }
+  dirty_ = true;
+}
+
+void Session::do_action(Action a) {
+  dirty_ = true;
+
+  switch (a) {
+    case Action::OpenMenu:
+      menu_.open();
+      return;
+    case Action::ToggleMouse:
+      mouse_on_ = !mouse_on_;
+      // Pas de message de protocole pour ça : les séquences DEC voyagent
+      // dans le flux de trames, que le client recopie verbatim.
+      out_of_band_ += mouse_on_ ? "\033[?1002h\033[?1006h"
+                                : "\033[?1002l\033[?1006l";
+      return;
+    case Action::ForceRepaint:
+      repaint_ = true;
+      return;
+    case Action::NextWindow:
+      wm_.focus_next();
+      return;
+    case Action::PrevWindow:
+      wm_.focus_prev();
+      return;
+    default:
+      break;
+  }
+
+  Window* w = wm_.find(wm_.focused());
+  if (w == nullptr) return;
+
+  switch (a) {
+    case Action::LiteralLeader:
+      w->app->on_key(KeyEvent{Key::Char, leader_.leader(), mod::Ctrl});
+      return;
+    case Action::Close:
+      // Le dialogue modal arrive à la tâche 11. D'ici là, une application
+      // qui refuse de partir reste ouverte, sans rien dire.
+      if (w->app->can_close().allowed) close_window(*w);
+      return;
+    case Action::Minimize:
+      wm_.set_mode(w->id, WinMode::Minimized, last_work_);
+      return;
+    case Action::MaximizeToggle:
+      wm_.set_mode(w->id,
+                   w->mode == WinMode::Maximized ? WinMode::Normal
+                                                 : WinMode::Maximized,
+                   last_work_);
+      return;
+    case Action::FullscreenToggle:
+      wm_.set_mode(w->id,
+                   w->mode == WinMode::Fullscreen ? WinMode::Normal
+                                                  : WinMode::Fullscreen,
+                   last_work_);
+      // Le panneau s'escamote ou revient : le client ne peut pas le deviner
+      // d'un delta.
+      repaint_ = true;
+      return;
+    default:
+      break;
+  }
+
+  // Les huit derniers travaillent sur la géométrie voulue -- jamais sur la
+  // projection -- et sont bornés à la zone de travail, sans quoi une
+  // fenêtre poussée trop loin partirait hors de l'écran et demanderait
+  // autant de frappes pour revenir.
+  //
+  // Pas d'aimantation ici, contrairement au relâchement d'un glissement :
+  // la tolérance vaut une cellule et le pas clavier aussi, donc snap()
+  // annulerait chaque pas fait DEPUIS un bord -- la fenêtre y resterait
+  // collée pour toujours (défaut trouvé à la sonde, pas par un test).
+  // Aimanter sert à rattraper un geste approximatif ; une frappe est déjà
+  // exacte, et buter contre le bord par clamp_to donne le même résultat.
+  const Size fmin = frame_min(*w->app);
+  Rect r = w->user_rect;
+  switch (a) {
+    case Action::MoveLeft: --r.x; break;
+    case Action::MoveRight: ++r.x; break;
+    case Action::MoveUp: --r.y; break;
+    case Action::MoveDown: ++r.y; break;
+    case Action::GrowWidth: ++r.w; break;
+    case Action::ShrinkWidth: r.w = std::max(fmin.w, r.w - 1); break;
+    case Action::GrowHeight: ++r.h; break;
+    case Action::ShrinkHeight: r.h = std::max(fmin.h, r.h - 1); break;
+    default: return;
+  }
+  w->user_rect = clamp_to(r, last_work_, fmin);
+}
+
 bool Session::take_dirty() {
   // L'horloge est relue ICI plutôt que dans render() seule : render() n'est
   // appelée que lorsque la frame est déjà sale, elle ne peut donc pas être
@@ -74,6 +258,7 @@ WindowId Session::open_from_catalog(std::string_view id) {
   if (e == nullptr) return 0;
   Window* w = wm_.open(e->make(), last_work_);
   if (w == nullptr) return 0;
+  w->app_id = e->id;
   // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
@@ -206,6 +391,59 @@ void Session::on_mouse(const MouseEvent& m) {
 
   if (m.action != MouseAction::Press) return;
 
+  // Le menu passe devant tout : ouvert, il prend le clic ou se referme.
+  if (menu_.is_open()) {
+    const MenuHitResult mh = menu_.hit(m.x, m.y);
+    if (mh.what == MenuHit::Item) {
+      const auto& items = menu_.visible();
+      if (mh.index >= 0 && mh.index < static_cast<int>(items.size())) {
+        run_menu(items[static_cast<size_t>(mh.index)].id);
+      }
+      return;
+    }
+    if (mh.what == MenuHit::None) menu_.close();
+    dirty_ = true;
+    return;
+  }
+
+  // Puis le panneau, qui recouvre par construction tout ce qui pourrait se
+  // trouver dessous.
+  const PanelHitResult ph = panel_.hit(m.x, m.y);
+  if (ph.what != PanelHit::None) {
+    dirty_ = true;
+    switch (ph.what) {
+      case PanelHit::MenuButton:
+        menu_.open();
+        break;
+      case PanelHit::Pinned: {
+        const auto& cat = catalog();
+        if (ph.index >= 0 && ph.index < static_cast<int>(cat.size())) {
+          focus_or_open(cat[static_cast<size_t>(ph.index)].id);
+        }
+        break;
+      }
+      case PanelHit::Task: {
+        Window* t = wm_.find(ph.win);
+        if (t == nullptr) break;
+        // Cliquer l'entrée de la fenêtre active la réduit ; cliquer celle
+        // d'une autre la rappelle. C'est la convention de toutes les barres
+        // des tâches, et elle rend le clic idempotent par paire.
+        if (t->mode == WinMode::Minimized) {
+          wm_.set_mode(t->id, WinMode::Normal, last_work_);
+          wm_.focus(t->id);
+        } else if (wm_.focused() == t->id) {
+          wm_.set_mode(t->id, WinMode::Minimized, last_work_);
+        } else {
+          wm_.focus(t->id);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    return;
+  }
+
   Window* wp = wm_.hit(m.x, m.y);
   if (wp == nullptr) return;
   Window& w = *wp;
@@ -269,6 +507,18 @@ void Session::on_input(const InputEvent& e) {
       quit_ = true;
       return;
     }
+    // Le menu capture tout tant qu'il est ouvert : une application ne doit
+    // jamais recevoir les frappes qui pilotent le bureau.
+    if (menu_.is_open()) {
+      menu_key(*k);
+      return;
+    }
+    const LeaderResult lr = leader_.feed(*k);
+    if (lr.action.has_value()) {
+      do_action(*lr.action);
+      return;
+    }
+    if (lr.consumed) return;
     if (Window* w = wm_.find(wm_.focused())) w->app->on_key(*k);
     return;
   }
@@ -358,6 +608,10 @@ void Session::render(Surface& out) {
   if (front == nullptr || front->mode != WinMode::Fullscreen) {
     panel_.draw(v, theme_, clock_.text(), clock_.date());
   }
+
+  // Le menu passe en dernier : il recouvre le panneau qui l'a ouvert.
+  menu_.layout(out.w(), out.h());
+  menu_.draw(v, theme_, border());
 }
 
 }  // namespace sshos

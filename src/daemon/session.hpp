@@ -7,10 +7,12 @@
 #include "common/platform.hpp"
 #include "daemon/host.hpp"
 #include "input/events.hpp"
+#include "input/shortcuts.hpp"
 #include "render/profile.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"
 #include "shell/clock.hpp"
+#include "shell/menu.hpp"
 #include "shell/panel.hpp"
 #include "wm/hittest.hpp"
 #include "wm/layout.hpp"
@@ -56,6 +58,14 @@ class Session {
   // sale et ne pourrait donc jamais se salir elle-même.
   bool take_dirty();
 
+  // Octets à écrire tels quels sur le terminal du client, devant la trame
+  // suivante. La bascule souris n'a pas de message de protocole : elle
+  // voyage ici. Consommée une seule fois.
+  std::string take_out_of_band();
+
+  // Le client doit-il tout repeindre ? Consommé une seule fois.
+  bool take_repaint();
+
   WinHitResult hit_window_at(int x, int y) const;
 
   // Appelée par le démon au détachement d'un client et à l'attache du
@@ -88,6 +98,14 @@ class Session {
   // Ferme une fenêtre en retirant d'abord ses surveillances : aucune entrée
   // epoll ne doit survivre au descripteur qu'elle désigne.
   void close_window(Window& w);
+
+  // Exécute une action de la table de raccourcis sur la fenêtre focalisée.
+  void do_action(Action a);
+  // Exécute une entrée du menu, désignée par son identifiant.
+  void run_menu(const std::string& id);
+  // Les frappes vont au menu tant qu'il est ouvert, jamais à l'application.
+  void menu_key(const KeyEvent& k);
+  void focus_or_open(const std::string& app_id);
   void on_mouse(const MouseEvent& m);
   void watchdog();
 
@@ -117,6 +135,15 @@ class Session {
   // rien ne les choisit encore -- le réglage arrive avec la configuration.
   Panel panel_;
   Clock clock_;
+  Menu menu_;
+  LeaderDispatch leader_;
+
+  // Les modes souris DEC sont posés par le client à l'attache ; la bascule
+  // les retire et les remet. TtyGuard les restaure à la sortie, donc une
+  // souris laissée coupée ne survit pas à la session.
+  bool mouse_on_ = true;
+  std::string out_of_band_;
+  bool repaint_ = false;
 
   // Repeint demandé hors de toute entrée utilisateur : l'horloge qui change
   // de minute, une application qui appelle Host::invalidate(). HostImpl en

@@ -603,7 +603,14 @@ int run_daemon(std::string_view socket_name) {
     const auto now = FrameClock::Clock::now();
     if (client && client->differ && clock.delay_ms(now) == 0) {
       session.render(screen);
-      const std::string ansi = client->differ->frame(screen, std::nullopt);
+      // Le repeint forcé se décide AVANT la trame : invalider après
+      // l'avoir calculée ne servirait à rien de ce tour-ci.
+      if (session.take_repaint()) client->differ->invalidate();
+      // Le hors-bande passe DEVANT la trame : ce sont des modes de terminal
+      // (la bascule souris), et ils doivent être posés avant tout dessin qui
+      // en dépend. Le client recopie FrameMsg::ansi verbatim.
+      const std::string oob = session.take_out_of_band();
+      const std::string ansi = oob + client->differ->frame(screen, std::nullopt);
       if (!ansi.empty()) client->out.push(encode(Msg{FrameMsg{ansi}}));
       clock.note_render(now);
 

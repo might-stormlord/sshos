@@ -480,6 +480,47 @@ void release_at(Session& s, int x, int y) {
 
 // La géométrie du cadre, relevée sur la surface : la première ligne qui
 // porte le titre.
+bool surface_contains(const Surface& s, const std::string& needle) {
+  for (int y = 0; y < s.h(); ++y) {
+    if (s.text_row(y).find(needle) != std::string::npos) return true;
+  }
+  return false;
+}
+
+// La colonne la plus à droite qui appartienne encore à une fenêtre, sur la
+// ligne donnée. Mesure la géométrie par le hit-test plutôt que par les
+// glyphes : c'est ce que l'utilisateur peut réellement attraper.
+int left_edge_of(Session& s, int y) {
+  for (int x = 0; x < 80; ++x) {
+    if (s.hit_window_at(x, y).what != sshos::WinHit::None) return x;
+  }
+  return -1;
+}
+
+int right_edge_of(Session& s, int y) {
+  for (int x = 79; x >= 0; --x) {
+    if (s.hit_window_at(x, y).what != sshos::WinHit::None) return x;
+  }
+  return -1;
+}
+
+// Combien de fenêtres distinctes le hit-test voit-il ? Compter les lignes
+// de texte ne suffit pas : deux fenêtres identiques se recouvrent, et la
+// seconde efface le libellé de la première.
+size_t count_windows(Session& s, int cols, int rows) {
+  std::vector<sshos::WindowId> ids;
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      const sshos::WinHitResult h = s.hit_window_at(x, y);
+      if (h.what == sshos::WinHit::None) continue;
+      if (std::find(ids.begin(), ids.end(), h.win) == ids.end()) {
+        ids.push_back(h.win);
+      }
+    }
+  }
+  return ids.size();
+}
+
 int title_row_of(const Surface& s, int rows) {
   for (int y = 0; y < rows; ++y) {
     if (s.text_row(y).find("Bloc") != std::string::npos) return y;
@@ -756,6 +797,292 @@ TEST(session_asks_for_a_repaint_when_the_clock_changes_minute) {
   plat.advance(30);
   CHECK(sess.take_dirty());   // la minute a tourné
   CHECK(!sess.take_dirty());  // et le drapeau se consomme
+}
+
+// Le bureau exécute vraiment l'action, pas seulement le dispatcheur.
+TEST(session_moves_the_focused_window_with_the_leader_table) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  const int before = title_row_of(s, 24);
+  REQUIRE(before >= 0);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'j', 0}});
+
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 24), before + 1);
+}
+
+// Les quatre redimensionnements clavier travaillent sur la géométrie
+// VOULUE, donc rétrécir d'autant qu'on a agrandi rend exactement la taille
+// de départ.
+TEST(session_resizes_the_focused_window_with_the_leader_table) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  const int before = right_edge_of(sess, 1);
+  REQUIRE(before > 0);
+
+  for (int i = 0; i < 2; ++i) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'L', 0}});
+  }
+  sess.render(s);
+  CHECK_EQ(right_edge_of(sess, 1), before + 2);
+
+  for (int i = 0; i < 2; ++i) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'H', 0}});
+  }
+  sess.render(s);
+  CHECK_EQ(right_edge_of(sess, 1), before);
+}
+
+// Un pas clavier vaut exactement une cellule -- ni plus, ni moins, et
+// surtout pas zéro : aimanter un pas d'une cellule avec une tolérance d'une
+// cellule collerait la fenêtre au bord pour toujours. Et pousser au-delà du
+// bord ne l'emmène pas hors de l'écran, où il faudrait autant de frappes
+// pour la ramener.
+TEST(session_bounds_a_window_moved_with_the_keyboard) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(left_edge_of(sess, 1), 2);
+
+  // Un seul pas vers la gauche déplace d'exactement une cellule.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'h', 0}});
+  sess.render(s);
+  CHECK_EQ(left_edge_of(sess, 1), 1);
+
+  // Soixante pas à droite : la fenêtre bute contre le bord droit au lieu de
+  // partir au loin. Soixante pas en retour la ramènent donc au bord gauche,
+  // pas à son point de départ.
+  for (int i = 0; i < 60; ++i) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'l', 0}});
+  }
+  sess.render(s);
+  CHECK_EQ(right_edge_of(sess, 1), 79);
+
+  for (int i = 0; i < 60; ++i) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'h', 0}});
+  }
+  sess.render(s);
+  CHECK_EQ(left_edge_of(sess, 1), 0);
+}
+
+// Les raccourcis ne doivent PAS fuir vers l'application, et une frappe
+// ordinaire ne doit PAS être avalée par le bureau.
+TEST(session_never_leaks_a_leader_chord_to_the_application) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  // Bloc déplace son curseur avec les flèches et marque son titre sur 'e'.
+  // Un accord complet ne doit rien lui faire.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'e', 0}});
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(after.text_row(1).find("Bloc *") == std::string::npos);
+
+  // Alors que la même touche seule lui parvient.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'e', 0}});
+  Surface typed(80, 24);
+  sess.render(typed);
+  CHECK(typed.text_row(1).find("Bloc *") != std::string::npos);
+}
+
+// ToggleMouse n'a pas de message de protocole : la bascule voyage dans le
+// flux de trames, que le client recopie verbatim.
+TEST(session_emits_the_mouse_toggle_out_of_band) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  CHECK(sess.take_out_of_band().empty());
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'o', 0}});
+
+  const std::string oob = sess.take_out_of_band();
+  CHECK(oob.find("\033[?1002l") != std::string::npos);
+  CHECK(oob.find("\033[?1006l") != std::string::npos);
+  CHECK(sess.take_out_of_band().empty());  // consommé une seule fois
+
+  // Et la bascule bascule : le second accord remet la souris.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'o', 0}});
+  const std::string back = sess.take_out_of_band();
+  CHECK(back.find("\033[?1002h") != std::string::npos);
+  CHECK(back.find("\033[?1006h") != std::string::npos);
+}
+
+TEST(session_asks_for_a_full_repaint_on_demand) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  CHECK(!sess.take_repaint());
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'r', 0}});
+  CHECK(sess.take_repaint());
+  CHECK(!sess.take_repaint());
+}
+
+// Le menu s'ouvre au clavier, capture les frappes, et lance ce qu'on a
+// choisi. C'est le seul chemin qui ouvre une application depuis le bureau.
+TEST(session_opens_an_application_through_the_menu) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  Surface open(80, 24);
+  sess.render(open);
+  // Le menu est là : il porte ses entrées, dont celle qui ne lance rien.
+  CHECK(surface_contains(open, "Quitter la session"));
+
+  // Filtrer sur « battement » puis valider.
+  for (const char32_t c : {U'b', U'a', U't', U't'}) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, c, 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  Surface after(80, 24);
+  sess.render(after);
+  bool found = false;
+  for (int y = 0; y < 23; ++y) {
+    if (after.text_row(y).find("battements: 0") != std::string::npos) found = true;
+  }
+  CHECK(found);
+
+  // Relancer la même entrée rappelle la fenêtre au lieu d'en empiler une
+  // seconde : c'est ce que fait une épinglée dans toute barre des tâches.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  for (const char32_t c : {U'b', U'a', U't', U't'}) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, c, 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  Surface twice(80, 24);
+  sess.render(twice);
+  (void)twice;
+  // Deux fenêtres en tout -- le Bloc du démarrage et le Battement --, pas
+  // trois. Compté au hit-test : deux Battement en cascade se recouvrent et
+  // le second effacerait le texte du premier, ce qui rendrait un décompte
+  // de lignes complaisant.
+  CHECK_EQ(count_windows(sess, 80, 23), static_cast<size_t>(2));
+}
+
+// Échap referme le menu sans rien lancer, et rend le clavier à
+// l'application.
+TEST(session_closes_the_menu_on_escape_without_running_anything) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Escape, 0, 0}});
+
+  Surface after(80, 24);
+  sess.render(after);
+  // Une seule fenêtre, et plus de ligne de saisie.
+  int titles = 0;
+  for (int y = 0; y < 23; ++y) {
+    if (after.text_row(y).find("Bloc") != std::string::npos) ++titles;
+  }
+  CHECK_EQ(titles, 1);
+
+  // Le clavier est revenu à l'application.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'e', 0}});
+  Surface typed(80, 24);
+  sess.render(typed);
+  CHECK(typed.text_row(1).find("Bloc *") != std::string::npos);
+}
+
+// Le bouton de menu du panneau ouvre le menu, et l'entrée d'une fenêtre la
+// réduit puis la rappelle.
+TEST(session_answers_clicks_on_the_panel) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  press_at(sess, 2, 23);  // « ☰ ssh_os » / « ssh_os »
+  Surface menu(80, 24);
+  sess.render(menu);
+  CHECK(surface_contains(menu, "Quitter la session"));
+
+  press_at(sess, 2, 23);  // le même clic referme (hors du menu)
+  Surface closed(80, 24);
+  sess.render(closed);
+
+  // L'entrée de la fenêtre active la réduit.
+  int task_x = -1;
+  for (int x = 0; x < 80; ++x) {
+    if (closed.at(x, 23).ch == U'*' || closed.at(x, 23).ch == U'●') task_x = x;
+  }
+  REQUIRE(task_x >= 0);
+  press_at(sess, task_x, 23);
+  Surface hidden(80, 24);
+  sess.render(hidden);
+  CHECK(title_row_of(hidden, 23) < 0);
+
+  press_at(sess, task_x, 23);
+  Surface back(80, 24);
+  sess.render(back);
+  CHECK(title_row_of(back, 23) >= 0);
+}
+
+// Plein écran : le panneau disparaît. C'est toute la différence avec
+// maximisé, qui s'arrête à la zone de travail pour le laisser visible.
+TEST(session_hides_the_panel_under_a_fullscreen_window) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE(s.text_row(23).find("ssh_os") != std::string::npos);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'f', 0}});
+  Surface full(80, 24);
+  sess.render(full);
+  CHECK(full.text_row(23).find("ssh_os") == std::string::npos);
+  // Et le repeint complet est réclamé : aucun delta ne dit « le panneau a
+  // disparu » de façon fiable.
+  CHECK(sess.take_repaint());
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'f', 0}});
+  Surface again(80, 24);
+  sess.render(again);
+  CHECK(again.text_row(23).find("ssh_os") != std::string::npos);
 }
 
 TEST(session_refuses_an_unknown_catalog_entry) {
@@ -1712,6 +2039,57 @@ TEST(daemon_quits_on_ctrl_q_received_over_the_wire) {
 // sa valeur de non-régression pour ce chemin de relais reste entière même
 // si le garde-fou n'est, pour l'instant, prouvé nécessaire par aucun test
 // boîte noire.
+// Le hors-bande et le repeint force ne traversent le demon que par le flux
+// de trames : ni l'un ni l'autre n'a de message de protocole. Ces deux cas
+// sont les seuls qui exercent ce cablage de bout en bout.
+TEST(daemon_carries_the_mouse_toggle_ahead_of_the_frame) {
+  const std::string name = unique_name() + "-oob";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+
+  // Ctrl+A puis 'o' : la bascule souris. \x01 est Ctrl+A sur le fil.
+  REQUIRE(send_all(client.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\x01o"}})));
+  CHECK(wait_for_frame_containing(client.get(), dec, "\033[?1002l",
+                                  "\033[?1006l", 3000));
+}
+
+TEST(daemon_repaints_everything_when_the_desktop_asks_for_it) {
+  const std::string name = unique_name() + "-repaint";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 3000));
+
+  // Ctrl+A puis 'r'. RIEN n'a change a l'ecran : sans invalidate() le delta
+  // serait vide, et seule une trame complete peut porter a la fois le titre
+  // de la fenetre et le texte du panneau.
+  REQUIRE(send_all(client.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 3000));
+}
+
 TEST(daemon_handles_client_takeover_with_reused_fd_in_one_epoll_batch) {
   const std::string name = unique_name() + "-fdreuse";
   DaemonHandle daemon(name);

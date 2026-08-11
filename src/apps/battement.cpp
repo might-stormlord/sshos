@@ -55,6 +55,11 @@ void Battement::beat() {
   (void)put;  // tuyau plein : le battement est perdu, sans conséquence
 }
 
+void Battement::on_command(std::string_view cmd) {
+  if (cmd == "beat") beat();
+  if (cmd == "cut") cut_source();
+}
+
 void Battement::cut_source() {
   if (write_fd_ < 0) return;
   ::close(write_fd_);
