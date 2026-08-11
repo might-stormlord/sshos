@@ -1351,3 +1351,273 @@ TEST(daemon_mute_probe_does_not_evict_the_attached_client) {
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Resize{100, 30}})));
   CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 3000));
 }
+
+namespace {
+
+// kill(SIGSTOP) rend la main AVANT que la cible ne soit effectivement
+// arrêtée : l'arrêt est asynchrone. Écrire dans la foulée laisse donc au
+// démon une fenêtre courte mais bien réelle pour drainer l'EPOLLIN de
+// lui-même avant de se figer — auquel cas les octets sont traités, et le test
+// passe alors même que le code est défectueux. Ce n'est pas une crainte
+// théorique : mesuré sur le test des clics ci-dessous, un simple kill() suivi
+// d'écritures immédiates ne faisait échouer le code d'avant que 5 fois sur
+// 10. Attendre l'état « arrêté » rend la coalescence déterministe et porte
+// les trois cas de ce round à 20 échecs sur 20 contre le code d'avant.
+//
+// L'état vit dans /proc/<pid>/stat, champ 3 : 'T' = arrêté. Le processus est
+// désigné par son pid, jamais par correspondance de nom — `ps` et `pgrep -f`
+// matchent leur propre ligne de commande (piège rencontré trois fois sur ce
+// projet, dont un « défaut reproduit » entièrement faux). Le champ comm
+// pouvant contenir espaces et parenthèses, on repart de la DERNIÈRE ')'.
+bool wait_until_stopped(pid_t pid, int timeout_ms) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  for (;;) {
+    std::ifstream f("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (f && std::getline(f, line)) {
+      const size_t rp = line.rfind(')');
+      // ") T ..." : l'état est le premier caractère non blanc après ')'.
+      if (rp != std::string::npos && rp + 2 < line.size() && line[rp + 2] == 'T') {
+        return true;
+      }
+    }
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    ::usleep(2 * 1000);
+  }
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------
+// Round EPOLLHUP / drainage (voir docs/hup-drain-brief.md).
+//
+// Symptôme utilisateur : cliquer puis fermer la fenêtre du terminal dans
+// la même fraction de seconde perd les tout derniers messages. Cause : le
+// répartiteur du démon honorait EPOLLHUP|EPOLLERR et faisait `continue`
+// AVANT d'avoir drainé EPOLLIN. Or epoll_wait() coalesce couramment les
+// deux bits dans un SEUL évènement quand le pair écrit puis ferme aussitôt
+// derrière : à cet instant les octets sont déjà dans le tampon de
+// réception du socket, et les jeter sans les lire est précisément la perte
+// observée — alors même que la session du démon, elle, survit au
+// détachement (c'est tout l'intérêt du démon).
+//
+// Ce test n'observe que du comportement de bout en bout : un Ctrl+Q envoyé
+// juste avant la fermeture doit encore arrêter le démon. Il ne dit rien de
+// l'ordre interne des blocs du répartiteur, afin de rester valable quelle
+// que soit la façon dont le correctif s'y prend.
+//
+// SIGSTOP rend la coalescence déterministe au lieu de seulement probable :
+// gelé, le démon ne peut pas se réveiller sur l'EPOLLIN seul avant que la
+// fermeture ne survienne, donc les deux bits sont forcément posés ensemble
+// quand il reprend la main. Même montage que
+// daemon_handles_client_takeover_with_reused_fd_in_one_epoll_batch
+// ci-dessus, dont une strace avait déjà confirmé le principe. SIGCONT peut
+// faire rendre EINTR à epoll_wait() : la boucle du démon le traite déjà par
+// un `continue` (daemon.cpp ~ligne 220) et repasse en attente sans perdre
+// les bits déjà posés.
+TEST(daemon_processes_input_sent_just_before_the_client_closes) {
+  const std::string name = unique_name() + "-hup-drain";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  // Point de synchronisation, pas un délai au hasard : Welcome n'est poussé
+  // qu'APRÈS `client = std::move(pending)` (daemon.cpp), donc le recevoir
+  // prouve que cette connexion est bien le `client` attaché. C'est sa
+  // branche du répartiteur que ce test vise, pas celle de `pending`.
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
+
+  // Aucun REQUIRE entre le gel et la reprise : son `return` nu laisserait le
+  // démon figé. On relève donc les résultats dans des booléens et on ne
+  // tranche qu'après SIGCONT.
+  const bool stopped = wait_until_stopped(daemon.pid(), 2000);
+  const bool sent = send_all(
+      client.get(), sshos::encode(sshos::Msg{sshos::Input{"\x11"}}));  // Ctrl+Q
+  // Fermeture immédiate : le FIN suit les octets sur le même socket, sans
+  // laisser au démon la moindre occasion de se réveiller entre les deux.
+  client.reset();
+  const bool resumed = ::kill(daemon.pid(), SIGCONT) == 0;
+
+  REQUIRE(stopped);
+  REQUIRE(sent);
+  REQUIRE(resumed);
+
+  // Preuve retenue : le démon s'arrête, donc le Ctrl+Q a bien traversé le
+  // décodeur et la session malgré la fermeture simultanée. Contre le code
+  // d'avant le correctif, l'octet est jeté avec le HUP : le démon reste
+  // vivant et cette attente expire.
+  int status = 0;
+  bool exited = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    const pid_t r = ::waitpid(daemon.pid(), &status, WNOHANG);
+    if (r == daemon.pid()) {
+      exited = true;
+      break;
+    }
+    ::usleep(10 * 1000);
+  }
+  // REQUIRE et non CHECK : sans sortie constatée, `status` ne veut rien dire
+  // et WIFEXITED(0) passerait tout seul, maquillant l'échec en succès.
+  REQUIRE(exited);
+  CHECK(WIFEXITED(status));
+  CHECK_EQ(WEXITSTATUS(status), 0);
+}
+
+// Même round, chemin d'observation exactement celui que réclamait le brief :
+// le symptôme tel que l'utilisateur le vit. Un client clique, ferme la fenêtre
+// du terminal aussitôt, se rattache — et doit retrouver ses clics. Le test
+// ci-dessus prouve la même garde par la sortie du démon (observable binaire,
+// insensible au rendu) ; celui-ci prouve qu'il en reste quelque chose dans
+// l'ÉTAT DE SESSION, ce qui est la promesse même du démon.
+//
+// Le second client est indispensable, pas décoratif : le protocole est
+// différentiel, un client déjà attaché ne reçoit que les cellules modifiées.
+// Seule une connexion neuve reçoit un repeint complet, donc une trame où
+// « clics: 3 » figure en toutes lettres.
+TEST(daemon_keeps_clicks_sent_just_before_the_client_closes) {
+  const std::string name = unique_name() + "-hup-clicks";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd a = connect_retry(name);
+  REQUIRE(a.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec_a;
+  auto welcome = recv_one(a.get(), dec_a, 2000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  // Référence avant tout clic, et point de synchronisation : attendre une
+  // trame effectivement composée garantit que le démon est retombé en attente
+  // dans epoll_wait() avant qu'on ne le gèle.
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "ssh_os", 3000));
+
+  REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
+
+  // Trois pressions SGR (\033[<0;C;LM), puis fermeture immédiate — sans jamais
+  // laisser au démon l'occasion de se réveiller entre les octets et le FIN.
+  // Aucun REQUIRE dans cette fenêtre : voir le test précédent.
+  const bool stopped = wait_until_stopped(daemon.pid(), 2000);
+  bool sent = true;
+  for (int i = 0; i < 3; ++i) {
+    sent = sent && send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{
+                                "\033[<0;10;5M"}}));
+  }
+  a.reset();
+  const bool resumed = ::kill(daemon.pid(), SIGCONT) == 0;
+
+  REQUIRE(stopped);
+  REQUIRE(sent);
+  REQUIRE(resumed);
+
+  // Rattache : client neuf, donc repeint complet.
+  sshos::Fd b = connect_retry(name);
+  REQUIRE(b.valid());
+  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec_b;
+  auto welcome_b = recv_one(b.get(), dec_b, 3000);
+  REQUIRE(welcome_b.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome_b));
+
+  // Contre le code d'avant le correctif, les trois pressions sont parties à la
+  // poubelle avec le HUP : la session affiche « clics: 0 » et cette attente
+  // expire.
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 3", "ssh_os", 3000));
+}
+
+// Même round, second emplacement du même motif : la branche `pending`
+// (connexion acceptée qui n'a pas encore décliné son intention). Le brief la
+// met explicitement dans le périmètre, et rien ne la discriminait jusqu'ici.
+//
+// Un Hello valide arrivé dans le même évènement que la fermeture de son
+// expéditeur doit être honoré, exactement comme il l'aurait été s'il était
+// arrivé une milliseconde plus tôt. C'est le point : avant le correctif, le
+// fait qu'un Hello compte ou non dépendait de la coalescence décidée par le
+// noyau — une course. Après, c'est déterministe.
+//
+// Observable retenue : le client déjà attaché reçoit Detached(« un autre
+// client a pris la main »), que drop_client() pousse ET vide sur le fil avant
+// de fermer. C'est la preuve directe que le Hello a bien été lu malgré le HUP
+// simultané.
+TEST(daemon_honours_a_hello_coalesced_with_its_senders_closure) {
+  const std::string name = unique_name() + "-hup-pending";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd a = connect_retry(name);
+  REQUIRE(a.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec_a;
+  auto welcome = recv_one(a.get(), dec_a, 2000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "ssh_os", 3000));
+
+  REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
+
+  // B se connecte pendant le gel : le noyau met la connexion en file d'attente
+  // de l'écouteur, le démon ne l'accepte qu'à la reprise. Ses octets et son
+  // FIN sont donc tous deux déjà présents quand son descripteur entre enfin
+  // dans epoll — la coalescence est acquise sans dépendre d'un ordonnancement
+  // heureux.
+  const bool stopped = wait_until_stopped(daemon.pid(), 2000);
+  bool sent_b = false;
+  {
+    sshos::Fd b = connect_retry(name);
+    if (b.valid()) {
+      sent_b = send_all(b.get(), sshos::encode(sshos::Msg{hello}));
+    }
+  }  // fermeture immédiate de B, juste derrière son Hello
+
+  const bool resumed = ::kill(daemon.pid(), SIGCONT) == 0;
+
+  REQUIRE(stopped);
+  REQUIRE(sent_b);
+  REQUIRE(resumed);
+
+  // Contre le code d'avant le correctif, le HUP de B est honoré avant le
+  // drainage : son Hello n'est jamais lu, A n'est jamais évincé, et cette
+  // attente n'apporte aucun Detached.
+  bool saw_detached = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (std::chrono::steady_clock::now() < deadline) {
+    const int remaining = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now())
+            .count());
+    auto m = recv_one(a.get(), dec_a, std::max(1, remaining));
+    if (!m) break;
+    if (std::holds_alternative<sshos::Detached>(*m)) {
+      saw_detached = true;
+      break;
+    }
+  }
+  CHECK(saw_detached);
+}
