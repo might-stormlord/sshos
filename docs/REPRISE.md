@@ -4,7 +4,8 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** au commit `ebd79d8`, branche `m1-noyau`, 186 tests au vert.
+> **Dernière mise à jour :** au commit `4aa774f`, branche `m1-noyau`, 189 tests au vert.
+> Le jalon 1 n'a plus aucune dette ouverte (le round `EPOLLHUP` du §7.1 est soldé).
 
 ---
 
@@ -67,7 +68,7 @@ UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ./build-dbg/sshos_tests   # arm
 ./build-dbg/sshos_tests diff                   # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `186 cas, 0 en echec, 0 assertions echouees`,** en Release comme en Debug,
+**Attendu : `189 cas, 0 en echec, 0 assertions echouees`,** en Release comme en Debug,
 avec 0 avertissement de compilation.
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise plusieurs
@@ -223,43 +224,58 @@ Ces points ont coûté cher à établir. Ne pas les défaire sans relire la mesu
 
 ## 7. Dette ouverte
 
-### 7.1 — Round `EPOLLHUP` / drainage : **correctif écrit, jamais compilé** ⚠️
+### 7.1 — Round `EPOLLHUP` / drainage : **soldé** ✅ (11 août 2026)
 
-**Le seul élément vraiment inachevé du jalon 1.**
+Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur le jalon 1.**
 
-- **Symptôme :** si l'on clique et que l'on ferme le terminal dans la même fraction de
-  seconde, les tout derniers messages sont perdus.
-- **Cause :** `src/daemon/daemon.cpp:337-340` honore `EPOLLHUP|EPOLLERR` puis fait `continue`
-  **avant** de drainer `EPOLLIN`. Le noyau coalesce `EPOLLIN|EPOLLHUP` en un seul réveil :
-  les octets déjà arrivés partent à la poubelle. Même motif sur la branche `pending`
-  (l. 399).
-- **Correctif rédigé** (jugé complet côté production, +51/−20) : dans les deux branches, le
-  bloc `EPOLLHUP|EPOLLERR`+`continue` est **retiré du haut** et remplacé, **après** le bloc
-  `EPOLLIN`, par :
+- **Symptôme :** cliquer puis fermer le terminal dans la même fraction de seconde perdait
+  les tout derniers messages.
+- **Cause :** la branche du client attaché honorait `EPOLLHUP|EPOLLERR` puis faisait
+  `continue` **avant** de drainer `EPOLLIN`. `epoll_wait()` coalesce les deux bits en un
+  seul réveil quand le pair écrit puis ferme aussitôt : les octets déjà arrivés partaient à
+  la poubelle. Même motif sur la branche `pending`.
+- **Correctif appliqué** (+51/−20, les deux branches) : le bloc `EPOLLHUP|EPOLLERR`+
+  `continue` est retiré du haut et remplacé, **après** le bloc `EPOLLIN`, par
+  `if (closed || (events & (EPOLLHUP | EPOLLERR)) != 0) { drop_*(); continue; }`. Le `||`
+  garantit **un seul** `drop_*` par fermeture ; `dec.failed()` reste après le drainage et
+  reste atteignable ; `session.wants_quit()` reste dans le bloc `EPOLLIN`.
+- **Trois tests discriminants**, dans `tests/test_session.cpp`, **20/20 en échec contre le
+  code d'avant** :
 
-  ```cpp
-  bool closed = false;                      // déclaré avant le bloc EPOLLIN
-  if ((events & EPOLLIN) != 0) { closed = drain_socket(*client); ... }
-  if (closed || (events & (EPOLLHUP | EPOLLERR)) != 0) { drop_client(nullptr); continue; }
+  | Cas | Observable |
+  |---|---|
+  | `daemon_processes_input_sent_just_before_the_client_closes` | Ctrl+Q envoyé juste avant la fermeture arrête quand même le démon |
+  | `daemon_keeps_clicks_sent_just_before_the_client_closes` | 3 clics puis fermeture : un client neuf lit `clics: 3` (le symptôme utilisateur) |
+  | `daemon_honours_a_hello_coalesced_with_its_senders_closure` | branche `pending` : un Hello coalescé avec la fermeture de son expéditeur est honoré (le client en place reçoit `Detached`) |
+
+  Sortie exacte contre le code d'avant :
+
+  ```
+  FAIL tests/test_session.cpp:1476  REQUIRE(exited)
+  FAIL tests/test_session.cpp:1546  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 3", "ssh_os", 3000))
+  FAIL tests/test_session.cpp:1622  CHECK(saw_detached)
+  189 cas, 3 en echec, 3 assertions echouees
   ```
 
-  Le `||` garantit **un seul** `drop_*` par fermeture ; le test `client->dec.failed()` reste
-  après le drainage et reste atteignable ; `session.wants_quit()` reste dans le bloc
-  `EPOLLIN`.
-- **Où il se trouve :** `docs/hup-drain-correctif-en-suspens.diff` — **versionné**, 119
-  lignes, sha256 `5f339d9a023a39b5…`. Il existe aussi dans le worktree
-  `.claude/worktrees/agent-aba4275accf38f581` (base `af36d6d`, non commité) et dans le
-  ledger, mais **ni l'un ni l'autre ne survivent à un `clone`** : `.superpowers/` est
-  ignoré par git (`.gitignore:3`) et un worktree est volatil. Le fichier de `docs/` fait foi.
-  S'applique sur `af36d6d` ; le HEAD actuel n'a qu'un commit de documentation d'avance,
-  donc aucun conflit attendu sur `src/`.
-- **Pourquoi c'est inachevé :** l'agent est mort sur `API Error: ConnectionRefused` juste
-  avant de compiler.
-- **Reste à faire :** compiler ; écrire le **test discriminant** (avec la sortie d'échec
-  exacte contre le code d'avant) ; **prouver par la mesure** l'absence de boucle active à
-  100 % CPU sur HUP ; `sha256sum` de restauration ; 20 exécutions Debug + 20 Release ;
-  commit `fix(daemon): …` ; fusion.
-- **Brief détaillé :** `docs/hup-drain-brief.md` (copie versionnée de celle du ledger).
+- **Piège trouvé en route, à retenir : `kill(SIGSTOP)` est asynchrone.** Il rend la main
+  avant que la cible ne soit réellement arrêtée. Écrire dans la foulée laisse au démon une
+  fenêtre pour drainer l'`EPOLLIN` tout seul avant de se figer — le test passe alors contre
+  le code défectueux. **Mesuré, pas supposé :** le test des clics n'échouait que **5 fois
+  sur 10** et celui du Ctrl+Q **19 fois sur 20**. Parade : `wait_until_stopped()` attend
+  l'état `T` dans `/proc/<pid>/stat` (champ 3), processus désigné **par son pid**. Avec
+  elle, les trois cas sont à **20/20**.
+- **Absence de boucle active : mesurée.** Sonde dédiée, pid connu par `fork()` direct.
+  **0 jiffie / 2 s** sur les trois scénarios de fermeture (client attaché qui écrit puis
+  ferme ; sonde muette ; Hello puis fermeture immédiate). La sonde est elle-même
+  discriminante, vérifié par mutation : en neutralisant la garde par `if (false)`, elle
+  mesure **194 jiffies / 2 s** — cohérent avec les 201 jiffies/2 s du défaut de boucle
+  active documenté au §6.
+- **Restauration du code de production vérifiée par `sha256sum`** après la mutation :
+  `b8964e6ed7d59eb66217258573af5a24dc1d0dcfce8507b7fa9d880adf463909`.
+- **Brief d'origine :** `docs/hup-drain-brief.md` (conservé comme trace du round). Le
+  fichier `docs/hup-drain-correctif-en-suspens.diff` a été **supprimé** : le correctif est
+  désormais dans l'arbre, et garder un diff « en suspens » déjà appliqué induit en erreur.
+  Il reste récupérable dans l'historique git.
 
 ### 7.2 — Points reportés au jalon 2
 
@@ -339,6 +355,5 @@ Le jalon 2 s'appuie intégralement sur le jalon 1 : les fenêtres seront des `Vi
 `Surface`, le panneau un consommateur du même diffeur, les gestes des `MouseEvent` déjà
 parsés. C'est donc surtout du dessin et de la logique de geste, pas de la plomberie.
 
-Avant de commencer, décider si l'on solde d'abord le round `EPOLLHUP` (§7.1) — il est court,
-le correctif est écrit, et il concerne précisément la fonctionnalité que l'utilisateur vient
-de tester.
+Le round `EPOLLHUP` (§7.1) est **soldé** : plus rien ne reste en travers avant d'attaquer le
+jalon 2. Le plan reste à écrire.
