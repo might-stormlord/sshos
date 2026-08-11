@@ -1,12 +1,15 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
+#include <variant>
 
 #include "common/platform.hpp"
 #include "input/events.hpp"
 #include "render/profile.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"
+#include "wm/hittest.hpp"
 #include "wm/window.hpp"
 
 namespace sshos {
@@ -30,11 +33,45 @@ class Session {
   void render(Surface& out);
   bool wants_quit() const { return quit_; }
 
+  WinHitResult hit_window_at(int x, int y) const;
+
+  // Appelée par le démon au détachement d'un client et à l'attache du
+  // suivant. Un glissement engagé n'a plus de sens quand la souris qui le
+  // tenait a disparu.
+  //
+  // Annuler RESTAURE : la fenêtre revient là où le geste l'avait prise.
+  // C'est ce que « annulation » veut dire, et c'est ce que fait Échap dans
+  // tout gestionnaire de fenêtres. Le seul chemin qui garde la nouvelle
+  // position est le relâchement, qui passe par finish_drag().
+  void cancel_drag();
+
  private:
+  struct Idle {};
+  struct Moving {
+    WindowId win = 0;
+    int grab_dx = 0;
+    int grab_dy = 0;
+    Rect origin{};  // à restaurer si le geste est annulé
+  };
+  struct Resizing {
+    WindowId win = 0;
+    Rect outline{};
+  };
+  using DragState = std::variant<Idle, Moving, Resizing>;
+
   Rect work_area(int cols, int rows) const;
   Border border() const;
   void ensure_window(const Rect& work);
   void draw_panel(View& v, int cols, int rows);
+  void on_mouse(const MouseEvent& m);
+  void watchdog();
+
+  // Clôt le geste en gardant ce qu'il a produit -- l'inverse exact de
+  // cancel_drag(), qui le défait.
+  void finish_drag() { drag_ = Idle{}; }
+
+  DragState drag_{Idle{}};
+  std::chrono::steady_clock::time_point drag_stamp_{};
 
   Platform* plat_;
   OutputProfile out_;

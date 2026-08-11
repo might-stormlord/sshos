@@ -144,6 +144,11 @@ int run_daemon(std::string_view socket_name) {
     // précis que ça évite — Input/Resize reçu avant tout Hello, qui a
     // laissé dirty_ vrai sans jamais être consommé par note_render()).
     clock.reset();
+    // La souris qui tenait le glissement vient de disparaître : le geste n'a
+    // plus personne pour le finir. Sans cet appel il survivrait au
+    // détachement et le premier mouvement du client SUIVANT le reprendrait
+    // en vol.
+    session.cancel_drag();
   };
 
   // Ferme silencieusement `pending` : contrairement à drop_client(), aucun
@@ -479,6 +484,18 @@ int run_daemon(std::string_view socket_name) {
             set_ambiguous_wide(false);
             screen.resize(hello_seen->cols, hello_seen->rows);
             session.resize(hello_seen->cols, hello_seen->rows);
+            // Ceinture et bretelles avec drop_client() : un client qui
+            // s'attache hérite d'un bureau propre, jamais d'un geste à
+            // moitié fait par le précédent.
+            //
+            // Les deux sites sont redondants et c'est mesuré : retirer l'un
+            // OU l'autre laisse
+            // daemon_forgets_a_drag_left_behind_by_a_departed_client vert,
+            // il faut retirer les deux pour le faire tomber. La redondance
+            // est gardée à dessein -- une future voie d'attache qui ne
+            // passerait pas par drop_client() (reprise de session, client
+            // remplacé sans détachement préalable) retomberait ici.
+            session.cancel_drag();
             client->out.push(encode(Msg{Welcome{}}));
             clock.mark_dirty();
             continue;

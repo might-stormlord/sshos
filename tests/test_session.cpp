@@ -43,7 +43,15 @@ struct FakePlatform : sshos::Platform {
     // 2026-08-10 14:05:00 UTC
     return std::chrono::system_clock::time_point(std::chrono::seconds(1786370700));
   }
+  // Horloge monotone réglable : le chien de garde du glissement se teste en
+  // avançant le temps d'un cran, pas en dormant deux secondes.
+  std::chrono::steady_clock::time_point steady_now() const override {
+    return steady;
+  }
+  void advance_steady(std::chrono::milliseconds d) { steady += d; }
   std::string read_file(std::string_view) const override { return {}; }
+
+  std::chrono::steady_clock::time_point steady{};
 };
 
 // Même rôle que FakePlatform ci-dessus, mais avec un instant configurable au
@@ -54,6 +62,10 @@ struct FakePlatformAt : sshos::Platform {
   explicit FakePlatformAt(std::int64_t epoch_seconds) : t_(epoch_seconds) {}
   std::chrono::system_clock::time_point now() const override {
     return std::chrono::system_clock::time_point(std::chrono::seconds(t_));
+  }
+  // Point fixe : aucun test de ce double ne touche au glissement.
+  std::chrono::steady_clock::time_point steady_now() const override {
+    return {};
   }
   std::string read_file(std::string_view) const override { return {}; }
 
@@ -411,6 +423,190 @@ TEST(session_keeps_every_window_above_the_panel) {
   CHECK(s.text_row(23).find("ssh_os") != std::string::npos);
 }
 
+namespace {
+
+// Presse, bouge, relâche. Le bouton 0 est le gauche (voir parser.cpp, où
+// le bouton est décodé par `cb & 3`).
+void press_at(Session& s, int x, int y) {
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Press;
+  m.button = 0;
+  m.x = x;
+  m.y = y;
+  s.on_input(sshos::InputEvent{m});
+}
+
+void motion_to(Session& s, int x, int y, std::uint8_t button = 0) {
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Motion;
+  m.button = button;
+  m.x = x;
+  m.y = y;
+  s.on_input(sshos::InputEvent{m});
+}
+
+void release_at(Session& s, int x, int y) {
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Release;
+  m.button = 0;
+  m.x = x;
+  m.y = y;
+  s.on_input(sshos::InputEvent{m});
+}
+
+// La géométrie du cadre, relevée sur la surface : la première ligne qui
+// porte le titre.
+int title_row_of(const Surface& s, int rows) {
+  for (int y = 0; y < rows; ++y) {
+    if (s.text_row(y).find("Bloc") != std::string::npos) return y;
+  }
+  return -1;
+}
+
+}  // namespace
+
+TEST(session_moves_a_window_dragged_by_its_title_bar) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 24), 1);
+
+  press_at(sess, 5, 1);
+  motion_to(sess, 8, 6);
+  release_at(sess, 8, 6);
+
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 24), 6);
+}
+
+// Le contrat central du glissement de redimensionnement : pendant le
+// geste, seul un contour bouge. L'application n'apprend sa nouvelle taille
+// qu'au relâchement -- UNE fois, quel que soit le nombre de mouvements.
+//
+// La composition intercalée entre chaque mouvement n'est pas décorative :
+// c'est elle qui donne des dents au test. Sans elle, une implémentation qui
+// redimensionnerait la fenêtre à chaque mouvement passerait aussi, puisque
+// on_resize() n'est émis que depuis render() -- le compteur ne verrait
+// jamais que l'état initial et l'état final. Avec elle, une telle
+// implémentation annonce une douzaine de tailles au lieu d'une.
+TEST(session_tells_the_app_its_new_size_exactly_once_per_resize_gesture) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);  // resize: 1
+
+  press_at(sess, 45, 14);  // coin bas-droit du cadre {2,1,44,14}
+  for (int i = 0; i < 10; ++i) {
+    motion_to(sess, 45 + i, 14 + (i % 3));
+    Surface mid(80, 24);
+    sess.render(mid);
+  }
+  release_at(sess, 54, 16);
+
+  Surface after(80, 24);
+  sess.render(after);
+  bool twice = false;
+  for (int y = 0; y < 23; ++y) {
+    if (after.text_row(y).find("resize: 2") != std::string::npos) twice = true;
+  }
+  CHECK(twice);
+}
+
+// Les sept chemins d'annulation. Ils asseyent TOUS la même conclusion : la
+// fenêtre est revenue là où le geste l'avait prise. Un seul chemin oublié
+// laisserait un glissement fantôme capable de déplacer une fenêtre au
+// prochain mouvement de souris, longtemps après que l'utilisateur a lâché
+// le bouton.
+TEST(session_cancels_a_drag_on_every_one_of_the_seven_paths) {
+  const int kPaths = 7;
+  for (int path = 0; path < kPaths; ++path) {
+    FakePlatform plat;
+    Session sess(plat, 80, 24);
+    Surface s(80, 24);
+    sess.render(s);
+    REQUIRE_EQ(title_row_of(s, 24), 1);
+
+    press_at(sess, 5, 1);
+    motion_to(sess, 8, 6);  // le glissement est engagé, la fenêtre a suivi
+
+    switch (path) {
+      case 0:  // Échap
+        sess.on_input(
+            sshos::InputEvent{sshos::KeyEvent{sshos::Key::Escape, 0, 0}});
+        break;
+      case 1:  // n'importe quelle autre frappe
+        sess.on_input(
+            sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'z', 0}});
+        break;
+      case 2:  // perte de focus du terminal
+        sess.on_input(sshos::InputEvent{sshos::FocusEvent{false}});
+        break;
+      case 3:  // mouvement sans bouton : le relâchement s'est perdu
+        motion_to(sess, 20, 15, 3);
+        break;
+      case 4:  // détachement du client, puis attache du suivant : DEUX sites
+               // d'appel dans le démon, une seule méthode ici. Le câblage
+               // des deux sites est couvert par le test bout-en-bout
+               // plus bas, pas par ce cas.
+        sess.cancel_drag();
+        break;
+      case 5:  // second appui pendant le glissement (ici sur le bouton de
+               // fermeture, qui ne doit pas non plus fermer quoi que ce soit)
+        press_at(sess, 44, 1);
+        break;
+      case 6: {  // chien de garde : plus de deux secondes sans nouvelle
+        plat.advance_steady(std::chrono::milliseconds(2100));
+        Surface tick(80, 24);
+        sess.render(tick);
+        break;
+      }
+      default:
+        break;
+    }
+
+    // Après annulation, un mouvement de souris ne doit plus rien traîner.
+    motion_to(sess, 40, 20);
+    release_at(sess, 40, 20);
+
+    Surface after(80, 24);
+    sess.render(after);
+    CHECK_EQ(title_row_of(after, 24), 1);
+  }
+}
+
+// Le chien de garde est relu à DEUX endroits, à l'entrée et à la
+// composition, et le test des sept chemins ne discrimine que le premier :
+// son mouvement de contrôle repasse par on_input(), qui aurait balayé le
+// geste de toute façon. Ce test-ci isole le second.
+//
+// Le scénario est celui qui rend la relecture à la composition nécessaire :
+// un redimensionnement dont le relâchement s'est perdu, et plus une seule
+// entrée derrière. Le contour élastique resterait peint indéfiniment, sans
+// rien pour venir l'effacer -- une trace à l'écran qu'aucun geste de
+// l'utilisateur ne peut plus enlever.
+TEST(session_sweeps_a_stale_resize_outline_without_any_further_input) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  press_at(sess, 45, 14);   // coin bas-droit du cadre {2,1,44,14}
+  motion_to(sess, 60, 20);  // contour étiré jusqu'à {2,1,59,20}
+
+  Surface during(80, 24);
+  sess.render(during);
+  // Coin bas-droit du contour, hors du cadre de la fenêtre : il n'y a que le
+  // contour pour poser un glyphe là. Bordures ASCII, faute de set_output().
+  REQUIRE_EQ(during.at(60, 20).ch, U'+');
+
+  // Plus aucune entrée, seulement du temps qui passe et des compositions.
+  plat.advance_steady(std::chrono::milliseconds(2100));
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(after.at(60, 20).ch, U' ');
+}
 
 // ---------------------------------------------------------------------
 // Infrastructure bout-en-bout : un vrai démon (fork() + run_daemon() dans
@@ -1714,4 +1910,61 @@ TEST(daemon_honours_a_hello_coalesced_with_its_senders_closure) {
     }
   }
   CHECK(saw_detached);
+}
+
+// Le cas 4 de session_cancels_a_drag_on_every_one_of_the_seven_paths appelle
+// cancel_drag() en direct : il prouve la méthode, pas les DEUX sites d'appel
+// du démon. C'est ce test-ci qui les couvre -- un client qui s'en va en plein
+// glissement, et le suivant qui hérite d'un bureau propre plutôt que d'un
+// geste à moitié fait.
+TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
+  const std::string name = unique_name() + "-drag-orphan";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.utf8 = true;
+
+  {
+    sshos::Fd a = connect_retry(name);
+    REQUIRE(a.valid());
+    REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
+    sshos::Decoder dec_a;
+    REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Bloc", "ssh_os", 3000));
+
+    // Presser sur la barre de titre (ligne 1, colonne 6 en base 0 -> 7;2 en
+    // SGR, qui compte à partir de 1), bouger bouton enfoncé (cb = 32), et
+    // disparaître sans jamais relâcher.
+    REQUIRE(send_all(a.get(),
+                     sshos::encode(sshos::Msg{sshos::Input{"\033[<0;7;2M"}})));
+    REQUIRE(send_all(
+        a.get(), sshos::encode(sshos::Msg{sshos::Input{"\033[<32;20;10M"}})));
+  }  // le client se ferme ici, en plein geste
+
+  sshos::Fd b = connect_retry(name);
+  REQUIRE(b.valid());
+  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
+  sshos::Decoder dec_b;
+  REQUIRE(wait_for_frame_containing(b.get(), dec_b, "Bloc", "ssh_os", 3000));
+
+  // Un mouvement bouton enfoncé : si le glissement avait survécu au
+  // détachement, la fenêtre suivrait le curseur jusqu'en bas de l'écran.
+  REQUIRE(send_all(
+      b.get(), sshos::encode(sshos::Msg{sshos::Input{"\033[<32;60;18M"}})));
+
+  // Puis un clic à l'intérieur de la zone cliente d'ORIGINE. Il n'atteint
+  // Bloc que si la fenêtre n'a pas bougé ; sinon il tombe sur le bureau et le
+  // compteur reste à zéro, ce que l'attente traduit en échec.
+  REQUIRE(send_all(b.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\033[<0;10;5M"}})));
+
+  // Un Resize immédiatement derrière, non pour redimensionner quoi que ce
+  // soit -- les dimensions sont identiques -- mais pour son effet de bord :
+  // le démon y appelle Differ::invalidate(), donc la trame suivante est un
+  // repeint COMPLET. Sans lui, l'incrément du compteur ne produit qu'un
+  // delta d'une seule cellule (le chiffre), où la chaîne « clics: 1 » ne
+  // figure jamais, et aucune aiguille textuelle n'aurait de quoi mordre.
+  // Le socket garantit l'ordre : le clic est traité avant le Resize.
+  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{sshos::Resize{80, 24}})));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "ssh_os", 3000));
 }
