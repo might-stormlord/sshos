@@ -1,7 +1,7 @@
 #pragma once
 
 #include <chrono>
-#include <memory>
+#include <string_view>
 #include <variant>
 
 #include "common/platform.hpp"
@@ -10,6 +10,7 @@
 #include "render/surface.hpp"
 #include "render/theme.hpp"
 #include "wm/hittest.hpp"
+#include "wm/manager.hpp"
 #include "wm/window.hpp"
 
 namespace sshos {
@@ -32,6 +33,10 @@ class Session {
   void on_input(const InputEvent& e);
   void render(Surface& out);
   bool wants_quit() const { return quit_; }
+
+  // Ouvre une application du catalogue. Rend 0 si l'identifiant est inconnu
+  // ou si le plafond de fenêtres est atteint.
+  WindowId open_from_catalog(std::string_view id);
 
   WinHitResult hit_window_at(int x, int y) const;
 
@@ -78,10 +83,14 @@ class Session {
   Theme theme_;
   bool quit_ = false;
 
-  // Une seule fenêtre jusqu'à la tâche 6, derrière un unique_ptr : son
-  // adresse doit rester stable, HostImpl la référence.
-  std::unique_ptr<Window> win_;
-  WindowId next_id_ = 1;
+  WindowManager wm_;
+
+  // Dernière zone de travail composée. A3 tient toujours -- render() dérive
+  // sa géométrie de la Surface qu'on lui passe et la réécrit ici -- mais le
+  // traitement des clics en a besoin hors composition : maximiser une
+  // fenêtre demande de connaître la zone, et on_mouse() ne voit aucune
+  // Surface.
+  Rect last_work_{0, 0, 80, 23};
 };
 
 }  // namespace sshos

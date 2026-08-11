@@ -608,6 +608,200 @@ TEST(session_sweeps_a_stale_resize_outline_without_any_further_input) {
   CHECK_EQ(after.at(60, 20).ch, U' ');
 }
 
+TEST(session_draws_the_focused_window_on_top) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  sess.open_from_catalog("bloc");
+  Surface two(80, 24);
+  sess.render(two);
+
+  int titles = 0;
+  for (int y = 0; y < 23; ++y) {
+    if (two.text_row(y).find("Bloc") != std::string::npos) ++titles;
+  }
+  CHECK_EQ(titles, 2);  // deux fenêtres, deux barres de titre visibles
+}
+
+// Une seule fenêtre porte les couleurs du focus. Le test ne rejoue pas le
+// calcul du thème : il vérifie que les deux barres de titre diffèrent, PUIS
+// qu'elles s'échangent quand le focus change -- ni « tout focalisé » ni
+// « tout terne » ne peut imiter cet échange.
+TEST(session_dims_every_window_that_does_not_have_the_focus) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  Surface two(80, 24);
+  sess.render(two);
+
+  // Barre de titre du fond en ligne 1 (cadre {2,1,44,14}), celle du dessus
+  // en ligne 2 ({4,2,44,14}).
+  const sshos::Color back = two.at(20, 1).bg;
+  const sshos::Color front = two.at(20, 2).bg;
+  CHECK(!(back == front));
+
+  press_at(sess, 2, 5);  // bord gauche du fond : il passe devant
+  release_at(sess, 2, 5);
+  Surface swapped(80, 24);
+  sess.render(swapped);
+  CHECK(swapped.at(20, 1).bg == front);
+}
+
+// hit_window_at() est l'entrée publique du test de collision. Avec une seule
+// fenêtre, parcourir la pile à l'endroit ou à l'envers donne le même
+// résultat : il faut deux fenêtres qui se recouvrent pour que l'ordre
+// compte.
+TEST(session_hit_test_answers_for_the_window_on_top) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  const sshos::WindowId top = sess.open_from_catalog("bloc");
+  REQUIRE(top != 0u);
+  Surface two(80, 24);
+  sess.render(two);
+
+  // (20, 5) tombe dans les DEUX cadres, {2,1,44,14} et {4,2,44,14}.
+  const sshos::WinHitResult over = sess.hit_window_at(20, 5);
+  CHECK_EQ(over.win, top);
+  CHECK(over.what == sshos::WinHit::Client);
+
+  // Colonne 2 : seul le cadre du dessous l'atteint.
+  const sshos::WinHitResult below = sess.hit_window_at(2, 5);
+  CHECK(below.win != top);
+  CHECK(below.what == sshos::WinHit::Frame);
+
+  // Et le bureau nu ne répond rien.
+  CHECK(sess.hit_window_at(70, 20).what == sshos::WinHit::None);
+}
+
+TEST(session_refuses_an_unknown_catalog_entry) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  CHECK_EQ(sess.open_from_catalog("il-n-existe-pas"), 0u);
+}
+
+// Un clic sur une fenêtre d'arrière-plan la ramène au premier plan, et un
+// clic sur sa case [×] la ferme -- ELLE, pas celle qui avait le focus.
+TEST(session_focuses_and_closes_the_window_under_the_pointer) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  Surface two(80, 24);
+  sess.render(two);
+  // Deuxième fenêtre en cascade : cadre {4, 2, 44, 14}, titre en ligne 2.
+  REQUIRE_EQ(two.text_row(1).find("Bloc"), std::string::size_type(4));
+  REQUIRE_EQ(two.text_row(2).find("Bloc"), std::string::size_type(6));
+
+  // Bord gauche de la fenêtre d'ARRIÈRE-plan, à gauche du cadre de celle du
+  // dessus : elle prend le focus, donc le dessus. Le bord et non la barre de
+  // titre, pour ne pas engager de déplacement au passage.
+  press_at(sess, 2, 5);
+  release_at(sess, 2, 5);
+  Surface raised(80, 24);
+  sess.render(raised);
+  // Elle repasse devant : sa ligne cliente recouvre désormais la barre de
+  // titre de l'autre, qui disparaît de la ligne 2.
+  CHECK_EQ(raised.text_row(2).find("Bloc"), std::string::npos);
+
+  // [×] de la fenêtre du dessus : cadre {2,1,44,14}, dernier bouton collé au
+  // bord droit intérieur, colonnes 42..44.
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+  Surface closed(80, 24);
+  sess.render(closed);
+  CHECK_EQ(closed.text_row(1).find("Bloc"), std::string::npos);
+  CHECK_EQ(closed.text_row(2).find("Bloc"), std::string::size_type(6));
+}
+
+// [_] réduit : la fenêtre sort de la composition sans rien perdre. [□]
+// bascule maximisée puis rétablit EXACTEMENT la géométrie d'avant.
+TEST(session_minimizes_and_maximizes_from_the_title_bar_buttons) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(s.text_row(1).find("Bloc"), std::string::size_type(4));
+
+  // [□] au milieu : cadre {2,1,44,14}, boutons en colonnes 36..44.
+  press_at(sess, 41, 1);
+  release_at(sess, 41, 1);
+  Surface maxed(80, 24);
+  sess.render(maxed);
+  // Maximisée sur la zone de travail {0,0,80,23} : titre en ligne 0.
+  CHECK_EQ(maxed.text_row(0).find("Bloc"), std::string::size_type(2));
+
+  press_at(sess, 74, 0);  // [□] du cadre maximisé : boutons en 70..78
+  release_at(sess, 74, 0);
+  Surface restored(80, 24);
+  sess.render(restored);
+  CHECK_EQ(restored.text_row(1).find("Bloc"), std::string::size_type(4));
+
+  // [_] : colonnes 36..38 du cadre rétabli.
+  press_at(sess, 37, 1);
+  release_at(sess, 37, 1);
+  Surface gone(80, 24);
+  sess.render(gone);
+  int titles = 0;
+  for (int y = 0; y < 23; ++y) {
+    if (gone.text_row(y).find("Bloc") != std::string::npos) ++titles;
+  }
+  CHECK_EQ(titles, 0);
+}
+
+// Un clic sur la barre de titre qui ne bouge pas la souris ne doit RIEN
+// déplacer. Sans garde, l'aimantation du relâchement décale la fenêtre d'une
+// cellule au premier clic venu : la première marche de la cascade tombe
+// justement à une cellule du bord haut de la zone de travail.
+TEST(session_does_not_move_a_window_merely_clicked_on_its_title_bar) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 24), 1);
+  REQUIRE_EQ(s.text_row(1).find("Bloc"), std::string::size_type(4));
+
+  press_at(sess, 5, 1);
+  release_at(sess, 5, 1);
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 24), 1);
+  CHECK_EQ(after.text_row(1).find("Bloc"), std::string::size_type(4));
+}
+
+// L'aimantation s'applique au relâchement d'un DÉPLACEMENT : un bord lâché
+// à une cellule d'un bord de la zone s'y colle, un bord lâché à trois ne
+// bouge pas. Le titre commence deux colonnes après le cadre, ce qui donne
+// l'abscisse du cadre à la lecture.
+TEST(session_snaps_a_dragged_window_onto_a_nearby_edge) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(s.text_row(1).find("Bloc"), std::string::size_type(4));
+
+  press_at(sess, 5, 1);  // prise à trois colonnes du bord gauche du cadre
+  motion_to(sess, 4, 6);
+  release_at(sess, 4, 6);  // poserait le cadre en x = 1
+  Surface snapped(80, 24);
+  sess.render(snapped);
+  CHECK_EQ(snapped.text_row(6).find("Bloc"), std::string::size_type(2));
+
+  press_at(sess, 2, 6);
+  motion_to(sess, 5, 6);
+  release_at(sess, 5, 6);  // pose le cadre en x = 3, trop loin pour aimanter
+  Surface free_(80, 24);
+  sess.render(free_);
+  CHECK_EQ(free_.text_row(6).find("Bloc"), std::string::size_type(5));
+}
+
 // ---------------------------------------------------------------------
 // Infrastructure bout-en-bout : un vrai démon (fork() + run_daemon() dans
 // le fils, sans passer par --daemon) et un vrai client sur socket abstrait.

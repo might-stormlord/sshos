@@ -2,10 +2,11 @@
 
 #include <cstdio>
 #include <ctime>
+#include <memory>
 #include <string>
 #include <variant>
 
-#include "apps/bloc.hpp"
+#include "app/catalog.hpp"
 #include "daemon/host.hpp"
 #include "wm/decor.hpp"
 
@@ -26,11 +27,11 @@ constexpr char kFullWarning[] = "terminal trop petit - 40x12 minimum";
 constexpr char kShortWarning[] = "trop petit";
 constexpr int kFullWarningLen = sizeof(kFullWarning) - 1;
 
-// Position et taille de la première fenêtre, déterministes : plusieurs
-// tests bout-en-bout cliquent à une coordonnée fixe en comptant sur le fait
-// qu'elle tombe dans la zone cliente. La cascade et le placement libre
-// arrivent à la tâche 6.
-constexpr Rect kFirstWindowRect{2, 1, 44, 14};
+// Ce que le bureau ouvre tout seul quand la pile est vide. La première
+// fenêtre tombe donc sur la première marche de la cascade, {2, 1, 44, 14} :
+// plusieurs tests bout-en-bout cliquent à une coordonnée fixe en comptant
+// sur le fait qu'elle atterrit dans sa zone cliente.
+constexpr char kDefaultApp[] = "bloc";
 
 // Le relâchement peut se perdre : terminal qui filtre, multiplexeur qui
 // avale un octet, client tué en plein geste. Deux secondes sans nouvelle
@@ -92,18 +93,23 @@ Rect Session::work_area(int cols, int rows) const {
   return Rect{0, 0, cols, rows - 1};
 }
 
-void Session::ensure_window(const Rect& work) {
-  if (win_) return;
-  auto w = std::make_unique<Window>();
-  w->id = next_id_++;
-  w->user_rect = kFirstWindowRect;
-  w->app = std::make_unique<Bloc>();
-  w->display_rect = clamp_to(w->user_rect, work, frame_min(*w->app));
-  // L'hôte est créé APRÈS la fenêtre et AVANT attach() : c'est attach() qui
-  // fait poser son titre à l'application.
+WindowId Session::open_from_catalog(std::string_view id) {
+  const CatalogEntry* e = catalog_find(id);
+  if (e == nullptr) return 0;
+  Window* w = wm_.open(e->make(), last_work_);
+  if (w == nullptr) return 0;
+  // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
+  // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
+  // son titre à l'application.
   w->host = std::make_unique<HostImpl>(*w);
   w->app->attach(*w->host);
-  win_ = std::move(w);
+  return w->id;
+}
+
+void Session::ensure_window(const Rect& work) {
+  (void)work;  // déjà relevée dans last_work_ par render()
+  if (!wm_.stack().empty()) return;
+  open_from_catalog(kDefaultApp);
 }
 
 void Session::draw_panel(View& v, int cols, int rows) {
@@ -128,7 +134,7 @@ void Session::cancel_drag() {
   // redimensionnement ne touche à rien avant le relâchement : seul le
   // premier a quelque chose à restaurer.
   if (const auto* mv = std::get_if<Moving>(&drag_)) {
-    if (win_ && win_->id == mv->win) win_->user_rect = mv->origin;
+    if (Window* w = wm_.find(mv->win)) w->user_rect = mv->origin;
   }
   drag_ = Idle{};
 }
@@ -139,14 +145,17 @@ void Session::watchdog() {
 }
 
 WinHitResult Session::hit_window_at(int x, int y) const {
-  if (!win_) return WinHitResult{};
-  return hit_window(*win_, x, y);
+  // De l'avant vers l'arrière : c'est la fenêtre du dessus qui répond.
+  const auto& st = wm_.stack();
+  for (auto it = st.rbegin(); it != st.rend(); ++it) {
+    const Window& w = **it;
+    if (w.mode == WinMode::Minimized) continue;
+    if (w.display_rect.contains(x, y)) return hit_window(w, x, y);
+  }
+  return WinHitResult{};
 }
 
 void Session::on_mouse(const MouseEvent& m) {
-  if (!win_) return;
-  Window& w = *win_;
-
   // Un mouvement sans bouton pendant un glissement veut dire que le
   // relâchement s'est perdu (parser.cpp : `cb & 3`, donc 3 = aucun bouton).
   if (m.action == MouseAction::Motion && m.button == 3) {
@@ -162,24 +171,54 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // Une fenêtre peut disparaître au milieu d'un geste -- une application qui
+  // se ferme toute seule sur un événement de descripteur, par exemple. Le
+  // glissement n'a alors plus de sujet : on l'annule.
   if (auto* mv = std::get_if<Moving>(&drag_)) {
+    Window* w = wm_.find(mv->win);
+    if (w == nullptr) {
+      cancel_drag();
+      return;
+    }
     drag_stamp_ = plat_->steady_now();
-    Rect r = w.user_rect;
+    Rect r = w->user_rect;
     r.x = m.x - mv->grab_dx;
     r.y = m.y - mv->grab_dy;
-    w.user_rect = r;
-    if (m.action == MouseAction::Release) finish_drag();
+    w->user_rect = r;
+    if (m.action == MouseAction::Release) {
+      // L'aimantation ne s'applique qu'ICI, au déplacement. snap() conserve
+      // w et h et ne bouge que x et y : c'est exactement ce qu'un
+      // déplacement fait, et exactement ce qu'un redimensionnement ne doit
+      // pas faire -- tirer le coin bas-droit ne doit jamais décaler le coin
+      // haut-gauche, ce que ferait un x aimanté.
+      //
+      // Et seulement si le geste a effectivement déplacé la fenêtre. Un
+      // simple clic sur la barre de titre -- prendre le focus, rien de plus
+      // -- passe par ici avec un déplacement net nul, et l'aimanter
+      // décalerait la fenêtre d'une cellule sans que personne l'ait
+      // demandé : la première marche de la cascade tombe précisément à une
+      // cellule du bord haut de la zone.
+      if (!(w->user_rect == mv->origin)) {
+        w->user_rect = snap(w->user_rect, last_work_, 1);
+      }
+      finish_drag();
+    }
     return;
   }
 
   if (auto* rz = std::get_if<Resizing>(&drag_)) {
+    Window* w = wm_.find(rz->win);
+    if (w == nullptr) {
+      cancel_drag();
+      return;
+    }
     drag_stamp_ = plat_->steady_now();
     rz->outline.w = m.x - rz->outline.x + 1;
     rz->outline.h = m.y - rz->outline.y + 1;
     if (m.action == MouseAction::Release) {
       // C'est ICI, et seulement ici, que la fenêtre change de taille : d'où
       // un unique on_resize() par geste, au lieu d'un par mouvement.
-      w.user_rect = rz->outline;
+      w->user_rect = rz->outline;
       finish_drag();
     }
     return;
@@ -187,12 +226,36 @@ void Session::on_mouse(const MouseEvent& m) {
 
   if (m.action != MouseAction::Press) return;
 
+  Window* wp = wm_.hit(m.x, m.y);
+  if (wp == nullptr) return;
+  Window& w = *wp;
+
+  // Un clic n'importe où sur une fenêtre non focalisée lui donne le focus
+  // AVANT tout le reste : appuyer sur [×] d'une fenêtre d'arrière-plan doit
+  // fermer celle-là, pas celle qui avait la main.
+  if (wm_.focused() != w.id) wm_.focus(w.id);
+
   const WinHitResult h = hit_window(w, m.x, m.y);
   drag_stamp_ = plat_->steady_now();
   switch (h.what) {
     case WinHit::TitleBar:
       drag_ = Moving{w.id, m.x - w.display_rect.x, m.y - w.display_rect.y,
                      w.user_rect};
+      break;
+    case WinHit::ButtonMinimize:
+      wm_.set_mode(w.id, WinMode::Minimized, last_work_);
+      break;
+    case WinHit::ButtonMaximize:
+      wm_.set_mode(w.id,
+                   w.mode == WinMode::Maximized ? WinMode::Normal
+                                                : WinMode::Maximized,
+                   last_work_);
+      break;
+    case WinHit::ButtonClose:
+      // Le dialogue modal arrive à la tâche 10. D'ici là, une application qui
+      // refuse de partir reste ouverte -- sans rien dire, mais sans mentir
+      // non plus.
+      if (w.app->can_close().allowed) wm_.close(w.id);
       break;
     case WinHit::EdgeRight:
     case WinHit::EdgeBottom:
@@ -226,7 +289,7 @@ void Session::on_input(const InputEvent& e) {
       quit_ = true;
       return;
     }
-    if (win_) win_->app->on_key(*k);
+    if (Window* w = wm_.find(wm_.focused())) w->app->on_key(*k);
     return;
   }
   if (const auto* f = std::get_if<FocusEvent>(&e)) {
@@ -258,29 +321,43 @@ void Session::render(Surface& out) {
   }
 
   const Rect work = work_area(out.w(), out.h());
+  last_work_ = work;
   ensure_window(work);
 
-  Window& w = *win_;
-  w.display_rect = clamp_to(w.user_rect, work, frame_min(*w.app));
-  const Rect cr = client_rect(w.display_rect);
-  const Size cs{cr.w, cr.h};
-  if (!(cs == w.sent_size)) {
-    w.app->on_resize(cs);
-    w.sent_size = cs;
+  // De l'arrière vers l'avant : la dernière peinte est celle du dessus.
+  const WindowId focused = wm_.focused();
+  for (const auto& up : wm_.stack()) {
+    Window& w = *up;
+    if (w.mode == WinMode::Minimized) continue;
+
+    // Maximisée ou plein écran, la fenêtre SUIT la zone de travail sans que
+    // son user_rect en garde trace : c'est ce qui rend le rétablissement
+    // exact après un redimensionnement du terminal.
+    w.display_rect = w.mode == WinMode::Normal
+                         ? clamp_to(w.user_rect, work, frame_min(*w.app))
+                         : work;
+    const Rect cr = client_rect(w.display_rect);
+    const Size cs{cr.w, cr.h};
+    if (!(cs == w.sent_size)) {
+      w.app->on_resize(cs);
+      w.sent_size = cs;
+    }
+
+    draw_decor(v, w, w.id == focused, theme_, border());
+    w.app->render(v.sub(cr));
   }
 
-  draw_decor(v, w, true, theme_, border());
-  w.app->render(v.sub(cr));
-
-  // Le contour élastique du redimensionnement, par-dessus la fenêtre : rien
-  // d'autre ne bouge pendant le geste, c'est lui seul qui donne à voir la
-  // taille visée.
+  // Le contour élastique du redimensionnement, par-dessus toute la pile :
+  // rien d'autre ne bouge pendant le geste, c'est lui seul qui donne à voir
+  // la taille visée.
   if (const auto* rz = std::get_if<Resizing>(&drag_)) {
-    Style ol;
-    ol.fg = theme_.accent;
-    ol.bg = theme_.desktop_bg;
-    const Rect o = clamp_to(rz->outline, work, frame_min(*w.app));
-    v.box(o, border(), ol);
+    if (const Window* w = wm_.find(rz->win)) {
+      Style ol;
+      ol.fg = theme_.accent;
+      ol.bg = theme_.desktop_bg;
+      const Rect o = clamp_to(rz->outline, work, frame_min(*w->app));
+      v.box(o, border(), ol);
+    }
   }
 
   // Le panneau passe en dernier. clamp_to() garantit déjà qu'aucune fenêtre
