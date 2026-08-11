@@ -179,9 +179,7 @@ void Session::do_action(Action a) {
       w->app->on_key(KeyEvent{Key::Char, leader_.leader(), mod::Ctrl});
       return;
     case Action::Close:
-      // Le dialogue modal arrive à la tâche 11. D'ici là, une application
-      // qui refuse de partir reste ouverte, sans rien dire.
-      if (w->app->can_close().allowed) close_window(*w);
+      request_close(*w);
       return;
     case Action::Minimize:
       wm_.set_mode(w->id, WinMode::Minimized, last_work_);
@@ -265,6 +263,36 @@ WindowId Session::open_from_catalog(std::string_view id) {
   w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_);
   w->app->attach(*w->host);
   return w->id;
+}
+
+void Session::request_close(Window& w) {
+  // Annuler le glissement AVANT tout le reste : sans cet ordre, la machine
+  // à états garderait l'identifiant d'une fenêtre détruite et le prochain
+  // mouvement de souris irait chercher un fantôme.
+  //
+  // Aucun chemin actuel n'y arrive avec un geste en cours -- au clavier, la
+  // règle « toute frappe annule le glissement » (on_input) est passée
+  // avant ; à la souris, un clic sur [×] suppose un bouton relâché, donc
+  // aucun geste engagé. Ça reste vrai tant que la seule voie restante,
+  // Host::request_close() consommée en tête de composition, ne peut pas
+  // survenir pendant un geste : la composition n'a jamais lieu au milieu du
+  // traitement d'un évènement de souris.
+  cancel_drag();
+  const CloseCheck c = w.app->can_close();
+  if (c.allowed) {
+    close_window(w);
+    return;
+  }
+  modal_.ask(c.question, w.id);
+  dirty_ = true;
+}
+
+void Session::answer_modal(bool confirmed) {
+  if (confirmed) {
+    if (Window* t = wm_.find(modal_.target())) close_window(*t);
+  }
+  modal_.dismiss();
+  dirty_ = true;
 }
 
 void Session::close_window(Window& w) {
@@ -391,6 +419,16 @@ void Session::on_mouse(const MouseEvent& m) {
 
   if (m.action != MouseAction::Press) return;
 
+  // Et la modale passe devant le menu : rien derrière un dialogue modal
+  // n'est cliquable, pas même pour le refermer d'un clic à côté.
+  if (modal_.is_open()) {
+    const ModalHit mh = modal_.hit(m.x, m.y);
+    if (mh == ModalHit::Confirm) answer_modal(true);
+    if (mh == ModalHit::Cancel) answer_modal(false);
+    dirty_ = true;
+    return;
+  }
+
   // Le menu passe devant tout : ouvert, il prend le clic ou se referme.
   if (menu_.is_open()) {
     const MenuHitResult mh = menu_.hit(m.x, m.y);
@@ -470,10 +508,7 @@ void Session::on_mouse(const MouseEvent& m) {
                    last_work_);
       break;
     case WinHit::ButtonClose:
-      // Le dialogue modal arrive à la tâche 10. D'ici là, une application qui
-      // refuse de partir reste ouverte -- sans rien dire, mais sans mentir
-      // non plus.
-      if (w.app->can_close().allowed) close_window(w);
+      request_close(w);
       break;
     case WinHit::EdgeRight:
     case WinHit::EdgeBottom:
@@ -507,6 +542,30 @@ void Session::on_input(const InputEvent& e) {
       quit_ = true;
       return;
     }
+    // La modale passe avant tout le reste : c'est ce que « modal » veut
+    // dire. Ni le menu, ni les raccourcis, ni l'application ne voient rien
+    // tant qu'on n'a pas répondu.
+    if (modal_.is_open()) {
+      switch (k->key) {
+        case Key::Escape:
+          modal_.dismiss();
+          break;
+        case Key::Tab:
+        case Key::BackTab:
+        case Key::Left:
+        case Key::Right:
+          modal_.focus_next();
+          break;
+        case Key::Enter:
+          answer_modal(modal_.confirm_focused());
+          break;
+        default:
+          break;
+      }
+      dirty_ = true;
+      return;
+    }
+
     // Le menu capture tout tant qu'il est ouvert : une application ne doit
     // jamais recevoir les frappes qui pilotent le bureau.
     if (menu_.is_open()) {
@@ -551,6 +610,18 @@ void Session::render(Surface& out) {
   }
 
   if (clock_.update(*plat_)) dirty_ = true;
+
+  // Une application qui a demandé sa propre fermeture est servie ici, en
+  // tête de composition : elle passe par le MÊME chemin qu'un clic sur
+  // [×], donc par can_close() et, s'il le faut, par le dialogue. Aucune
+  // application du catalogue n'appelle encore Host::request_close(), mais
+  // sans cette consommation le drapeau serait en écriture seule.
+  for (const auto& up : wm_.stack()) {
+    if (!up->close_requested) continue;
+    up->close_requested = false;
+    request_close(*up);
+    break;  // la pile vient de changer : le reste au prochain tour
+  }
 
   const Rect work =
       work_area(out.w(), out.h(), panel_.edge(), panel_.thickness());
@@ -612,6 +683,11 @@ void Session::render(Surface& out) {
   // Le menu passe en dernier : il recouvre le panneau qui l'a ouvert.
   menu_.layout(out.w(), out.h());
   menu_.draw(v, theme_, border());
+
+  // Et la modale par-dessus le menu : elle est la dernière chose posée
+  // parce qu'elle est la seule à laquelle on puisse répondre.
+  modal_.layout(out.w(), out.h());
+  modal_.draw(v, theme_, border());
 }
 
 }  // namespace sshos

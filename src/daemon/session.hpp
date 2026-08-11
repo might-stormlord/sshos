@@ -13,6 +13,7 @@
 #include "render/theme.hpp"
 #include "shell/clock.hpp"
 #include "shell/menu.hpp"
+#include "shell/modal.hpp"
 #include "shell/panel.hpp"
 #include "wm/hittest.hpp"
 #include "wm/layout.hpp"
@@ -99,6 +100,16 @@ class Session {
   // epoll ne doit survivre au descripteur qu'elle désigne.
   void close_window(Window& w);
 
+
+  // Le chemin de fermeture, dans cet ordre : annuler le glissement, poser
+  // la question à l'application, fermer ou ouvrir le dialogue. Tous les
+  // chemins de fermeture passent ici -- bouton, raccourci, demande de
+  // l'application elle-même.
+  void request_close(Window& w);
+  // Répond au dialogue : ferme la cible si l'on a confirmé, referme dans
+  // tous les cas.
+  void answer_modal(bool confirmed);
+
   // Exécute une action de la table de raccourcis sur la fenêtre focalisée.
   void do_action(Action a);
   // Exécute une entrée du menu, désignée par son identifiant.
@@ -136,6 +147,7 @@ class Session {
   Panel panel_;
   Clock clock_;
   Menu menu_;
+  Modal modal_;
   LeaderDispatch leader_;
 
   // Les modes souris DEC sont posés par le client à l'attache ; la bascule

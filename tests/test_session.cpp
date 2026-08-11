@@ -1085,6 +1085,126 @@ TEST(session_hides_the_panel_under_a_fullscreen_window) {
   CHECK(again.text_row(23).find("ssh_os") != std::string::npos);
 }
 
+// Bloc refuse de se fermer une fois modifiée : la session doit poser la
+// question, pas fermer, et pas non plus l'ignorer.
+TEST(session_asks_before_closing_a_modified_window_and_honours_the_answer) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'z', 0}});
+
+  // Ctrl+A w : demander la fermeture.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'w', 0}});
+
+  Surface asked(80, 24);
+  sess.render(asked);
+  bool question = false;
+  for (int y = 0; y < 23; ++y) {
+    if (asked.text_row(y).find("modifications") != std::string::npos) question = true;
+  }
+  CHECK(question);
+
+  // Entrée valide le bouton par défaut, qui est Annuler : la fenêtre reste.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  Surface kept(80, 24);
+  sess.render(kept);
+  // L'étoile du titre dit que c'est bien LA fenêtre modifiée qui est
+  // restée : le bureau rouvre aussitôt une fenêtre neuve quand la pile se
+  // vide (ensure_window), donc compter les titres ne distinguerait pas
+  // « restée » de « fermée puis remplacée ».
+  CHECK(surface_contains(kept, "Bloc *"));
+  // Et le dialogue a bien disparu.
+  CHECK(!surface_contains(kept, "modifications"));
+
+  // Cette fois on confirme : Tab pour atteindre Confirmer, puis Entrée.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'w', 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Tab, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  Surface gone(80, 24);
+  sess.render(gone);
+  CHECK(!surface_contains(gone, "Bloc *"));
+  // Le bureau n'est jamais vide : une fenêtre neuve a pris la place.
+  CHECK(title_row_of(gone, 24) >= 0);
+}
+
+// Tant que la modale est là, ni l'application ni les raccourcis ne voient
+// quoi que ce soit. C'est tout ce que « modal » veut dire.
+TEST(session_lets_nothing_through_while_the_modal_is_up) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'z', 0}});
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'w', 0}});
+  Surface asked(80, 24);
+  sess.render(asked);
+  REQUIRE(surface_contains(asked, "modifications"));
+
+  // Le raccourci du menu ne l'ouvre pas.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  Surface still(80, 24);
+  sess.render(still);
+  CHECK(!surface_contains(still, "Quitter la session"));
+  CHECK(surface_contains(still, "modifications"));
+
+  // Un clic sur la barre de titre de la fenêtre en dessous n'engage aucun
+  // déplacement : la fenêtre ne bouge pas d'une cellule.
+  const int before = title_row_of(still, 24);
+  press_at(sess, 10, before);
+  motion_to(sess, 20, before + 5, 1);
+  release_at(sess, 20, before + 5);
+  Surface unmoved(80, 24);
+  sess.render(unmoved);
+  CHECK_EQ(title_row_of(unmoved, 24), before);
+
+  // Échap referme sans fermer la fenêtre.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Escape, 0, 0}});
+  Surface back(80, 24);
+  sess.render(back);
+  CHECK(!surface_contains(back, "modifications"));
+  CHECK(title_row_of(back, 24) >= 0);
+}
+
+// Un accord entamé pendant un glissement annule le geste au lieu de
+// l'exécuter -- la règle « toute frappe annule le glissement » de la
+// tâche 5 passe AVANT le dispatcheur. La fenêtre revient donc là où le
+// geste l'avait prise, et le 'w' qui suit n'est pas une fermeture : il
+// tombe dans l'application, qui le prend pour une saisie.
+TEST(session_cancels_a_drag_instead_of_closing_when_a_chord_starts_mid_gesture) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  const int before = title_row_of(s, 24);
+  REQUIRE(before >= 0);
+
+  press_at(sess, 5, before);
+  motion_to(sess, 8, before + 5, 1);
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'w', 0}});
+
+  motion_to(sess, 40, 20, 1);
+  release_at(sess, 40, 20);
+  Surface after(80, 24);
+  sess.render(after);
+  // Le geste a été défait, pas poursuivi : la fenêtre n'a pas bougé.
+  CHECK_EQ(title_row_of(after, 24), before);
+  // Et le 'w' est bien allé à l'application, qui se déclare modifiée.
+  CHECK(surface_contains(after, "Bloc *"));
+}
+
 TEST(session_refuses_an_unknown_catalog_entry) {
   FakePlatform plat;
   Session sess(plat, g_fds, 80, 24);
