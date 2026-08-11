@@ -25,22 +25,22 @@ constexpr int kFullWarningLen = sizeof(kFullWarning) - 1;
 std::string clock_text(const Platform& plat) {
   const std::time_t t = std::chrono::system_clock::to_time_t(plat.now());
   // Heure LOCALE, pas UTC : un panneau qui affiche l'heure doit suivre le
-  // fuseau reel de la machine, heure d'ete comprise -- jamais un decalage
-  // fixe code en dur (Toronto est a UTC-5 en hiver/EST, UTC-4 en ete/EDT ;
-  // seule la base de fuseaux tzdata, interrogee par ::localtime_r, connait
+  // fuseau réel de la machine, heure d'été comprise -- jamais un décalage
+  // fixe codé en dur (Toronto est à UTC-5 en hiver/EST, UTC-4 en été/EDT ;
+  // seule la base de fuseaux tzdata, interrogée par ::localtime_r, connaît
   // la bonne bascule). Un offset constant serait juste faux six mois par
   // an.
   //
-  // ::tzset() est necessaire ici, pas cosmetique : POSIX ne garantit pas que
-  // ::localtime_r() l'appelle elle-meme, et la glibc ne relit TZ qu'a la
-  // premiere utilisation (verifie empiriquement -- voir rapport de tache) :
-  // un changement ulterieur de TZ resterait sinon silencieusement ignore.
-  // Cout nominal negligeable : glibc ne re-parse le fichier de zone que si
-  // TZ a effectivement change depuis le dernier appel.
+  // ::tzset() est nécessaire ici, pas cosmétique : POSIX ne garantit pas que
+  // ::localtime_r() l'appelle elle-même, et la glibc ne relit TZ qu'à la
+  // première utilisation (vérifié empiriquement -- voir rapport de tâche) :
+  // un changement ultérieur de TZ resterait sinon silencieusement ignoré.
+  // Coût nominal négligeable : glibc ne re-parse le fichier de zone que si
+  // TZ a effectivement changé depuis le dernier appel.
   //
-  // Le demon est detache (double fork + setsid, voir daemonize.cpp) : il ne
-  // conserve aucun terminal controleur, mais herite bien de l'environnement
-  // du processus qui l'a lance, TZ compris -- c'est cette valeur, figee au
+  // Le démon est détaché (double fork + setsid, voir daemonize.cpp) : il ne
+  // conserve aucun terminal contrôleur, mais hérite bien de l'environnement
+  // du processus qui l'a lancé, TZ compris -- c'est cette valeur, figée au
   // moment du lancement, que ::tzset() lit ici.
   ::tzset();
   std::tm tm{};
