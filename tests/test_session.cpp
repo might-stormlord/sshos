@@ -27,6 +27,8 @@
 #include "daemon/daemon.hpp"
 #include "daemon/session.hpp"
 #include "harness.hpp"
+#include "input/events.hpp"
+#include "render/profile.hpp"
 #include "render/surface.hpp"
 
 using sshos::Session;
@@ -209,7 +211,7 @@ TEST(session_clock_follows_daylight_saving_under_a_single_timezone) {
   CHECK_EQ(offset_aug, 4);
 }
 
-TEST(session_draws_a_bordered_box_with_its_title) {
+TEST(session_draws_a_decorated_window_with_its_title) {
   FakePlatform plat;
   Session sess(plat, 40, 12);
   Surface s(40, 12);
@@ -217,7 +219,7 @@ TEST(session_draws_a_bordered_box_with_its_title) {
 
   bool found_title = false;
   for (int y = 0; y < 11; ++y) {
-    if (s.text_row(y).find("ssh_os 2.0") != std::string::npos) found_title = true;
+    if (s.text_row(y).find("Bloc") != std::string::npos) found_title = true;
   }
   CHECK(found_title);
 }
@@ -303,7 +305,7 @@ TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
   CHECK(a.text_row(10).find("ssh_os") == std::string::npos);
   bool found_title_a = false;
   for (int y = 0; y < 11; ++y) {
-    if (a.text_row(y).find("ssh_os 2.0") != std::string::npos) found_title_a = true;
+    if (a.text_row(y).find("Bloc") != std::string::npos) found_title_a = true;
   }
   CHECK(found_title_a);
 
@@ -313,10 +315,102 @@ TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
   CHECK(b.text_row(18).find("ssh_os") == std::string::npos);
   bool found_title_b = false;
   for (int y = 0; y < 19; ++y) {
-    if (b.text_row(y).find("ssh_os 2.0") != std::string::npos) found_title_b = true;
+    if (b.text_row(y).find("Bloc") != std::string::npos) found_title_b = true;
   }
   CHECK(found_title_b);
 }
+
+TEST(session_forwards_a_click_inside_the_client_area_to_the_app) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);  // crée la fenêtre
+
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Press;
+  m.x = 9;
+  m.y = 4;
+  sess.on_input(sshos::InputEvent{m});
+
+  Surface again(80, 24);
+  sess.render(again);
+  bool found = false;
+  for (int y = 0; y < 23; ++y) {
+    if (again.text_row(y).find("clics: 1") != std::string::npos) found = true;
+  }
+  CHECK(found);
+}
+
+// Le pendant du test précédent : un clic sur la décoration ou sur le
+// bureau ne doit PAS être livré à l'application. Sans cette garde, une
+// application recevrait des coordonnées négatives ou hors de sa surface.
+TEST(session_does_not_forward_a_click_outside_the_client_area) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Press;
+  m.x = 2;  // colonne gauche du cadre : la bordure, pas la zone cliente
+  m.y = 5;
+  sess.on_input(sshos::InputEvent{m});
+
+  Surface again(80, 24);
+  sess.render(again);
+  bool zero = false;
+  for (int y = 0; y < 23; ++y) {
+    if (again.text_row(y).find("clics: 0") != std::string::npos) zero = true;
+  }
+  CHECK(zero);
+}
+
+// Une frame rendue deux fois de suite à taille constante ne doit annoncer
+// qu'UN redimensionnement. C'est le relevé qui servira de preuve au geste
+// complet, à la tâche 5.
+TEST(session_announces_a_size_change_only_when_it_changes) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  sess.render(s);
+  sess.render(s);
+
+  bool once = false;
+  for (int y = 0; y < 23; ++y) {
+    if (s.text_row(y).find("resize: 1") != std::string::npos) once = true;
+  }
+  CHECK(once);
+}
+
+TEST(session_uses_ascii_borders_until_the_client_announces_utf8) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+
+  Surface ascii(80, 24);
+  sess.render(ascii);
+  CHECK_EQ(ascii.at(2, 14).ch, U'+');  // coin bas-gauche du cadre {2,1,44,14}
+
+  sshos::OutputProfile p;
+  p.depth = sshos::ColorDepth::TrueColor;
+  p.utf8 = true;
+  sess.set_output(p);
+
+  Surface uni(80, 24);
+  sess.render(uni);
+  CHECK_EQ(uni.at(2, 14).ch, U'└');
+}
+
+// La zone de travail s'arrête au-dessus du panneau : une fenêtre ne peut
+// pas recouvrir la barre des tâches, quelle que soit sa géométrie voulue.
+TEST(session_keeps_every_window_above_the_panel) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  CHECK(s.text_row(23).find("ssh_os") != std::string::npos);
+}
+
 
 // ---------------------------------------------------------------------
 // Infrastructure bout-en-bout : un vrai démon (fork() + run_daemon() dans
@@ -866,7 +960,7 @@ TEST(daemon_dirty_overflow_closes_the_connection) {
 
 // Le test bout-en-bout exigé par la tâche : un vrai démon, un vrai client
 // sur socket abstrait, un aller Hello/Welcome, une trame reçue contenant le
-// titre de la boîte ("ssh_os 2.0") et le texte du panneau ("ssh_os"), puis
+// titre de la fenêtre ("Bloc") et le texte du panneau ("ssh_os"), puis
 // un arrêt propre (SIGTERM, comme `sshos --kill`) vérifié par le code de
 // sortie ET par la disparition du socket abstrait. Les étapes 12 et 14 du
 // plan (lancement interactif, Ctrl+Q sous un vrai tty) ne sont pas
@@ -891,7 +985,7 @@ TEST(end_to_end_attach_render_detach_kill) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os 2.0", "ssh_os", 2000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 2000));
 
   // Détachement côté client : fermer notre bout ne doit rien perturber côté
   // démon (le bouchon M1 n'a qu'un seul client à la fois, sans notion de
@@ -1320,7 +1414,7 @@ TEST(daemon_mute_probe_does_not_evict_the_attached_client) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os 2.0", "ssh_os", 2000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 2000));
 
   // La sonde muette : ouvre puis referme, sans écrire un seul octet --
   // exactement --status/--kill/la sonde d'attache initiale de main.cpp.

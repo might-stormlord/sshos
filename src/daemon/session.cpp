@@ -5,6 +5,10 @@
 #include <string>
 #include <variant>
 
+#include "apps/bloc.hpp"
+#include "daemon/host.hpp"
+#include "wm/decor.hpp"
+
 namespace sshos {
 namespace {
 
@@ -21,6 +25,12 @@ constexpr int kMinRows = 12;
 constexpr char kFullWarning[] = "terminal trop petit - 40x12 minimum";
 constexpr char kShortWarning[] = "trop petit";
 constexpr int kFullWarningLen = sizeof(kFullWarning) - 1;
+
+// Position et taille de la première fenêtre, déterministes : plusieurs
+// tests bout-en-bout cliquent à une coordonnée fixe en comptant sur le fait
+// qu'elle tombe dans la zone cliente. La cascade et le placement libre
+// arrivent à la tâche 6.
+constexpr Rect kFirstWindowRect{2, 1, 44, 14};
 
 std::string clock_text(const Platform& plat) {
   const std::time_t t = std::chrono::system_clock::to_time_t(plat.now());
@@ -52,29 +62,91 @@ std::string clock_text(const Platform& plat) {
 
 }  // namespace
 
-Session::Session(Platform& plat, int, int) : plat_(&plat) {}
+Session::Session(Platform& plat, int, int) : plat_(&plat) {
+  theme_ = Theme::defaults().for_profile(out_);
+}
+
+void Session::set_output(const OutputProfile& p) {
+  out_ = p;
+  theme_ = Theme::defaults().for_profile(p);
+}
 
 void Session::resize(int, int) {}
+
+Border Session::border() const {
+  return out_.utf8 ? Border::Unicode : Border::Ascii;
+}
+
+Rect Session::work_area(int cols, int rows) const {
+  // Panneau ancré en bas, épaisseur 1. Les quatre bords arrivent à la
+  // tâche 9.
+  return Rect{0, 0, cols, rows - 1};
+}
+
+void Session::ensure_window(const Rect& work) {
+  if (win_) return;
+  auto w = std::make_unique<Window>();
+  w->id = next_id_++;
+  w->user_rect = kFirstWindowRect;
+  w->app = std::make_unique<Bloc>();
+  w->display_rect = clamp_to(w->user_rect, work, frame_min(*w->app));
+  // L'hôte est créé APRÈS la fenêtre et AVANT attach() : c'est attach() qui
+  // fait poser son titre à l'application.
+  w->host = std::make_unique<HostImpl>(*w);
+  w->app->attach(*w->host);
+  win_ = std::move(w);
+}
+
+void Session::draw_panel(View& v, int cols, int rows) {
+  Style p;
+  p.bg = theme_.panel_bg;
+  p.fg = theme_.panel_fg;
+  const int py = rows - 1;
+  v.fill(Rect{0, py, cols, 1}, p);
+
+  // Le bouton de menu porte la marque du projet. En UTF-8 il gagne son
+  // glyphe ; sans UTF-8 le mot seul reste lisible, là où un point
+  // d'interrogation ne dirait rien. Il devient cliquable à la tâche 10.
+  v.text(1, py, out_.utf8 ? "☰ ssh_os" : "ssh_os", p);
+
+  const std::string t = clock_text(*plat_);
+  v.text(cols - static_cast<int>(t.size()) - 1, py, t, p);
+}
 
 void Session::on_input(const InputEvent& e) {
   if (const auto* k = std::get_if<KeyEvent>(&e)) {
     if (k->key == Key::Char && k->ch == U'q' && (k->mods & mod::Ctrl) != 0) {
       quit_ = true;
+      return;
     }
-  } else if (const auto* m = std::get_if<MouseEvent>(&e)) {
-    if (m->action == MouseAction::Press) ++clicks_;
+    if (win_) win_->app->on_key(*k);
+    return;
+  }
+  if (const auto* m = std::get_if<MouseEvent>(&e)) {
+    if (!win_) return;
+    // Routage volontairement minimal : la tâche 5 le remplace par le vrai
+    // hit-test. Il suffit à garder verts les trois tests du round EPOLLHUP
+    // à chaque commit intermédiaire.
+    const Rect cr = client_rect(win_->display_rect);
+    if (!cr.contains(m->x, m->y)) return;
+    MouseEvent local = *m;
+    local.x = m->x - cr.x;
+    local.y = m->y - cr.y;
+    win_->app->on_mouse(local);
   }
 }
 
 void Session::render(Surface& out) {
   View v = out.root();
-  Style bg;
-  bg.bg = Color::indexed(4);
-  v.fill(Rect{0, 0, out.w(), out.h()}, bg);
+  Style desk;
+  desk.bg = theme_.desktop_bg;
+  v.fill(Rect{0, 0, out.w(), out.h()}, desk);
 
   if (out.w() < kMinCols || out.h() < kMinRows) {
+    // On sort AVANT de toucher à quoi que ce soit : l'état du bureau est
+    // préservé intact, et réagrandir le terminal le rend tel quel.
     Style warn;
-    warn.fg = Color::indexed(7);
+    warn.fg = theme_.panel_fg;
     if (out.w() >= kFullWarningLen) {
       v.text(0, 0, kFullWarning, warn);
     } else {
@@ -83,41 +155,25 @@ void Session::render(Surface& out) {
     return;
   }
 
-  // Panneau ancré en bas.
-  Style panel;
-  panel.bg = Color::indexed(0);
-  panel.fg = Color::indexed(7);
-  const int py = out.h() - 1;
-  v.fill(Rect{0, py, out.w(), 1}, panel);
-  v.text(1, py, "ssh_os", panel);
-  const std::string t = clock_text(*plat_);
-  v.text(out.w() - static_cast<int>(t.size()) - 1, py, t, panel);
+  const Rect work = work_area(out.w(), out.h());
+  ensure_window(work);
 
-  // Boîte centrée.
-  const int bw = 24;
-  const int bh = 6;
-  const int bx = (out.w() - bw) / 2;
-  const int by = (out.h() - 1 - bh) / 2;
-  Style box;
-  box.bg = Color::indexed(0);
-  box.fg = Color::indexed(15);
-  v.fill(Rect{bx, by, bw, bh}, box);
-  for (int x = 1; x < bw - 1; ++x) {
-    v.put(bx + x, by, U'-', box);
-    v.put(bx + x, by + bh - 1, U'-', box);
+  Window& w = *win_;
+  w.display_rect = clamp_to(w.user_rect, work, frame_min(*w.app));
+  const Rect cr = client_rect(w.display_rect);
+  const Size cs{cr.w, cr.h};
+  if (!(cs == w.sent_size)) {
+    w.app->on_resize(cs);
+    w.sent_size = cs;
   }
-  for (int y = 1; y < bh - 1; ++y) {
-    v.put(bx, by + y, U'|', box);
-    v.put(bx + bw - 1, by + y, U'|', box);
-  }
-  v.put(bx, by, U'+', box);
-  v.put(bx + bw - 1, by, U'+', box);
-  v.put(bx, by + bh - 1, U'+', box);
-  v.put(bx + bw - 1, by + bh - 1, U'+', box);
 
-  v.text(bx + 2, by + 1, "ssh_os 2.0", box);
-  v.text(bx + 2, by + 2, "clics: " + std::to_string(clicks_), box);
-  v.text(bx + 2, by + 4, "Ctrl+Q pour quitter", box);
+  draw_decor(v, w, true, theme_, border());
+  w.app->render(v.sub(cr));
+
+  // Le panneau passe en dernier. clamp_to() garantit déjà qu'aucune fenêtre
+  // ne l'atteint ; le dessiner par-dessus coûte une ligne et supprime toute
+  // une classe de régressions futures.
+  draw_panel(v, out.w(), out.h());
 }
 
 }  // namespace sshos

@@ -470,8 +470,12 @@ int run_daemon(std::string_view socket_name) {
             client = std::move(pending);
             client->cols = hello_seen->cols;
             client->rows = hello_seen->rows;
-            client->differ = std::make_unique<Differ>(OutputProfile::detect(
-                hello_seen->term, hello_seen->colorterm, hello_seen->utf8));
+            const OutputProfile prof = OutputProfile::detect(
+                hello_seen->term, hello_seen->colorterm, hello_seen->utf8);
+            client->differ = std::make_unique<Differ>(prof);
+            // Le nouveau client repart d'un Differ neuf, donc d'un repeint
+            // complet : changer de thème ici n'a rien à invalider.
+            session.set_output(prof);
             set_ambiguous_wide(false);
             screen.resize(hello_seen->cols, hello_seen->rows);
             session.resize(hello_seen->cols, hello_seen->rows);
