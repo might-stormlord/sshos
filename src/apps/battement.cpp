@@ -87,6 +87,11 @@ IoStatus Battement::on_io(uint64_t token, uint32_t events) {
     break;
   }
 
+  // Ce que l'application vient de lire change ce qu'elle affiche : c'est à
+  // elle de le dire, pas au démon de le deviner. Sans cet appel, le compteur
+  // n'apparaîtrait à l'écran qu'à la frappe suivante.
+  host_->invalidate();
+
   if (ended || (events & (EPOLLHUP | EPOLLERR)) != 0) {
     close_pipe();
     return IoStatus::Closed;

@@ -1,7 +1,5 @@
 #include "daemon/session.hpp"
 
-#include <cstdio>
-#include <ctime>
 #include <memory>
 #include <string>
 #include <variant>
@@ -42,39 +40,22 @@ constexpr char kDefaultApp[] = "bloc";
 // chaque composition.
 constexpr std::chrono::milliseconds kDragWatchdog{2000};
 
-std::string clock_text(const Platform& plat) {
-  const std::time_t t = std::chrono::system_clock::to_time_t(plat.now());
-  // Heure LOCALE, pas UTC : un panneau qui affiche l'heure doit suivre le
-  // fuseau réel de la machine, heure d'été comprise -- jamais un décalage
-  // fixe codé en dur (Toronto est à UTC-5 en hiver/EST, UTC-4 en été/EDT ;
-  // seule la base de fuseaux tzdata, interrogée par ::localtime_r, connaît
-  // la bonne bascule). Un offset constant serait juste faux six mois par
-  // an.
-  //
-  // ::tzset() est nécessaire ici, pas cosmétique : POSIX ne garantit pas que
-  // ::localtime_r() l'appelle elle-même, et la glibc ne relit TZ qu'à la
-  // première utilisation (vérifié empiriquement -- voir rapport de tâche) :
-  // un changement ultérieur de TZ resterait sinon silencieusement ignoré.
-  // Coût nominal négligeable : glibc ne re-parse le fichier de zone que si
-  // TZ a effectivement changé depuis le dernier appel.
-  //
-  // Le démon est détaché (double fork + setsid, voir daemonize.cpp) : il ne
-  // conserve aucun terminal contrôleur, mais hérite bien de l'environnement
-  // du processus qui l'a lancé, TZ compris -- c'est cette valeur, figée au
-  // moment du lancement, que ::tzset() lit ici.
-  ::tzset();
-  std::tm tm{};
-  ::localtime_r(&t, &tm);
-  char buf[16];
-  std::snprintf(buf, sizeof buf, "%02d:%02d", tm.tm_hour, tm.tm_min);
-  return buf;
-}
 
 }  // namespace
 
 Session::Session(Platform& plat, FdRegistrar& fds, int, int)
     : plat_(&plat), fds_(&fds) {
   theme_ = Theme::defaults().for_profile(out_);
+}
+
+bool Session::take_dirty() {
+  // L'horloge est relue ICI plutôt que dans render() seule : render() n'est
+  // appelée que lorsque la frame est déjà sale, elle ne peut donc pas être
+  // ce qui découvre qu'une minute a tourné.
+  if (clock_.update(*plat_)) dirty_ = true;
+  const bool d = dirty_;
+  dirty_ = false;
+  return d;
 }
 
 void Session::set_output(const OutputProfile& p) {
@@ -96,7 +77,7 @@ WindowId Session::open_from_catalog(std::string_view id) {
   // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
-  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_);
+  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_);
   w->app->attach(*w->host);
   return w->id;
 }
@@ -126,21 +107,6 @@ void Session::ensure_window(const Rect& work) {
   open_from_catalog(kDefaultApp);
 }
 
-void Session::draw_panel(View& v, int cols, int rows) {
-  Style p;
-  p.bg = theme_.panel_bg;
-  p.fg = theme_.panel_fg;
-  const int py = rows - 1;
-  v.fill(Rect{0, py, cols, 1}, p);
-
-  // Le bouton de menu porte la marque du projet. En UTF-8 il gagne son
-  // glyphe ; sans UTF-8 le mot seul reste lisible, là où un point
-  // d'interrogation ne dirait rien. Il devient cliquable à la tâche 10.
-  v.text(1, py, out_.utf8 ? "☰ ssh_os" : "ssh_os", p);
-
-  const std::string t = clock_text(*plat_);
-  v.text(cols - static_cast<int>(t.size()) - 1, py, t, p);
-}
 
 void Session::cancel_drag() {
   // Défaire ce que le geste a déjà écrit. Un déplacement suit le curseur en
@@ -334,7 +300,10 @@ void Session::render(Surface& out) {
     return;
   }
 
-  const Rect work = work_area(out.w(), out.h(), edge_, thickness_);
+  if (clock_.update(*plat_)) dirty_ = true;
+
+  const Rect work =
+      work_area(out.w(), out.h(), panel_.edge(), panel_.thickness());
   last_work_ = work;
   ensure_window(work);
 
@@ -380,9 +349,14 @@ void Session::render(Surface& out) {
   // Sauf sous une fenêtre plein écran, qui l'escamote : c'est là toute la
   // différence entre « plein écran » et « maximisé », lequel s'arrête à la
   // zone de travail précisément pour laisser le panneau visible.
+  //
+  // La disposition du panneau est recalculee dans tous les cas : c'est elle
+  // que le hit-test consulte, et un panneau caché reste un panneau dont on
+  // doit savoir où il serait.
+  panel_.layout(wm_, out.w(), out.h(), out_.utf8);
   const Window* front = wm_.find(focused);
   if (front == nullptr || front->mode != WinMode::Fullscreen) {
-    draw_panel(v, out.w(), out.h());
+    panel_.draw(v, theme_, clock_.text(), clock_.date());
   }
 }
 

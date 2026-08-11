@@ -52,12 +52,18 @@ struct FakeRegistrar : FdRegistrar {
 // même raison : `return w;` sur un objet nommé PEUT déplacer (la NRVO
 // n'est pas garantie), et l'HostImpl resterait accroché à l'ancienne
 // adresse.
+//
+// Le dernier paramètre est le drapeau de repeint : les cas qui ne le
+// regardent pas partagent g_dirty, celui qui le regarde passe le sien.
+bool g_dirty = false;
+
 std::unique_ptr<Window> make_window(sshos::WindowId id, std::unique_ptr<App> app,
-                                    FdRegistrar& reg, uint32_t& gen) {
+                                    FdRegistrar& reg, uint32_t& gen,
+                                    bool& dirty = g_dirty) {
   auto w = std::make_unique<Window>();
   w->id = id;
   w->app = std::move(app);
-  w->host = std::make_unique<HostImpl>(*w, reg, gen);
+  w->host = std::make_unique<HostImpl>(*w, reg, gen, dirty);
   return w;
 }
 
@@ -288,4 +294,51 @@ TEST(a_real_epoll_hands_back_exactly_the_key_the_host_registered) {
   CHECK_EQ(got, key);
   CHECK(host_of(*w).deliver(got, what) == IoStatus::Ok);
   CHECK_EQ(app->beats(), 1);
+}
+
+// Le canal application -> session. Il est resté muet jusqu'à ce que
+// l'horloge du panneau ait besoin de réclamer un repeint sans frappe.
+TEST(host_invalidate_asks_for_a_repaint) {
+  FakeRegistrar reg;
+  uint32_t gen = 16;
+  bool dirty = false;
+  auto w = make_window(3, std::make_unique<Bloc>(), reg, gen, dirty);
+
+  CHECK(!dirty);
+  host_of(*w).invalidate();
+  CHECK(dirty);
+}
+
+// set_title et request_close passent par la fenêtre, pas par un canal
+// détourné : c'est ce qui permet à une application d'être fermée par
+// elle-même sans rien savoir du gestionnaire.
+TEST(host_writes_the_title_and_the_close_request_on_its_own_window) {
+  FakeRegistrar reg;
+  uint32_t gen = 16;
+  auto w = make_window(3, std::make_unique<Bloc>(), reg, gen);
+
+  host_of(*w).set_title("Titre");
+  CHECK_EQ(w->title, std::string("Titre"));
+  CHECK(!w->close_requested);
+  host_of(*w).request_close();
+  CHECK(w->close_requested);
+}
+
+// L'application est ce qui SAIT que son affichage a changé. Le démon ne
+// peut pas le deviner : sans cet appel, le compteur de battements
+// n'apparaîtrait à l'écran qu'à la frappe suivante.
+TEST(battement_asks_for_a_repaint_when_it_reads) {
+  FakeRegistrar reg;
+  uint32_t gen = 16;
+  bool dirty = false;
+  auto w = make_window(8, std::make_unique<Battement>(), reg, gen, dirty);
+  w->app->attach(host_of(*w));
+  REQUIRE_EQ(reg.watches.size(), static_cast<size_t>(1));
+
+  auto* app = static_cast<Battement*>(w->app.get());
+  app->beat();
+  dirty = false;
+  CHECK(host_of(*w).deliver(reg.watches[0].key, EPOLLIN) == IoStatus::Ok);
+  CHECK_EQ(app->beats(), 1);
+  CHECK(dirty);
 }

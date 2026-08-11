@@ -60,6 +60,24 @@ struct FakePlatform : sshos::Platform {
   std::chrono::steady_clock::time_point steady{};
 };
 
+// Horloge murale QUI AVANCE, contrairement aux deux doubles figés
+// ci-dessous : la seule façon de faire tourner une minute sans dormir
+// soixante secondes.
+struct MovingPlatform : sshos::Platform {
+  explicit MovingPlatform(std::int64_t epoch_seconds) : t_(epoch_seconds) {}
+  std::chrono::system_clock::time_point now() const override {
+    return std::chrono::system_clock::time_point(std::chrono::seconds(t_));
+  }
+  std::chrono::steady_clock::time_point steady_now() const override {
+    return std::chrono::steady_clock::time_point{};
+  }
+  std::string read_file(std::string_view) const override { return {}; }
+  void advance(std::int64_t seconds) { t_ += seconds; }
+
+ private:
+  std::int64_t t_;
+};
+
 // Même rôle que FakePlatform ci-dessus, mais avec un instant configurable au
 // lieu d'un seul figé en dur -- nécessaire pour l'item 4 (round horloge, voir
 // clock-round-brief.md), qui doit comparer le rendu à DEUX instants distincts
@@ -719,6 +737,25 @@ TEST(session_preserves_the_desktop_across_a_terminal_too_small_to_draw_it) {
   for (int y = 0; y < 24; ++y) {
     CHECK_EQ(again.text_row(y), before[static_cast<size_t>(y)]);
   }
+}
+
+// LE canal que la tâche 9 ouvre. Sans lui, l'horloge du panneau resterait
+// figée jusqu'à la prochaine frappe : le démon ne compose que sur une frame
+// sale, et render() -- qui n'est appelée QUE sur une frame déjà sale -- ne
+// peut donc pas être ce qui découvre qu'une minute a tourné.
+TEST(session_asks_for_a_repaint_when_the_clock_changes_minute) {
+  MovingPlatform plat(1786370700);  // 2026-08-10 14:05:00 UTC
+  Session sess(plat, g_fds, 80, 24);
+  Surface out(80, 24);
+  sess.render(out);
+  sess.take_dirty();  // la première composition amorce l'horloge
+
+  CHECK(!sess.take_dirty());
+  plat.advance(30);
+  CHECK(!sess.take_dirty());  // même minute : rien à repeindre
+  plat.advance(30);
+  CHECK(sess.take_dirty());   // la minute a tourné
+  CHECK(!sess.take_dirty());  // et le drapeau se consomme
 }
 
 TEST(session_refuses_an_unknown_catalog_entry) {

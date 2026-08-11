@@ -255,6 +255,16 @@ int run_daemon(std::string_view socket_name) {
     // la place) de celui du rendu.
     const bool renderable = client && client->differ;
     int timeout = renderable ? clock.delay_ms(FrameClock::Clock::now()) : -1;
+    // Avec un client attaché, on ne dort jamais plus d'une seconde. Sans ce
+    // plancher, l'horloge du panneau resterait figée jusqu'à la prochaine
+    // frappe : delay_ms() rend -1 tant que rien n'est sale (frameclock.hpp),
+    // et rien ne peut plus jamais devenir sale tout seul. Ce n'est pas du
+    // scrutin actif -- le réveil ne compose que si take_dirty() ci-dessous
+    // dit qu'il y a de quoi -- et sans client il n'y a aucun plancher du
+    // tout : le démon au repos continue de bloquer indéfiniment.
+    if (client) {
+      timeout = (timeout < 0) ? 1000 : std::min(timeout, 1000);
+    }
     if (pending) {
       const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
           pending_deadline - FrameClock::Clock::now());
@@ -563,8 +573,12 @@ int run_daemon(std::string_view socket_name) {
         // sans bruit -- c'est le cas NORMAL d'un réveil en retard sur une
         // surveillance déjà retirée, exactement ce que les générations
         // servent à distinguer.
+        // Pas de mark_dirty() ici : c'est à l'application de dire que son
+        // affichage a changé, via Host::invalidate() -- que take_dirty()
+        // relève plus bas dans ce même tour. Salir d'office masquerait une
+        // application qui oublie de le faire, et repeindrait le bureau pour
+        // un réveil que l'application a peut-être ignoré.
         session.on_fd_event(key, events);
-        clock.mark_dirty();
       }
     }
 
@@ -578,6 +592,12 @@ int run_daemon(std::string_view socket_name) {
     if (pending && FrameClock::Clock::now() >= pending_deadline) {
       drop_pending();
     }
+
+    // Ce que la session veut repeindre sans qu'on ait touché à une touche :
+    // l'horloge qui change de minute, une application qui a appelé
+    // Host::invalidate(). Interrogée une fois par tour, juste avant la
+    // décision de composition.
+    if (session.take_dirty()) clock.mark_dirty();
 
     // Composition : au plus une fois par intervalle, après avoir tout drainé.
     const auto now = FrameClock::Clock::now();

@@ -10,6 +10,8 @@
 #include "render/profile.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"
+#include "shell/clock.hpp"
+#include "shell/panel.hpp"
 #include "wm/hittest.hpp"
 #include "wm/layout.hpp"
 #include "wm/manager.hpp"
@@ -47,6 +49,13 @@ class Session {
   // réveil en retard sur une surveillance déjà retirée.
   void on_fd_event(uint64_t key, uint32_t events);
 
+  // Relève -- et consomme -- la demande de repeint que la session a pu
+  // former sans qu'aucune touche n'ait été frappée. Le démon l'interroge
+  // une fois par tour. Elle relit l'horloge au passage : c'est ce qui rend
+  // le canal utile, puisque render() n'est appelée que sur une frame déjà
+  // sale et ne pourrait donc jamais se salir elle-même.
+  bool take_dirty();
+
   WinHitResult hit_window_at(int x, int y) const;
 
   // Appelée par le démon au détachement d'un client et à l'attache du
@@ -79,7 +88,6 @@ class Session {
   // Ferme une fenêtre en retirant d'abord ses surveillances : aucune entrée
   // epoll ne doit survivre au descripteur qu'elle désigne.
   void close_window(Window& w);
-  void draw_panel(View& v, int cols, int rows);
   void on_mouse(const MouseEvent& m);
   void watchdog();
 
@@ -104,11 +112,17 @@ class Session {
   // numéro de descripteur du noyau -- obtienne malgré tout une clé neuve.
   uint32_t fd_gen_ = kGenFirstDynamic;
 
-  // Le panneau est ancré en bas sur une ligne. Les trois autres bords et les
-  // épaisseurs plus grandes marchent déjà -- work_area() les traite -- mais
-  // rien ne les choisit encore : le réglage arrive avec la configuration.
-  PanelEdge edge_ = PanelEdge::Bottom;
-  int thickness_ = 1;
+  // Le panneau porte son bord et son épaisseur ; la zone de travail s'en
+  // déduit. Ancré en bas par défaut : les trois autres bords marchent, mais
+  // rien ne les choisit encore -- le réglage arrive avec la configuration.
+  Panel panel_;
+  Clock clock_;
+
+  // Repeint demandé hors de toute entrée utilisateur : l'horloge qui change
+  // de minute, une application qui appelle Host::invalidate(). HostImpl en
+  // tient l'adresse, d'où sa position parmi les membres -- il doit survivre
+  // aux fenêtres, et les fenêtres vivent dans wm_, déclaré plus haut.
+  bool dirty_ = false;
 
   // Dernière zone de travail composée. A3 tient toujours -- render() dérive
   // sa géométrie de la Surface qu'on lui passe et la réécrit ici -- mais le

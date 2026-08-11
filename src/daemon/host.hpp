@@ -55,8 +55,8 @@ inline constexpr uint32_t kGenFirstDynamic = 16;
 // vector d'objets déplaçables.
 class HostImpl : public Host {
  public:
-  HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen)
-      : win_(&win), fds_(&fds), gen_(&gen) {}
+  HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen, bool& dirty)
+      : win_(&win), fds_(&fds), gen_(&gen), dirty_(&dirty) {}
 
   void set_title(std::string title) override;
   void request_close() override;
@@ -84,6 +84,7 @@ class HostImpl : public Host {
   Window* win_;
   FdRegistrar* fds_;
   uint32_t* gen_;
+  bool* dirty_;
   std::vector<std::pair<uint64_t, int>> watched_;
 };
 
