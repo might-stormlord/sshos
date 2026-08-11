@@ -2,11 +2,52 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "app/app.hpp"
 #include "wm/window.hpp"
 
 namespace sshos {
+
+// Couture entre la session et l'epoll du démon. La session ne voit jamais
+// le descripteur de l'epoll ; le démon ne sait jamais ce qu'une clé
+// désigne.
+struct FdRegistrar {
+  virtual ~FdRegistrar() = default;
+  virtual void watch(uint64_t key, int fd, uint32_t events) = 0;
+  // Toujours appelée AVANT close(). L'ordre inverse laisse une entrée sur
+  // un numéro que le noyau peut réattribuer aussitôt.
+  virtual void unwatch(int fd) = 0;
+};
+
+// Objet nul, pas échafaudage : il donne un registrar valide aux cas
+// unitaires de Session, qui n'ont pas d'epoll et n'en veulent pas.
+struct NullFdRegistrar : FdRegistrar {
+  void watch(uint64_t, int, uint32_t) override {}
+  void unwatch(int) override {}
+};
+
+// epoll_event.data est une UNION : impossible d'y ranger un descripteur
+// pour les fds du démon et autre chose pour ceux des applications. Tout
+// passe donc par un u64, découpé en (fenêtre, génération). La génération
+// est ce qui distingue deux surveillances successives d'un même numéro de
+// descripteur -- le noyau recycle les numéros libres immédiatement.
+constexpr uint64_t make_key(WindowId win, uint32_t gen) {
+  return (static_cast<uint64_t>(win) << 32) | gen;
+}
+constexpr WindowId key_window(uint64_t key) {
+  return static_cast<WindowId>(key >> 32);
+}
+
+// Générations réservées au démon lui-même (window_id == 0). Les trois
+// premiers descripteurs vivent aussi longtemps que le processus ; les
+// suivants (client, connexion en attente) prennent une génération issue
+// d'un compteur qui démarre ici.
+inline constexpr uint32_t kGenListener = 1;
+inline constexpr uint32_t kGenTimer = 2;
+inline constexpr uint32_t kGenSignal = 3;
+inline constexpr uint32_t kGenFirstDynamic = 16;
 
 // Le seul objet qui traverse la frontière entre une application et le
 // bureau. Il tient une référence sur SA fenêtre, dont l'adresse est stable
@@ -14,21 +55,36 @@ namespace sshos {
 // vector d'objets déplaçables.
 class HostImpl : public Host {
  public:
-  explicit HostImpl(Window& win) : win_(&win) {}
+  HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen)
+      : win_(&win), fds_(&fds), gen_(&gen) {}
 
   void set_title(std::string title) override;
   void request_close() override;
   void invalidate() override;
 
-  // watch/unwatch sont câblés à la tâche 8, avec le FdRegistrar et les clés
-  // générationnelles. Ne rien faire est le comportement CORRECT tant
-  // qu'aucune application du catalogue ne surveille de descripteur : Bloc
-  // n'en a pas, et Battement -- qui en a un -- arrive avec le registrar.
   uint64_t watch(int fd, uint32_t events) override;
   void unwatch(uint64_t token) override;
 
+  // Cette clé désigne-t-elle encore une surveillance vivante ? Répondre non
+  // est tout l'intérêt des générations : un événement livré par epoll pour
+  // une surveillance déjà retirée porte une clé que plus personne ne
+  // reconnaît, et se jette au lieu d'être servi à l'application comme s'il
+  // était le sien.
+  bool owns(uint64_t key) const;
+
+  // Achemine un événement vers l'application. Une clé périmée est jetée
+  // sans bruit -- c'est un cas NORMAL, pas une anomalie.
+  IoStatus deliver(uint64_t key, uint32_t events);
+
+  // Appelée avant de détruire une fenêtre encore surveillée : les entrées
+  // epoll doivent partir avant les descripteurs qu'elles désignent.
+  void unwatch_all();
+
  private:
   Window* win_;
+  FdRegistrar* fds_;
+  uint32_t* gen_;
+  std::vector<std::pair<uint64_t, int>> watched_;
 };
 
 }  // namespace sshos

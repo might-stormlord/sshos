@@ -36,6 +36,12 @@ using sshos::Surface;
 
 namespace {
 
+// Registrar nul partagé par tous les cas unitaires : ils n'ont pas d'epoll
+// et n'en veulent pas. Une seule instance suffit parce que l'objet est sans
+// état -- il ne fait rien, c'est tout son rôle. Les cas bout-en-bout, eux,
+// passent par le vrai registrar du démon.
+sshos::NullFdRegistrar g_fds;
+
 // Horloge figée : sans elle le harnais n'est pas déterministe par
 // construction, et un test d'affichage d'heure est ininspectable.
 struct FakePlatform : sshos::Platform {
@@ -147,7 +153,7 @@ TEST(session_draws_a_panel_on_the_last_row) {
   TzGuard tz("America/Toronto");
 
   FakePlatform plat;
-  Session sess(plat, 40, 12);
+  Session sess(plat, g_fds, 40, 12);
   Surface s(40, 12);
   sess.render(s);
   const std::string panel = s.text_row(11);
@@ -181,7 +187,7 @@ TEST(session_clock_follows_daylight_saving_under_a_single_timezone) {
   constexpr std::int64_t kAugustEpoch = 1786795200;   // 2026-08-15 12:00:00 UTC
 
   FakePlatformAt jan(kJanuaryEpoch);
-  Session sess_jan(jan, 40, 12);
+  Session sess_jan(jan, g_fds, 40, 12);
   Surface s_jan(40, 12);
   sess_jan.render(s_jan);
   const std::string panel_jan = s_jan.text_row(11);
@@ -189,7 +195,7 @@ TEST(session_clock_follows_daylight_saving_under_a_single_timezone) {
   CHECK(pos_jan != std::string::npos);
 
   FakePlatformAt aug(kAugustEpoch);
-  Session sess_aug(aug, 40, 12);
+  Session sess_aug(aug, g_fds, 40, 12);
   Surface s_aug(40, 12);
   sess_aug.render(s_aug);
   const std::string panel_aug = s_aug.text_row(11);
@@ -225,7 +231,7 @@ TEST(session_clock_follows_daylight_saving_under_a_single_timezone) {
 
 TEST(session_draws_a_decorated_window_with_its_title) {
   FakePlatform plat;
-  Session sess(plat, 40, 12);
+  Session sess(plat, g_fds, 40, 12);
   Surface s(40, 12);
   sess.render(s);
 
@@ -245,7 +251,7 @@ TEST(session_draws_a_decorated_window_with_its_title) {
 // isole la même propriété sans dépendre d'un comptage de caractères précis.
 TEST(session_survives_a_terminal_smaller_than_the_minimum) {
   FakePlatform plat;
-  Session sess(plat, 12, 3);
+  Session sess(plat, g_fds, 12, 3);
   Surface s(12, 3);
   sess.render(s);  // ne doit ni planter ni écrire hors surface
   CHECK(s.text_row(0).find("petit") != std::string::npos);
@@ -253,7 +259,7 @@ TEST(session_survives_a_terminal_smaller_than_the_minimum) {
 
 TEST(session_quits_on_ctrl_q) {
   FakePlatform plat;
-  Session sess(plat, 40, 12);
+  Session sess(plat, g_fds, 40, 12);
   CHECK(!sess.wants_quit());
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'q', sshos::mod::Ctrl}});
@@ -270,7 +276,7 @@ TEST(session_quits_on_ctrl_q) {
 // rôle pour l'autre embranchement.
 TEST(session_shows_full_warning_when_width_permits_but_height_does_not) {
   FakePlatform plat;
-  Session sess(plat, 40, 3);
+  Session sess(plat, g_fds, 40, 3);
   Surface s(40, 3);
   sess.render(s);
   CHECK(s.text_row(0).find("terminal trop petit - 40x12 minimum") !=
@@ -286,7 +292,7 @@ TEST(session_shows_full_warning_when_width_permits_but_height_does_not) {
 // segment est coupé par le clip avant d'être atteint).
 TEST(session_shows_short_warning_when_width_is_too_small_for_the_full_message) {
   FakePlatform plat;
-  Session sess(plat, 12, 3);
+  Session sess(plat, g_fds, 12, 3);
   Surface s(12, 3);
   sess.render(s);
   const std::string row = s.text_row(0);
@@ -309,7 +315,7 @@ TEST(session_shows_short_warning_when_width_is_too_small_for_the_full_message) {
 // régression hypothétique, démontrée par mutation).
 TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
   FakePlatform plat;
-  Session sess(plat, 999, 999);
+  Session sess(plat, g_fds, 999, 999);
 
   Surface a(40, 12);
   sess.render(a);
@@ -334,7 +340,7 @@ TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
 
 TEST(session_forwards_a_click_inside_the_client_area_to_the_app) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);  // crée la fenêtre
 
@@ -358,7 +364,7 @@ TEST(session_forwards_a_click_inside_the_client_area_to_the_app) {
 // application recevrait des coordonnées négatives ou hors de sa surface.
 TEST(session_does_not_forward_a_click_outside_the_client_area) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
 
@@ -382,7 +388,7 @@ TEST(session_does_not_forward_a_click_outside_the_client_area) {
 // complet, à la tâche 5.
 TEST(session_announces_a_size_change_only_when_it_changes) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   sess.render(s);
@@ -397,7 +403,7 @@ TEST(session_announces_a_size_change_only_when_it_changes) {
 
 TEST(session_uses_ascii_borders_until_the_client_announces_utf8) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
 
   Surface ascii(80, 24);
   sess.render(ascii);
@@ -417,7 +423,7 @@ TEST(session_uses_ascii_borders_until_the_client_announces_utf8) {
 // pas recouvrir la barre des tâches, quelle que soit sa géométrie voulue.
 TEST(session_keeps_every_window_above_the_panel) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   CHECK(s.text_row(23).find("ssh_os") != std::string::npos);
@@ -467,7 +473,7 @@ int title_row_of(const Surface& s, int rows) {
 
 TEST(session_moves_a_window_dragged_by_its_title_bar) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE_EQ(title_row_of(s, 24), 1);
@@ -493,7 +499,7 @@ TEST(session_moves_a_window_dragged_by_its_title_bar) {
 // implémentation annonce une douzaine de tailles au lieu d'une.
 TEST(session_tells_the_app_its_new_size_exactly_once_per_resize_gesture) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);  // resize: 1
 
@@ -523,7 +529,7 @@ TEST(session_cancels_a_drag_on_every_one_of_the_seven_paths) {
   const int kPaths = 7;
   for (int path = 0; path < kPaths; ++path) {
     FakePlatform plat;
-    Session sess(plat, 80, 24);
+    Session sess(plat, g_fds, 80, 24);
     Surface s(80, 24);
     sess.render(s);
     REQUIRE_EQ(title_row_of(s, 24), 1);
@@ -588,7 +594,7 @@ TEST(session_cancels_a_drag_on_every_one_of_the_seven_paths) {
 // l'utilisateur ne peut plus enlever.
 TEST(session_sweeps_a_stale_resize_outline_without_any_further_input) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
 
@@ -610,7 +616,7 @@ TEST(session_sweeps_a_stale_resize_outline_without_any_further_input) {
 
 TEST(session_draws_the_focused_window_on_top) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   sess.open_from_catalog("bloc");
@@ -630,7 +636,7 @@ TEST(session_draws_the_focused_window_on_top) {
 // « tout terne » ne peut imiter cet échange.
 TEST(session_dims_every_window_that_does_not_have_the_focus) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE(sess.open_from_catalog("bloc") != 0u);
@@ -656,7 +662,7 @@ TEST(session_dims_every_window_that_does_not_have_the_focus) {
 // compte.
 TEST(session_hit_test_answers_for_the_window_on_top) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   const sshos::WindowId top = sess.open_from_catalog("bloc");
@@ -687,7 +693,7 @@ TEST(session_hit_test_answers_for_the_window_on_top) {
 // écrasés par la géométrie contrainte du petit terminal.
 TEST(session_preserves_the_desktop_across_a_terminal_too_small_to_draw_it) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface big(80, 24);
   sess.render(big);
   REQUIRE(sess.open_from_catalog("bloc") != 0u);
@@ -717,7 +723,7 @@ TEST(session_preserves_the_desktop_across_a_terminal_too_small_to_draw_it) {
 
 TEST(session_refuses_an_unknown_catalog_entry) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   CHECK_EQ(sess.open_from_catalog("il-n-existe-pas"), 0u);
@@ -727,7 +733,7 @@ TEST(session_refuses_an_unknown_catalog_entry) {
 // clic sur sa case [×] la ferme -- ELLE, pas celle qui avait le focus.
 TEST(session_focuses_and_closes_the_window_under_the_pointer) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE(sess.open_from_catalog("bloc") != 0u);
@@ -762,7 +768,7 @@ TEST(session_focuses_and_closes_the_window_under_the_pointer) {
 // bascule maximisée puis rétablit EXACTEMENT la géométrie d'avant.
 TEST(session_minimizes_and_maximizes_from_the_title_bar_buttons) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE_EQ(s.text_row(1).find("Bloc"), std::string::size_type(4));
@@ -799,7 +805,7 @@ TEST(session_minimizes_and_maximizes_from_the_title_bar_buttons) {
 // justement à une cellule du bord haut de la zone de travail.
 TEST(session_does_not_move_a_window_merely_clicked_on_its_title_bar) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE_EQ(title_row_of(s, 24), 1);
@@ -819,7 +825,7 @@ TEST(session_does_not_move_a_window_merely_clicked_on_its_title_bar) {
 // l'abscisse du cadre à la lecture.
 TEST(session_snaps_a_dragged_window_onto_a_nearby_edge) {
   FakePlatform plat;
-  Session sess(plat, 80, 24);
+  Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
   REQUIRE_EQ(s.text_row(1).find("Bloc"), std::string::size_type(4));

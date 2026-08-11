@@ -72,7 +72,8 @@ std::string clock_text(const Platform& plat) {
 
 }  // namespace
 
-Session::Session(Platform& plat, int, int) : plat_(&plat) {
+Session::Session(Platform& plat, FdRegistrar& fds, int, int)
+    : plat_(&plat), fds_(&fds) {
   theme_ = Theme::defaults().for_profile(out_);
 }
 
@@ -95,9 +96,28 @@ WindowId Session::open_from_catalog(std::string_view id) {
   // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
-  w->host = std::make_unique<HostImpl>(*w);
+  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_);
   w->app->attach(*w->host);
   return w->id;
+}
+
+void Session::close_window(Window& w) {
+  // L'ordre est le même que partout ailleurs : les entrées epoll partent
+  // avant les descripteurs. Le destructeur de l'application le fait déjà
+  // pour ses propres surveillances (Window déclare `host` avant `app`,
+  // donc l'hôte lui survit) ; ceci couvre celles qu'elle aurait oubliées.
+  if (w.host != nullptr) static_cast<HostImpl*>(w.host.get())->unwatch_all();
+  wm_.close(w.id);
+}
+
+void Session::on_fd_event(uint64_t key, uint32_t events) {
+  Window* w = wm_.find(key_window(key));
+  if (w == nullptr || w->host == nullptr) return;  // fenêtre déjà fermée
+  auto* host = static_cast<HostImpl*>(w->host.get());
+  if (host->deliver(key, events) == IoStatus::Closed) {
+    // L'application a perdu sa source. Elle reste vivante : c'est à elle de
+    // décider si elle veut continuer, et Battement le fait.
+  }
 }
 
 void Session::ensure_window(const Rect& work) {
@@ -249,7 +269,7 @@ void Session::on_mouse(const MouseEvent& m) {
       // Le dialogue modal arrive à la tâche 10. D'ici là, une application qui
       // refuse de partir reste ouverte -- sans rien dire, mais sans mentir
       // non plus.
-      if (w.app->can_close().allowed) wm_.close(w.id);
+      if (w.app->can_close().allowed) close_window(w);
       break;
     case WinHit::EdgeRight:
     case WinHit::EdgeBottom:

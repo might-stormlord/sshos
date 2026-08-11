@@ -1,11 +1,13 @@
 #include "app/catalog.hpp"
 
+#include "apps/battement.hpp"
 #include "apps/bloc.hpp"
 
 namespace sshos {
 namespace {
 
 std::unique_ptr<App> make_bloc() { return std::make_unique<Bloc>(); }
+std::unique_ptr<App> make_battement() { return std::make_unique<Battement>(); }
 
 }  // namespace
 
@@ -17,6 +19,7 @@ std::unique_ptr<App> make_bloc() { return std::make_unique<Bloc>(); }
 const std::vector<CatalogEntry>& catalog() {
   static const std::vector<CatalogEntry> entries = {
       {"bloc", "Bloc", &make_bloc},
+      {"battement", "Battement", &make_battement},
   };
   return entries;
 }

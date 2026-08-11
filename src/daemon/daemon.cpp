@@ -19,6 +19,7 @@
 #include "common/outqueue.hpp"
 #include "common/platform.hpp"
 #include "common/proto.hpp"
+#include "daemon/host.hpp"
 #include "daemon/session.hpp"
 #include "input/parser.hpp"
 #include "render/diff.hpp"
@@ -42,6 +43,10 @@ constexpr std::chrono::milliseconds kPendingHelloTimeout{5000};
 
 struct Client {
   Fd fd;
+  // Clé epoll de CETTE connexion. Sa génération est neuve à chaque accept(),
+  // donc un événement en retard sur un numéro de descripteur déjà recyclé
+  // porte l'ancienne génération et n'est reconnu par personne.
+  uint64_t key = 0;
   Decoder dec;
   InputParser input;
   OutQueue out{kBackpressureCeiling};
@@ -50,19 +55,38 @@ struct Client {
   int rows = 24;
 };
 
-void epoll_mod(int ep, int fd, uint32_t events) {
+// epoll_event.data est une UNION : impossible d'y ranger un descripteur
+// pour les fds du démon et un u64 pour ceux des applications. Toute la
+// boucle est donc passée aux clés (voir make_key dans daemon/host.hpp), y
+// compris pour ses propres descripteurs.
+void epoll_mod(int ep, uint64_t key, int fd, uint32_t events) {
   epoll_event ev{};
   ev.events = events;
-  ev.data.fd = fd;
+  ev.data.u64 = key;
   ::epoll_ctl(ep, EPOLL_CTL_MOD, fd, &ev);
 }
 
-void epoll_add(int ep, int fd, uint32_t events) {
+void epoll_add(int ep, uint64_t key, int fd, uint32_t events) {
   epoll_event ev{};
   ev.events = events;
-  ev.data.fd = fd;
+  ev.data.u64 = key;
   ::epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev);
 }
+
+// Le registrar concret. La session ne voit jamais l'epoll ; le démon ne
+// sait jamais ce qu'une clé désigne.
+struct EpollRegistrar : FdRegistrar {
+  int ep = -1;
+  void watch(uint64_t key, int fd, uint32_t events) override {
+    epoll_event ev{};
+    ev.events = events;
+    ev.data.u64 = key;
+    if (::epoll_ctl(ep, EPOLL_CTL_ADD, fd, &ev) < 0 && errno == EEXIST) {
+      ::epoll_ctl(ep, EPOLL_CTL_MOD, fd, &ev);
+    }
+  }
+  void unwatch(int fd) override { ::epoll_ctl(ep, EPOLL_CTL_DEL, fd, nullptr); }
+};
 
 Fd make_signalfd() {
   sigset_t mask;
@@ -88,7 +112,6 @@ int run_daemon(std::string_view socket_name) {
   set_nonblock(listener.get());
 
   RealPlatform plat;
-  Session session(plat, 80, 24);
   Surface screen(80, 24);
   FrameClock clock{std::chrono::milliseconds(kFrameIntervalMs)};
 
@@ -96,9 +119,20 @@ int run_daemon(std::string_view socket_name) {
   Fd sigfd = make_signalfd();
   Fd timer(::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK));
 
-  epoll_add(ep.get(), listener.get(), EPOLLIN);
-  epoll_add(ep.get(), sigfd.get(), EPOLLIN);
-  epoll_add(ep.get(), timer.get(), EPOLLIN);
+  // L'ordre de déclaration EST la durée de vie : `session` meurt avant
+  // `registrar`, qui meurt avant `ep`. Les applications appellent unwatch()
+  // depuis leurs destructeurs -- l'epoll doit donc leur survivre.
+  EpollRegistrar registrar;
+  registrar.ep = ep.get();
+  Session session(plat, registrar, 80, 24);
+
+  // Les trois descripteurs du démon vivent aussi longtemps que le
+  // processus : leur génération est fixe. Les connexions, elles, en tirent
+  // une neuve à chaque accept().
+  epoll_add(ep.get(), make_key(0, kGenListener), listener.get(), EPOLLIN);
+  epoll_add(ep.get(), make_key(0, kGenSignal), sigfd.get(), EPOLLIN);
+  epoll_add(ep.get(), make_key(0, kGenTimer), timer.get(), EPOLLIN);
+  uint32_t next_gen = kGenFirstDynamic;
 
   std::unique_ptr<Client> client;
 
@@ -120,15 +154,22 @@ int run_daemon(std::string_view socket_name) {
   std::string scratch(65536, '\0');
   bool running = true;
 
-  // A2 : descripteurs fermés pendant le lot epoll en cours, qu'ils
-  // appartenaient à `client` ou à `pending`. epoll_wait() remplit son
-  // tableau d'événements d'après l'état au moment de l'attente ; si un
-  // drop_*() ferme un descripteur puis qu'un accept_peer() ultérieur du
-  // MÊME lot lui redonne ce numéro (le noyau réutilise les plus petits
-  // numéros libres), les gardes `fd == client->fd.get()` /
-  // `fd == pending->fd.get()` laisseraient passer un événement périmé vers
-  // le nouvel occupant de ce numéro. Vidée au début de chaque tour.
-  std::vector<int> closed_this_batch;
+  // A2 : CLÉS fermées pendant le lot epoll en cours, qu'elles appartinssent
+  // à `client` ou à `pending`. epoll_wait() remplit son tableau
+  // d'événements d'après l'état au moment de l'attente ; si un drop_*()
+  // ferme un descripteur puis qu'un accept_peer() ultérieur du MÊME lot lui
+  // redonne ce numéro (le noyau réutilise les plus petits numéros libres),
+  // les gardes `key == client->key` / `key == pending->key` laisseraient
+  // passer un événement périmé vers le nouvel occupant de ce numéro. Vidée
+  // au début de chaque tour.
+  //
+  // Depuis le passage aux clés générationnelles, cette liste n'est même
+  // plus la seule ligne de défense : une connexion neuve tire une
+  // génération neuve à chaque accept(), donc un événement en retard porte
+  // une clé que PLUS PERSONNE ne reconnaît et tombe dans la branche
+  // applicative finale, où il est jeté. C'est ce qui referme pour de bon le
+  // trou décrit ci-dessus.
+  std::vector<uint64_t> closed_this_batch;
 
   const auto drop_client = [&](const char* reason) {
     if (!client) return;
@@ -137,7 +178,7 @@ int run_daemon(std::string_view socket_name) {
       client->out.flush(client->fd.get());
     }
     ::epoll_ctl(ep.get(), EPOLL_CTL_DEL, client->fd.get(), nullptr);
-    closed_this_batch.push_back(client->fd.get());
+    closed_this_batch.push_back(client->key);
     client.reset();
     // Sans client, plus rien n'est rendable : aucun dirty_ résiduel ne doit
     // survivre à son départ (voir FrameClock::reset() pour le scénario
@@ -160,7 +201,7 @@ int run_daemon(std::string_view socket_name) {
   const auto drop_pending = [&]() {
     if (!pending) return;
     ::epoll_ctl(ep.get(), EPOLL_CTL_DEL, pending->fd.get(), nullptr);
-    closed_this_batch.push_back(pending->fd.get());
+    closed_this_batch.push_back(pending->key);
     pending.reset();
   };
 
@@ -227,10 +268,10 @@ int run_daemon(std::string_view socket_name) {
     }
 
     for (int i = 0; i < n; ++i) {
-      const int fd = evs[i].data.fd;
+      const uint64_t key = evs[i].data.u64;
       const uint32_t events = evs[i].events;
 
-      if (fd == sigfd.get()) {
+      if (key == make_key(0, kGenSignal)) {
         signalfd_siginfo si{};
         while (::read(sigfd.get(), &si, sizeof si) == sizeof si) {
           if (si.ssi_signo == SIGTERM || si.ssi_signo == SIGINT) running = false;
@@ -238,14 +279,14 @@ int run_daemon(std::string_view socket_name) {
         continue;
       }
 
-      if (fd == timer.get()) {
+      if (key == make_key(0, kGenTimer)) {
         uint64_t ticks = 0;
         while (::read(timer.get(), &ticks, sizeof ticks) == sizeof ticks) {
         }
         continue;
       }
 
-      if (fd == listener.get()) {
+      if (key == make_key(0, kGenListener)) {
         AcceptResult r = accept_peer(listener.get(), ::getuid());
         switch (r.outcome) {
           case AcceptOutcome::Empty:
@@ -288,7 +329,8 @@ int run_daemon(std::string_view socket_name) {
             if (pending) drop_pending();
             pending = std::make_unique<Client>();
             pending->fd = std::move(fresh);
-            epoll_add(ep.get(), pending->fd.get(), EPOLLIN);
+            pending->key = make_key(0, next_gen++);
+            epoll_add(ep.get(), pending->key, pending->fd.get(), EPOLLIN);
             pending_deadline = FrameClock::Clock::now() + kPendingHelloTimeout;
             break;
           }
@@ -331,18 +373,20 @@ int run_daemon(std::string_view socket_name) {
       // correctement une extension future (plusieurs accepts par tour, ou
       // un tableau evs[] plus grand traité en plusieurs passes), et son
       // coût est nul.
-      if (std::find(closed_this_batch.begin(), closed_this_batch.end(), fd) !=
+      if (std::find(closed_this_batch.begin(), closed_this_batch.end(), key) !=
           closed_this_batch.end()) {
         continue;
       }
 
-      if (client && fd == client->fd.get()) {
+      if (client && key == client->key) {
         if ((events & EPOLLOUT) != 0) {
           if (!client->out.flush(client->fd.get())) {
             drop_client(nullptr);
             continue;
           }
-          if (!client->out.wants_write()) epoll_mod(ep.get(), fd, EPOLLIN);
+          if (!client->out.wants_write()) {
+            epoll_mod(ep.get(), client->key, client->fd.get(), EPOLLIN);
+          }
         }
 
         // Round C (voir le rapport de tâche) : on draine et on traite
@@ -420,7 +464,7 @@ int run_daemon(std::string_view socket_name) {
           drop_client(nullptr);
           continue;
         }
-      } else if (pending && fd == pending->fd.get()) {
+      } else if (pending && key == pending->key) {
         // Item 2 : une connexion qui n'a pas encore décliné son intention
         // n'a aucun effet sur `client`, quoi qu'elle envoie ou qu'elle
         // fasse — voir le commentaire au-dessus de la déclaration de
@@ -513,6 +557,14 @@ int run_daemon(std::string_view socket_name) {
           drop_pending();
           continue;
         }
+      } else {
+        // Aucun descripteur du démon : c'est une application qui se
+        // réveille. Une clé que plus aucune fenêtre ne reconnaît s'y jette
+        // sans bruit -- c'est le cas NORMAL d'un réveil en retard sur une
+        // surveillance déjà retirée, exactement ce que les générations
+        // servent à distinguer.
+        session.on_fd_event(key, events);
+        clock.mark_dirty();
       }
     }
 
@@ -560,7 +612,7 @@ int run_daemon(std::string_view socket_name) {
         if (!client->out.flush(client->fd.get())) {
           drop_client(nullptr);
         } else if (client->out.wants_write()) {
-          epoll_mod(ep.get(), client->fd.get(), EPOLLIN | EPOLLOUT);
+          epoll_mod(ep.get(), client->key, client->fd.get(), EPOLLIN | EPOLLOUT);
         }
       }
     }

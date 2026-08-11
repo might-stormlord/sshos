@@ -5,6 +5,7 @@
 #include <variant>
 
 #include "common/platform.hpp"
+#include "daemon/host.hpp"
 #include "input/events.hpp"
 #include "render/profile.hpp"
 #include "render/surface.hpp"
@@ -18,7 +19,9 @@ namespace sshos {
 
 class Session {
  public:
-  Session(Platform& plat, int cols, int rows);
+  // Le registrar est la seule chose que la session sache de l'epoll du
+  // démon : elle lui tend des clés, il les rend telles quelles.
+  Session(Platform& plat, FdRegistrar& fds, int cols, int rows);
 
   // Appelée par le démon à chaque attache, là où il construit déjà le
   // profil pour le Differ. Détermine le thème ET le jeu de bordures : un
@@ -38,6 +41,11 @@ class Session {
   // Ouvre une application du catalogue. Rend 0 si l'identifiant est inconnu
   // ou si le plafond de fenêtres est atteint.
   WindowId open_from_catalog(std::string_view id);
+
+  // Un événement sur un descripteur applicatif. Une clé que plus aucune
+  // fenêtre ne reconnaît s'y jette sans bruit -- c'est le cas NORMAL d'un
+  // réveil en retard sur une surveillance déjà retirée.
+  void on_fd_event(uint64_t key, uint32_t events);
 
   WinHitResult hit_window_at(int x, int y) const;
 
@@ -67,6 +75,10 @@ class Session {
 
   Border border() const;
   void ensure_window(const Rect& work);
+
+  // Ferme une fenêtre en retirant d'abord ses surveillances : aucune entrée
+  // epoll ne doit survivre au descripteur qu'elle désigne.
+  void close_window(Window& w);
   void draw_panel(View& v, int cols, int rows);
   void on_mouse(const MouseEvent& m);
   void watchdog();
@@ -79,11 +91,18 @@ class Session {
   std::chrono::steady_clock::time_point drag_stamp_{};
 
   Platform* plat_;
+  FdRegistrar* fds_;
   OutputProfile out_;
   Theme theme_;
   bool quit_ = false;
 
   WindowManager wm_;
+
+  // Compteur de générations de la session, distinct de celui du démon : il
+  // s'incrémente à chaque watch(), pas à chaque fenêtre, pour qu'une
+  // application qui referme et rouvre son tuyau -- et récupère le même
+  // numéro de descripteur du noyau -- obtienne malgré tout une clé neuve.
+  uint32_t fd_gen_ = kGenFirstDynamic;
 
   // Le panneau est ancré en bas sur une ligne. Les trois autres bords et les
   // épaisseurs plus grandes marchent déjà -- work_area() les traite -- mais
