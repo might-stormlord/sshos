@@ -1,0 +1,119 @@
+diff --git a/src/daemon/daemon.cpp b/src/daemon/daemon.cpp
+index 67a4699..ff48d3e 100644
+--- a/src/daemon/daemon.cpp
++++ b/src/daemon/daemon.cpp
+@@ -332,13 +332,6 @@ int run_daemon(std::string_view socket_name) {
+       }
+ 
+       if (client && fd == client->fd.get()) {
+-        // EPOLLHUP est signalé quel que soit le masque demandé : un
+-        // répartiteur qui ne teste que EPOLLIN boucle à 100 % de CPU.
+-        if ((events & (EPOLLHUP | EPOLLERR)) != 0) {
+-          drop_client(nullptr);
+-          continue;
+-        }
+-
+         if ((events & EPOLLOUT) != 0) {
+           if (!client->out.flush(client->fd.get())) {
+             drop_client(nullptr);
+@@ -347,8 +340,24 @@ int run_daemon(std::string_view socket_name) {
+           if (!client->out.wants_write()) epoll_mod(ep.get(), fd, EPOLLIN);
+         }
+ 
++        // Round C (voir le rapport de tâche) : on draine et on traite
++        // EPOLLIN AVANT d'honorer EPOLLHUP/EPOLLERR ci-dessous, jamais
++        // l'inverse. epoll_wait() coalesce couramment EPOLLIN et EPOLLHUP
++        // dans le MÊME événement quand le pair écrit puis ferme aussitôt
++        // (dernières frappes suivies d'une fermeture immédiate, sans
++        // attendre) : à cet instant précis, les octets sont encore dans le
++        // tampon de réception du socket, et honorer HUP avant de les avoir
++        // lus les jetterait purement et simplement — alors même que la
++        // session du démon, elle, survit au détachement (c'est tout
++        // l'intérêt du démon). `closed` capture la fermeture vue par
++        // drain_socket() (read() rendant 0, ou une erreur de lecture
++        // franche sous EPOLLERR) ; elle est combinée plus bas avec le bit
++        // HUP/ERR pour ne jamais appeler drop_client() plus d'une fois pour
++        // la même fermeture.
++        bool closed = false;
++
+         if ((events & EPOLLIN) != 0) {
+-          const bool closed = drain_socket(*client);
++          closed = drain_socket(*client);
+ 
+           while (auto m = client->dec.next()) {
+             // Hello n'est plus jamais attendu ici : il est géré exclusivement
+@@ -382,31 +391,43 @@ int run_daemon(std::string_view socket_name) {
+           // toujours, sans être fermée. Tout ce qui a pu être décodé
+           // valablement AVANT la corruption a déjà été traité par la boucle
+           // ci-dessus (drainer d'abord) ; ici, on ferme si la suite ne
+-          // viendra jamais (tester ensuite).
++          // viendra jamais (tester ensuite). Reste atteignable après le
++          // réordonnancement du round C : ce test s'exécute toujours sur le
++          // même chemin, juste après le drainage, avant tout `continue` lié
++          // à HUP/ERR ci-dessous.
+           if (client->dec.failed()) {
+             drop_client("message de protocole invalide");
+             continue;
+           }
+ 
+           if (session.wants_quit()) running = false;
+-          if (closed) drop_client(nullptr);
++        }
++
++        // EPOLLHUP est signalé quel que soit le masque demandé : un
++        // répartiteur qui ne teste que EPOLLIN boucle à 100 % de CPU si le
++        // bit reste ignoré indéfiniment — d'où l'appel à drop_client() ici,
++        // qui retire le descripteur d'epoll (EPOLL_CTL_DEL) et empêche donc
++        // tout réveil ultérieur sur lui. `closed` (vu ci-dessus via
++        // drain_socket) et ce bit peuvent signaler la MÊME fermeture au
++        // sein d'un seul tour (exactement le cas visé par ce round) : le
++        // `||` garantit un seul appel à drop_client(), jamais deux.
++        if (closed || (events & (EPOLLHUP | EPOLLERR)) != 0) {
++          drop_client(nullptr);
++          continue;
+         }
+       } else if (pending && fd == pending->fd.get()) {
+         // Item 2 : une connexion qui n'a pas encore décliné son intention
+         // n'a aucun effet sur `client`, quoi qu'elle envoie ou qu'elle
+         // fasse — voir le commentaire au-dessus de la déclaration de
+         // `pending`.
+-        if ((events & (EPOLLHUP | EPOLLERR)) != 0) {
+-          // La sonde muette exacte que ce jalon corrige : ouvrir puis
+-          // refermer une connexion sans jamais rien écrire (--status,
+-          // --kill, la sonde d'attache de main.cpp). Fermeture silencieuse,
+-          // `client` n'est pas averti et continue de recevoir ses trames.
+-          drop_pending();
+-          continue;
+-        }
++        //
++        // Round C : même principe de réordonnancement que pour `client`
++        // ci-dessus — voir son commentaire pour le détail complet de la
++        // coalescence EPOLLIN|EPOLLHUP par epoll_wait().
++        bool closed = false;
+ 
+         if ((events & EPOLLIN) != 0) {
+-          const bool closed = drain_socket(*pending);
++          closed = drain_socket(*pending);
+ 
+           // Drainer d'abord : un Hello valide arrivé avant une éventuelle
+           // corruption plus loin dans le même flux compte (même principe
+@@ -458,8 +479,18 @@ int run_daemon(std::string_view socket_name) {
+             clock.mark_dirty();
+             continue;
+           }
++        }
+ 
+-          if (closed) drop_pending();
++        // La sonde muette exacte que ce jalon corrige : ouvrir puis
++        // refermer une connexion sans jamais rien écrire (--status,
++        // --kill, la sonde d'attache de main.cpp). Fermeture silencieuse,
++        // `client` n'est pas averti et continue de recevoir ses trames.
++        // Round C : même combinaison `closed || HUP/ERR` que côté `client`
++        // ci-dessus, et pour la même raison — un seul drop_pending() par
++        // fermeture, jamais deux.
++        if (closed || (events & (EPOLLHUP | EPOLLERR)) != 0) {
++          drop_pending();
++          continue;
+         }
+       }
+     }

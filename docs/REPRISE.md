@@ -246,17 +246,20 @@ Ces points ont coûté cher à établir. Ne pas les défaire sans relire la mesu
   Le `||` garantit **un seul** `drop_*` par fermeture ; le test `client->dec.failed()` reste
   après le drainage et reste atteignable ; `session.wants_quit()` reste dans le bloc
   `EPOLLIN`.
-- **Où il se trouve :** figé dans `.superpowers/sdd/2026-08-10-ssh-os-m1-noyau/hup-drain-partial.diff`
-  (119 lignes, sha256 `5f339d9a023a39b5…`), et dans le worktree
-  `.claude/worktrees/agent-aba4275accf38f581` (base `af36d6d`, non commité). Le worktree
-  peut avoir été nettoyé ; le `.diff` fait foi.
+- **Où il se trouve :** `docs/hup-drain-correctif-en-suspens.diff` — **versionné**, 119
+  lignes, sha256 `5f339d9a023a39b5…`. Il existe aussi dans le worktree
+  `.claude/worktrees/agent-aba4275accf38f581` (base `af36d6d`, non commité) et dans le
+  ledger, mais **ni l'un ni l'autre ne survivent à un `clone`** : `.superpowers/` est
+  ignoré par git (`.gitignore:3`) et un worktree est volatil. Le fichier de `docs/` fait foi.
+  S'applique sur `af36d6d` ; le HEAD actuel n'a qu'un commit de documentation d'avance,
+  donc aucun conflit attendu sur `src/`.
 - **Pourquoi c'est inachevé :** l'agent est mort sur `API Error: ConnectionRefused` juste
   avant de compiler.
 - **Reste à faire :** compiler ; écrire le **test discriminant** (avec la sortie d'échec
   exacte contre le code d'avant) ; **prouver par la mesure** l'absence de boucle active à
   100 % CPU sur HUP ; `sha256sum` de restauration ; 20 exécutions Debug + 20 Release ;
   commit `fix(daemon): …` ; fusion.
-- **Brief détaillé :** `.superpowers/sdd/2026-08-10-ssh-os-m1-noyau/hup-drain-brief.md`.
+- **Brief détaillé :** `docs/hup-drain-brief.md` (copie versionnée de celle du ledger).
 
 ### 7.2 — Points reportés au jalon 2
 
@@ -281,7 +284,11 @@ Ces points ont coûté cher à établir. Ne pas les défaire sans relire la mesu
 L'utilisateur a choisi le **mode 1** : *un sous-agent frais par tâche, revue entre chaque*
 (SDD — subagent-driven development).
 
-- **Ledger :** `.superpowers/sdd/2026-08-10-ssh-os-m1-noyau/progress.md`.
+> ⚠️ **`.superpowers/` est ignoré par git** (`.gitignore:3`). Le ledger, les 20 briefs et les
+> ~20 diffs de revue **n'existent que sur le disque de cette machine** et disparaissent à un
+> `clone`. Ce qu'un contexte neuf doit absolument avoir a donc été recopié dans `docs/`.
+
+- **Ledger :** `.superpowers/sdd/2026-08-10-ssh-os-m1-noyau/progress.md` *(non versionné)*.
 - **Plan :** `docs/superpowers/plans/2026-08-10-ssh-os-m1-noyau.md`.
 - **Spec :** `docs/superpowers/specs/2026-08-10-ssh-os-design.md`.
 - Chaque tâche a un `task-N-brief.md` (consigne) et souvent un `task-N-report.md` (retour).
