@@ -10,6 +10,7 @@
 #include "render/surface.hpp"
 #include "render/theme.hpp"
 #include "wm/hittest.hpp"
+#include "wm/layout.hpp"
 #include "wm/manager.hpp"
 #include "wm/window.hpp"
 
@@ -64,7 +65,6 @@ class Session {
   };
   using DragState = std::variant<Idle, Moving, Resizing>;
 
-  Rect work_area(int cols, int rows) const;
   Border border() const;
   void ensure_window(const Rect& work);
   void draw_panel(View& v, int cols, int rows);
@@ -84,6 +84,12 @@ class Session {
   bool quit_ = false;
 
   WindowManager wm_;
+
+  // Le panneau est ancré en bas sur une ligne. Les trois autres bords et les
+  // épaisseurs plus grandes marchent déjà -- work_area() les traite -- mais
+  // rien ne les choisit encore : le réglage arrive avec la configuration.
+  PanelEdge edge_ = PanelEdge::Bottom;
+  int thickness_ = 1;
 
   // Dernière zone de travail composée. A3 tient toujours -- render() dérive
   // sa géométrie de la Surface qu'on lui passe et la réécrit ici -- mais le

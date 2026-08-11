@@ -87,12 +87,6 @@ Border Session::border() const {
   return out_.utf8 ? Border::Unicode : Border::Ascii;
 }
 
-Rect Session::work_area(int cols, int rows) const {
-  // Panneau ancré en bas, épaisseur 1. Les quatre bords arrivent à la
-  // tâche 9.
-  return Rect{0, 0, cols, rows - 1};
-}
-
 WindowId Session::open_from_catalog(std::string_view id) {
   const CatalogEntry* e = catalog_find(id);
   if (e == nullptr) return 0;
@@ -320,9 +314,14 @@ void Session::render(Surface& out) {
     return;
   }
 
-  const Rect work = work_area(out.w(), out.h());
+  const Rect work = work_area(out.w(), out.h(), edge_, thickness_);
   last_work_ = work;
   ensure_window(work);
+
+  // Toute la géométrie se décide ICI, en un seul endroit et sans toucher à
+  // un seul user_rect : c'est ce qui rend le redimensionnement du terminal
+  // réversible.
+  relayout(wm_, work, out.w(), out.h());
 
   // De l'arrière vers l'avant : la dernière peinte est celle du dessus.
   const WindowId focused = wm_.focused();
@@ -330,12 +329,6 @@ void Session::render(Surface& out) {
     Window& w = *up;
     if (w.mode == WinMode::Minimized) continue;
 
-    // Maximisée ou plein écran, la fenêtre SUIT la zone de travail sans que
-    // son user_rect en garde trace : c'est ce qui rend le rétablissement
-    // exact après un redimensionnement du terminal.
-    w.display_rect = w.mode == WinMode::Normal
-                         ? clamp_to(w.user_rect, work, frame_min(*w.app))
-                         : work;
     const Rect cr = client_rect(w.display_rect);
     const Size cs{cr.w, cr.h};
     if (!(cs == w.sent_size)) {
@@ -363,7 +356,14 @@ void Session::render(Surface& out) {
   // Le panneau passe en dernier. clamp_to() garantit déjà qu'aucune fenêtre
   // ne l'atteint ; le dessiner par-dessus coûte une ligne et supprime toute
   // une classe de régressions futures.
-  draw_panel(v, out.w(), out.h());
+  //
+  // Sauf sous une fenêtre plein écran, qui l'escamote : c'est là toute la
+  // différence entre « plein écran » et « maximisé », lequel s'arrête à la
+  // zone de travail précisément pour laisser le panneau visible.
+  const Window* front = wm_.find(focused);
+  if (front == nullptr || front->mode != WinMode::Fullscreen) {
+    draw_panel(v, out.w(), out.h());
+  }
 }
 
 }  // namespace sshos

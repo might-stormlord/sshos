@@ -678,6 +678,43 @@ TEST(session_hit_test_answers_for_the_window_on_top) {
   CHECK(sess.hit_window_at(70, 20).what == sshos::WinHit::None);
 }
 
+// Sous 40x12, la session affiche un avertissement -- et ne touche à RIEN.
+// Réagrandir doit rendre le bureau tel qu'il était, pas un bureau neuf.
+//
+// La comparaison porte sur les 24 lignes, pas sur un décompte de titres :
+// une disposition peut se perdre sans qu'aucune fenêtre disparaisse, et
+// c'est même le mode de défaillance le plus probable -- des user_rect
+// écrasés par la géométrie contrainte du petit terminal.
+TEST(session_preserves_the_desktop_across_a_terminal_too_small_to_draw_it) {
+  FakePlatform plat;
+  Session sess(plat, 80, 24);
+  Surface big(80, 24);
+  sess.render(big);
+  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  sess.render(big);
+
+  std::vector<std::string> before;
+  for (int y = 0; y < 24; ++y) before.push_back(big.text_row(y));
+  int titles = 0;
+  for (int y = 0; y < 23; ++y) {
+    if (before[static_cast<size_t>(y)].find("Bloc") != std::string::npos) {
+      ++titles;
+    }
+  }
+  REQUIRE_EQ(titles, 3);
+
+  Surface tiny(20, 5);
+  sess.render(tiny);
+  CHECK(tiny.text_row(0).find("petit") != std::string::npos);
+
+  Surface again(80, 24);
+  sess.render(again);
+  for (int y = 0; y < 24; ++y) {
+    CHECK_EQ(again.text_row(y), before[static_cast<size_t>(y)]);
+  }
+}
+
 TEST(session_refuses_an_unknown_catalog_entry) {
   FakePlatform plat;
   Session sess(plat, 80, 24);
