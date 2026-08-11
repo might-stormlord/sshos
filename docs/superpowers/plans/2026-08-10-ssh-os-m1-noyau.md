@@ -1887,6 +1887,12 @@ using Msg = std::variant<Hello, Welcome, Incompatible, Detached, Input, Resize,
 
 std::string encode(const Msg& m);
 
+// PERIME - ne pas transcrire. Le Decoder reel est celui de src/common/proto.hpp
+// au HEAD de la branche. Le round de durcissement 4bbc3cb lui a ajoute un etat
+// d'echec collant (fail(), failed()), des plafonds par message et de tampon, et
+// une liberation de capacite. Le contrat de failed() laisse a l'APPELANT le soin
+// de fermer la connexion : transcrire ce bloc reintroduit une connexion qui gele
+// (defaut Critical de la revue large de branche, corrige en 1df88b8).
 // Décodeur incrémental : les messages arrivent découpés n'importe comment.
 class Decoder {
  public:
@@ -4311,6 +4317,12 @@ int run_daemon(std::string_view socket_name) {
         Fd fresh = accept_peer(listener.get(), ::getuid());
         if (!fresh.valid()) continue;
         set_nonblock(fresh.get());
+// PERIME - ne pas transcrire. Evincer a l'accept est un defaut Critical de la
+// revue large de branche : une connexion qui n'envoie pas un octet suffit alors
+// a tuer la session en place, ce que fait `sshos --status`. Le HEAD de la branche
+// retarde l'eviction jusqu'a la reception d'un Hello compatible, via deux
+// connexions coexistantes (`client` attache et `pending` non identifiee), avec un
+// bornage de la connexion muette. Voir src/daemon/daemon.cpp, corrige en 1df88b8.
         // Le nouveau prend la main : l'ancien est détaché, pas partagé.
         drop_client("un autre client a pris la main");
         client = std::make_unique<Client>();
