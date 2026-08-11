@@ -4,6 +4,12 @@
 #include <cstdio>
 
 namespace sshos {
+
+// Déclarée en avant : color_code(), qui vit dans le namespace anonyme
+// ci-dessous, s'appuie dessus, mais la définition doit rester hors de cet
+// anonyme puisque le header l'expose.
+Color quantize_color(const Color& c, ColorDepth d);
+
 namespace {
 
 std::string num(int v) { return std::to_string(v); }
@@ -44,22 +50,22 @@ std::string color_code(const Color& c, bool foreground, const OutputProfile& p) 
 
   if (c.kind == ColorKind::Default) return "\033[" + num(reset) + "m";
 
-  uint8_t r = c.r;
-  uint8_t g = c.g;
-  uint8_t b = c.b;
-  if (c.kind == ColorKind::Indexed) indexed_to_rgb(c.idx, r, g, b);
-
-  switch (p.depth) {
-    case ColorDepth::TrueColor:
-      return "\033[" + num(base) + ";2;" + num(r) + ";" + num(g) + ";" + num(b) + "m";
-    case ColorDepth::Indexed256:
-      if (c.kind == ColorKind::Indexed)
-        return "\033[" + num(base) + ";5;" + num(c.idx) + "m";
-      return "\033[" + num(base) + ";5;" + num(quantize_256(r, g, b)) + "m";
-    case ColorDepth::Mono16:
-      return "\033[" + num(simple + quantize_16(r, g, b)) + "m";
+  if (p.depth == ColorDepth::TrueColor) {
+    uint8_t r = c.r;
+    uint8_t g = c.g;
+    uint8_t b = c.b;
+    if (c.kind == ColorKind::Indexed) indexed_to_rgb(c.idx, r, g, b);
+    return "\033[" + num(base) + ";2;" + num(r) + ";" + num(g) + ";" + num(b) + "m";
   }
-  return "";
+
+  // Une seule règle de réduction dans tout le projet : celle de
+  // quantize_color. Le thème et l'émetteur SGR doivent répondre la même
+  // chose, sinon le thème « prouve » une distinction que l'écran ne montre
+  // pas.
+  const Color q = quantize_color(c, p.depth);
+  if (p.depth == ColorDepth::Indexed256)
+    return "\033[" + num(base) + ";5;" + num(q.idx) + "m";
+  return "\033[" + num(simple + q.idx) + "m";
 }
 
 bool contains(std::string_view hay, std::string_view needle) {
@@ -67,6 +73,24 @@ bool contains(std::string_view hay, std::string_view needle) {
 }
 
 }  // namespace
+
+Color quantize_color(const Color& c, ColorDepth d) {
+  if (c.kind == ColorKind::Default) return c;
+  if (d == ColorDepth::TrueColor) return c;
+
+  uint8_t r = c.r;
+  uint8_t g = c.g;
+  uint8_t b = c.b;
+  if (c.kind == ColorKind::Indexed) indexed_to_rgb(c.idx, r, g, b);
+
+  if (d == ColorDepth::Indexed256) {
+    // Un index reste lui-même : le terminal en connaît déjà les 256, le
+    // faire transiter par le cube 6x6x6 ne ferait que le dégrader.
+    if (c.kind == ColorKind::Indexed) return c;
+    return Color::indexed(quantize_256(r, g, b));
+  }
+  return Color::indexed(static_cast<uint8_t>(quantize_16(r, g, b)));
+}
 
 OutputProfile OutputProfile::detect(std::string_view term,
                                     std::string_view colorterm, bool utf8) {

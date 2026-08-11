@@ -256,3 +256,51 @@ TEST(surface_second_cleanup_orphan_outside_clip) {
     }
   }
 }
+
+TEST(view_box_draws_a_unicode_frame_without_touching_the_inside) {
+  Surface s(6, 4);
+  View v = s.root();
+  v.box(Rect{0, 0, 6, 4}, sshos::Border::Unicode, Style{});
+  CHECK_EQ(s.at(0, 0).ch, U'┌');
+  CHECK_EQ(s.at(5, 0).ch, U'┐');
+  CHECK_EQ(s.at(0, 3).ch, U'└');
+  CHECK_EQ(s.at(5, 3).ch, U'┘');
+  CHECK_EQ(s.at(3, 0).ch, U'─');
+  CHECK_EQ(s.at(0, 2).ch, U'│');
+  CHECK_EQ(s.at(5, 2).ch, U'│');
+  CHECK_EQ(s.at(3, 2).ch, U' ');
+}
+
+TEST(view_box_falls_back_to_ascii) {
+  Surface s(4, 3);
+  View v = s.root();
+  v.box(Rect{0, 0, 4, 3}, sshos::Border::Ascii, Style{});
+  CHECK_EQ(s.at(0, 0).ch, U'+');
+  CHECK_EQ(s.at(3, 2).ch, U'+');
+  CHECK_EQ(s.at(1, 0).ch, U'-');
+  CHECK_EQ(s.at(0, 1).ch, U'|');
+}
+
+// box() n'est pas une primitive privilégiée : elle passe par put(), donc
+// elle hérite du clip et ne peut pas peindre chez la voisine.
+TEST(view_box_clips_like_every_other_write) {
+  Surface s(6, 4);
+  View v = s.root().sub(Rect{1, 1, 3, 2});
+  v.box(Rect{-2, -2, 20, 20}, sshos::Border::Ascii, Style{});
+  for (int x = 0; x < 6; ++x) CHECK_EQ(s.at(x, 0).ch, U' ');
+  for (int y = 0; y < 4; ++y) CHECK_EQ(s.at(0, y).ch, U' ');
+  CHECK_EQ(s.at(4, 1).ch, U' ');
+}
+
+TEST(view_box_degenerates_without_crashing) {
+  Surface s(5, 3);
+  View v = s.root();
+  v.box(Rect{0, 0, 5, 1}, sshos::Border::Ascii, Style{});
+  CHECK_EQ(s.at(0, 0).ch, U'-');
+  CHECK_EQ(s.at(4, 0).ch, U'-');
+  v.box(Rect{0, 1, 1, 2}, sshos::Border::Ascii, Style{});
+  CHECK_EQ(s.at(0, 1).ch, U'|');
+  CHECK_EQ(s.at(0, 2).ch, U'|');
+  v.box(Rect{2, 1, 0, 0}, sshos::Border::Ascii, Style{});
+  CHECK_EQ(s.at(2, 1).ch, U' ');
+}

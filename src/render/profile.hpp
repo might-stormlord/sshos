@@ -17,6 +17,13 @@ struct OutputProfile {
                               bool utf8);
 };
 
+// Rend la couleur telle qu'elle sera RÉELLEMENT affichée sur cette
+// profondeur. Exposée parce que le thème (render/theme.hpp) doit pouvoir
+// vérifier que deux teintes qu'il veut distinctes ne s'effondrent pas sur
+// la même une fois réduites -- une question que seul l'appelant peut poser,
+// et à laquelle sgr_transition() répond trop tard, au moment d'émettre.
+Color quantize_color(const Color& c, ColorDepth d);
+
 // Séquence minimale pour passer du style `from` au style `to`. Le diffeur
 // suit l'état courant sur toute la frame : une ligne uniforme ne coûte
 // qu'un seul SGR.

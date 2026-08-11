@@ -137,6 +137,40 @@ void View::fill(Rect r, Style st) {
   }
 }
 
+void View::box(Rect r, Border b, Style st) {
+  if (r.w <= 0 || r.h <= 0) return;
+
+  const bool uni = (b == Border::Unicode);
+  const char32_t hor = uni ? U'─' : U'-';
+  const char32_t ver = uni ? U'│' : U'|';
+
+  // Les cas dégénérés ne sont pas des erreurs : un cadre d'une ligne ou
+  // d'une colonne arrive naturellement quand une fenêtre est réduite au
+  // plancher, et planter là serait un défaut de robustesse, pas une
+  // protection.
+  if (r.h == 1) {
+    for (int x = 0; x < r.w; ++x) put(r.x + x, r.y, hor, st);
+    return;
+  }
+  if (r.w == 1) {
+    for (int y = 0; y < r.h; ++y) put(r.x, r.y + y, ver, st);
+    return;
+  }
+
+  for (int x = 1; x < r.w - 1; ++x) {
+    put(r.x + x, r.y, hor, st);
+    put(r.x + x, r.y + r.h - 1, hor, st);
+  }
+  for (int y = 1; y < r.h - 1; ++y) {
+    put(r.x, r.y + y, ver, st);
+    put(r.x + r.w - 1, r.y + y, ver, st);
+  }
+  put(r.x, r.y, uni ? U'┌' : U'+', st);
+  put(r.x + r.w - 1, r.y, uni ? U'┐' : U'+', st);
+  put(r.x, r.y + r.h - 1, uni ? U'└' : U'+', st);
+  put(r.x + r.w - 1, r.y + r.h - 1, uni ? U'┘' : U'+', st);
+}
+
 View View::sub(Rect r) const {
   const int x0 = clip_.x + std::max(0, r.x);
   const int y0 = clip_.y + std::max(0, r.y);

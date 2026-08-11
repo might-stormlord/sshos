@@ -60,6 +60,11 @@ struct Style {
   bool operator==(const Style&) const = default;
 };
 
+// Jeu de caractères des encadrements. Il vit ici plutôt que dans theme.hpp
+// pour que surface.hpp, qui déclare View::box(), n'ait pas à tirer
+// profile.hpp derrière lui.
+enum class Border { Unicode, Ascii };
+
 // width : 1 normal, 2 pleine chasse, 0 cellule de continuation.
 // cluster : 0 quand le graphème tient dans `ch`, sinon index dans le
 // réservoir de la Surface. Le réservoir ne coûte que sur ce qui l'exige.

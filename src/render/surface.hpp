@@ -63,6 +63,7 @@ class View {
   void put(int x, int y, char32_t ch, Style st);
   int text(int x, int y, std::string_view utf8, Style st);
   void fill(Rect r, Style st);
+  void box(Rect r, Border b, Style st);
   View sub(Rect r) const;
 
  private:
