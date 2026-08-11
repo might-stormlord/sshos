@@ -7,7 +7,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <optional>
 #include <random>
@@ -41,6 +43,67 @@ struct FakePlatform : sshos::Platform {
   std::string read_file(std::string_view) const override { return {}; }
 };
 
+// Même rôle que FakePlatform ci-dessus, mais avec un instant configurable au
+// lieu d'un seul figé en dur -- nécessaire pour l'item 4 (round horloge, voir
+// clock-round-brief.md), qui doit comparer le rendu à DEUX instants distincts
+// sous le même fuseau.
+struct FakePlatformAt : sshos::Platform {
+  explicit FakePlatformAt(std::int64_t epoch_seconds) : t_(epoch_seconds) {}
+  std::chrono::system_clock::time_point now() const override {
+    return std::chrono::system_clock::time_point(std::chrono::seconds(t_));
+  }
+  std::string read_file(std::string_view) const override { return {}; }
+
+ private:
+  std::int64_t t_;
+};
+
+// Fixe TZ pour la durée du test puis restaure exactement l'état antérieur --
+// même raison d'être que UnlinkGuard/FifoReleaseGuard dans
+// tests/test_daemonize.cpp : la suite entière s'exécute dans un seul
+// processus ouvrier (voir tests/main.cpp, un seul fork() pour tout le lot),
+// donc TZ est un état GLOBAL partagé avec tous les cas restants -- un garde
+// qui ne restaure pas correctement contaminerait silencieusement toute la
+// suite après lui.
+//
+// setenv("TZ", "", 1) ne reproduit PAS l'absence de TZ : glibc distingue "TZ
+// vide" (UTC) de "TZ absent" (consultation de /etc/localtime). Le cas "non
+// défini au départ" est donc mémorisé à part et restauré par unsetenv(),
+// jamais par un setenv() avec une chaîne vide.
+//
+// tzset() après chaque changement de TZ (construction ET destruction) n'est
+// pas cosmétique : la glibc ne relit TZ qu'à la première utilisation de
+// localtime_r/mktime (vérifié empiriquement -- voir rapport de tâche), donc
+// sans ce tzset() explicite ici, ce garde changerait TZ dans l'environnement
+// sans que ::localtime_r() ne le voie jamais -- un résultat faux mais
+// crédible, exactement le piège documenté dans clock-round-brief.md.
+class TzGuard {
+ public:
+  explicit TzGuard(const char* zone) {
+    const char* prev = std::getenv("TZ");
+    had_tz_ = prev != nullptr;
+    if (had_tz_) prev_value_ = prev;
+    ::setenv("TZ", zone, 1);
+    ::tzset();
+  }
+
+  ~TzGuard() {
+    if (had_tz_) {
+      ::setenv("TZ", prev_value_.c_str(), 1);
+    } else {
+      ::unsetenv("TZ");
+    }
+    ::tzset();
+  }
+
+  TzGuard(const TzGuard&) = delete;
+  TzGuard& operator=(const TzGuard&) = delete;
+
+ private:
+  bool had_tz_;
+  std::string prev_value_;
+};
+
 }  // namespace
 
 TEST(surface_text_row_reads_back_what_was_written) {
@@ -49,14 +112,100 @@ TEST(surface_text_row_reads_back_what_was_written) {
   CHECK_EQ(s.text_row(0), std::string("\xe6\x97\xa5" "ab  "));
 }
 
+// Round horloge (clock-round-brief.md), items 2 et 3. Ce test affirmait
+// autrefois panel.find("14:05") -- le rendu UTC de l'instant figé par
+// FakePlatform, stable uniquement parce que le code appelait ::gmtime_r et
+// que cette machine est réglée sur Etc/UTC. Dès que le code passe à
+// ::localtime_r, une assertion qui dépend du fuseau de la MACHINE est un
+// défaut de portabilité latent : elle continuerait de passer ici et
+// échouerait ailleurs. TzGuard fixe donc explicitement le fuseau au lieu de
+// dépendre de celui de la machine, avec restauration garantie en sortie.
+//
+// C'est aussi, sans modification supplémentaire, le test discriminant exigé
+// par l'item 3 : avec TZ=America/Toronto, "10:05" (rendu local, EDT en
+// août) ne peut sortir que de ::localtime_r ; la seconde assertion exclut
+// explicitement "14:05" (le rendu qu'aurait produit l'ancien ::gmtime_r),
+// donc ce test échoue contre le code d'avant ce round et passe contre le
+// code corrigé. Voir le rapport de tâche pour la sortie d'échec exacte
+// obtenue en remettant ::gmtime_r en place.
 TEST(session_draws_a_panel_on_the_last_row) {
+  TzGuard tz("America/Toronto");
+
   FakePlatform plat;
   Session sess(plat, 40, 12);
   Surface s(40, 12);
   sess.render(s);
   const std::string panel = s.text_row(11);
-  CHECK(panel.find("14:05") != std::string::npos);
+  // 1786370700 = 2026-08-10 14:05:00 UTC = 10:05:00 EDT à Toronto (août,
+  // heure d'été active).
+  CHECK(panel.find("10:05") != std::string::npos);
+  CHECK(panel.find("14:05") == std::string::npos);
   CHECK(panel.find("ssh_os") != std::string::npos);
+}
+
+// Round horloge (clock-round-brief.md), item 4. Sous UN SEUL fuseau
+// (America/Toronto), un instant d'hiver (EST, UTC-5) et un instant d'été
+// (EDT, UTC-4) doivent produire des écarts différents entre heure rendue et
+// heure UTC. C'est précisément ce qui distingue un vrai appel à la base de
+// fuseaux (tzdata, via ::localtime_r) d'un décalage constant codé en dur --
+// un offset fixe serait juste faux six mois par an, exactement la confusion
+// exprimée par l'utilisateur à l'origine de ce round.
+//
+// Les deux instants ci-dessous partagent volontairement la même heure UTC
+// (12:00:00) : seule la date diffère, ce qui isole strictement l'effet de la
+// bascule DST sur l'écart mesuré plus bas. Choisis "franchement à
+// l'intérieur" de chaque période -- loin des deux bascules de Toronto en
+// 2026 (dimanche 8 mars, dimanche 1er novembre) -- et vérifiés
+// indépendamment (voir rapport de tâche) :
+//   TZ=America/Toronto date -d @1768478400  -> Thu Jan 15 07:00:00 EST 2026
+//   TZ=America/Toronto date -d @1786795200  -> Sat Aug 15 08:00:00 EDT 2026
+TEST(session_clock_follows_daylight_saving_under_a_single_timezone) {
+  TzGuard tz("America/Toronto");
+
+  constexpr std::int64_t kJanuaryEpoch = 1768478400;  // 2026-01-15 12:00:00 UTC
+  constexpr std::int64_t kAugustEpoch = 1786795200;   // 2026-08-15 12:00:00 UTC
+
+  FakePlatformAt jan(kJanuaryEpoch);
+  Session sess_jan(jan, 40, 12);
+  Surface s_jan(40, 12);
+  sess_jan.render(s_jan);
+  const std::string panel_jan = s_jan.text_row(11);
+  const auto pos_jan = panel_jan.find("07:00");  // EST : UTC-5
+  CHECK(pos_jan != std::string::npos);
+
+  FakePlatformAt aug(kAugustEpoch);
+  Session sess_aug(aug, 40, 12);
+  Surface s_aug(40, 12);
+  sess_aug.render(s_aug);
+  const std::string panel_aug = s_aug.text_row(11);
+  const auto pos_aug = panel_aug.find("08:00");  // EDT : UTC-4
+  CHECK(pos_aug != std::string::npos);
+
+  // REQUIRE, pas seulement les deux CHECK ci-dessus : sans les deux positions
+  // trouvées, le substr() qui suit déréférencerait au-delà de la chaîne --
+  // exactement le cas que la convention du harnais réserve à REQUIRE (voir
+  // harness.hpp), pas à un CHECK laissé sans garde.
+  REQUIRE(pos_jan != std::string::npos);
+  REQUIRE(pos_aug != std::string::npos);
+
+  // Preuve centrale de cet item : l'écart heure-UTC / heure-rendue -- dérivé
+  // de l'heure RÉELLEMENT rendue (pas d'une valeur supposée) et de
+  // ::gmtime_r, indépendamment du code sous test -- N'EST PAS le même aux
+  // deux dates, bien que le fuseau soit identique.
+  const int rendered_hour_jan = std::stoi(panel_jan.substr(pos_jan, 2));
+  const int rendered_hour_aug = std::stoi(panel_aug.substr(pos_aug, 2));
+
+  std::time_t t_jan = static_cast<std::time_t>(kJanuaryEpoch);
+  std::time_t t_aug = static_cast<std::time_t>(kAugustEpoch);
+  std::tm utc_jan{};
+  std::tm utc_aug{};
+  ::gmtime_r(&t_jan, &utc_jan);
+  ::gmtime_r(&t_aug, &utc_aug);
+  const int offset_jan = utc_jan.tm_hour - rendered_hour_jan;
+  const int offset_aug = utc_aug.tm_hour - rendered_hour_aug;
+  CHECK(offset_jan != offset_aug);
+  CHECK_EQ(offset_jan, 5);
+  CHECK_EQ(offset_aug, 4);
 }
 
 TEST(session_draws_a_bordered_box_with_its_title) {
