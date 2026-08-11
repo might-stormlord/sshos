@@ -33,6 +33,17 @@ class FrameClock {
     last_ = now;
   }
 
+  // Remet l'horloge à son état initial : plus rien de sale, plus de dernier
+  // rendu connu. À appeler quand le client qui aurait pu justifier ces
+  // marques disparaît (déconnexion) : sans ça, un dirty_ posé avant tout
+  // Hello (donc jamais consommé par note_render(), faute de differ à
+  // rendre) survivrait à la déconnexion et referait réclamer un rendu
+  // immédiat par delay_ms() alors qu'il n'y a plus personne à qui l'envoyer.
+  void reset() {
+    dirty_ = false;
+    last_.reset();
+  }
+
  private:
   std::chrono::milliseconds min_interval_;
   std::optional<Clock::time_point> last_;
