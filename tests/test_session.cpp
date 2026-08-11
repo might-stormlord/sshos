@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include "client/client.hpp"
 #include "common/fd.hpp"
 #include "common/net.hpp"
 #include "common/platform.hpp"
@@ -568,6 +569,107 @@ sshos::Hello make_hello(uint16_t cols, uint16_t rows) {
   return h;
 }
 
+// ---------------------------------------------------------------------
+// Infrastructure additionnelle pour le round correctif Critique
+// (integration-fix-brief.md, items 1 et 2). Les helpers ci-dessus
+// (DaemonHandle, connect_retry, send_all, recv_one,
+// wait_for_frame_containing) sont réutilisés tels quels ; ce qui suit est
+// propre à la reproduction de ces deux défauts précis.
+// ---------------------------------------------------------------------
+
+// Fabrique un message dont l'enveloppe (tag connu + longueur déclarée)
+// ment sciemment sur ce que le lecteur consomme réellement -- exactement
+// ce qu'un pair hostile ou bogué ferait, sans jamais passer par
+// l'encodeur légitime (encode(), proto.cpp, ne sait produire que des
+// messages cohérents). Reproduit ici en dur le tag Resize = 6 (enum Tag
+// anonyme de proto.cpp, non exporté) : son lecteur (proto.cpp,
+// case Tag::Resize) ne consomme que 4 octets fixes (cols u16 + rows u16,
+// pas de préfixe de longueur interne). En déclarant une longueur de corps
+// de 5 dans l'enveloppe -- un octet de plus que ce que Resize consomme --
+// r.i (4) reste différent de len (5) une fois le corps lu : exactement la
+// condition documentée dans proto.cpp qui fait basculer le décodeur en
+// échec permanent (Decoder::fail()), voir Decoder::next() ~ligne 258.
+// C'est la reproduction directe suggérée par le rapport de tâche pour
+// l'item 1 : « une Resize dont la longueur déclarée dépasse ce que le
+// lecteur consomme ».
+std::string malformed_known_tag_message() {
+  std::string out;
+  out += static_cast<char>(6);  // Tag::Resize
+  // longueur déclarée du corps : 5, big-endian sur 4 octets.
+  out += static_cast<char>(0);
+  out += static_cast<char>(0);
+  out += static_cast<char>(0);
+  out += static_cast<char>(5);
+  // corps : cols=80, rows=24 (les 4 octets que Resize consomme), suivis
+  // d'un cinquième octet que personne ne consommera jamais.
+  out += static_cast<char>(0x00);
+  out += static_cast<char>(0x50);
+  out += static_cast<char>(0x00);
+  out += static_cast<char>(0x18);
+  out += static_cast<char>(0x00);  // l'octet de trop, jamais consommé -> fail()
+  return out;
+}
+
+// accept() bloquant, mais borné par un poll() préalable -- même principe
+// que connect_retry() plus haut, côté acceptation plutôt que connexion.
+// N'utilise délibérément PAS accept_peer() (net.hpp) : ce test-ci n'a rien
+// à vérifier côté SO_PEERCRED, un accept() nu suffit à jouer le rôle d'un
+// faux démon pour le test client ci-dessous.
+sshos::Fd accept_with_timeout(int listen_fd, int timeout_ms) {
+  pollfd pfd{listen_fd, POLLIN, 0};
+  const int pr = ::poll(&pfd, 1, timeout_ms);
+  if (pr <= 0) return sshos::Fd();
+  const int raw = ::accept(listen_fd, nullptr, nullptr);
+  if (raw < 0) return sshos::Fd();
+  return sshos::Fd(raw);
+}
+
+// Fait tourner un vrai client (fork() + appel direct à run_client() dans
+// le fils, sans passer par l'exécutable `sshos` -- même schéma et même
+// raison d'être que DaemonHandle plus haut) avec STDIN_FILENO redirigé
+// vers l'extrémité lecture d'un tube dont l'écriture reste ouverte côté
+// appelant pendant toute la durée du test (jamais fermée, jamais écrite) :
+// sans donnée ni EOF sur ce tube, le poll(STDIN_FILENO, sock) de
+// run_client() (client.cpp) ne peut se réveiller que sur `sock` -- exactement
+// ce qu'il faut pour isoler le chemin testé ci-dessous. TtyGuard::TtyGuard
+// (tty_guard.cpp) échoue silencieusement son tcgetattr() sur un tube
+// (ENOTTY) et reste désarmé (armed_ == false) : ni mode brut appliqué, ni
+// séquence d'échappement écrite vers ce tube, ni restauration à dérouler à
+// la sortie -- vérifié en lisant tty_guard.cpp (TtyGuard::TtyGuard,
+// ~ligne 129 : le `return` immédiat après un tcgetattr() en échec saute
+// tout le reste du constructeur, y compris write_all(fd_, tty_setup_sequence())).
+class ClientHandle {
+ public:
+  ClientHandle(std::string socket_name, int stdin_read_fd) {
+    pid_ = ::fork();
+    if (pid_ == 0) {
+      ::dup2(stdin_read_fd, STDIN_FILENO);
+      _exit(sshos::run_client(socket_name));
+    }
+  }
+
+  ~ClientHandle() {
+    if (pid_ > 0) {
+      // Même filet de sécurité que DaemonHandle ci-dessus, pour la même
+      // raison : un test qui échoue (code d'avant le correctif de l'item 1,
+      // le client gelant indéfiniment) ne doit pas laisser un processus
+      // orphelin derrière lui.
+      ::kill(pid_, SIGKILL);
+      int status = 0;
+      ::waitpid(pid_, &status, 0);
+    }
+  }
+
+  ClientHandle(const ClientHandle&) = delete;
+  ClientHandle& operator=(const ClientHandle&) = delete;
+
+  bool valid() const { return pid_ > 0; }
+  pid_t pid() const { return pid_; }
+
+ private:
+  pid_t pid_ = -1;
+};
+
 }  // namespace
 
 // A7, cas Clean : un tout premier repaint qui dépasse à lui seul le
@@ -1087,4 +1189,165 @@ TEST(daemon_handles_client_takeover_with_reused_fd_in_one_epoll_batch) {
   auto welcome = recv_one(client_b.get(), dec, 3000);
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
+}
+
+// ---------------------------------------------------------------------
+// Round correctif Critique (jalon 1, intégration -- voir
+// .superpowers/sdd/2026-08-10-ssh-os-m1-noyau/integration-fix-brief.md).
+// Deux défauts, chacun couvert ci-dessous par un test qui échoue contre le
+// code d'avant son propre correctif -- voir le rapport de tâche pour la
+// sortie exacte obtenue en retirant temporairement chaque correctif.
+// ---------------------------------------------------------------------
+
+// Item 1, volet démon : Decoder::failed() (proto.hpp) documentait une
+// obligation -- « à charge pour l'appelant de la fermer » -- que personne
+// ne respectait. Une fois failed_ vrai, feed() n'accumule plus rien et
+// next() ne renvoie plus jamais rien (proto.cpp) : plus aucun signal ne
+// distingue alors « rien à lire pour l'instant » de « ce pair ne parlera
+// plus jamais correctement » -- la connexion gelait en silence, pour
+// toujours, sans jamais être fermée. Ce test force ce scénario côté
+// démon : un Hello/Welcome normal, puis un message à tag connu (Resize)
+// dont le corps ment sur sa propre longueur (voir
+// malformed_known_tag_message() ci-dessus).
+TEST(daemon_closes_connection_on_malformed_message_instead_of_freezing) {
+  const std::string name = unique_name() + "-malformed";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+  CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  REQUIRE(send_all(client.get(), malformed_known_tag_message()));
+
+  // Preuve retenue : la connexion doit se FERMER, pas geler indéfiniment.
+  // Contre le code d'avant le correctif de l'item 1, ce CHECK échoue par
+  // expiration du délai (le décodeur du démon reste en échec permanent,
+  // mais rien n'appelle jamais drop_client() pour autant).
+  CHECK(wait_for_peer_close(client.get(), 3000));
+}
+
+// Item 1, volet client : le même défaut existait aussi dans client.cpp
+// (voir son commentaire « Item 1 », juste après la boucle
+// `while (auto m = dec.next())` de run_client()). run_client() est un vrai
+// processus (fork() + appel direct, même schéma que DaemonHandle),
+// connecté à un faux démon (ce test lui-même, via un accept() nu -- voir
+// accept_with_timeout() ci-dessus) qui envoie un Hello/Welcome légitime
+// PUIS le même message corrompu que le test précédent. Sans le correctif,
+// le client gèlerait indéfiniment sur un décodeur en échec permanent au
+// lieu de sortir avec rc=1.
+TEST(client_exits_on_malformed_message_instead_of_freezing) {
+  const std::string name = unique_name() + "-client-malformed";
+
+  sshos::Fd listener = sshos::bind_abstract(name);
+  REQUIRE(listener.valid());
+
+  int pipefd[2];
+  REQUIRE(::pipe(pipefd) == 0);
+  // stdin_write n'est délibérément ni fermé ni écrit avant la fin de ce
+  // test -- voir le commentaire de ClientHandle ci-dessus.
+  sshos::Fd stdin_write(pipefd[1]);
+  sshos::Fd stdin_read(pipefd[0]);
+
+  ClientHandle client(name, stdin_read.get());
+  REQUIRE(client.valid());
+
+  sshos::Fd peer = accept_with_timeout(listener.get(), 3000);
+  REQUIRE(peer.valid());
+
+  sshos::Decoder server_dec;
+  auto hello_msg = recv_one(peer.get(), server_dec, 2000);
+  REQUIRE(hello_msg.has_value());
+  CHECK(std::holds_alternative<sshos::Hello>(*hello_msg));
+
+  REQUIRE(send_all(peer.get(), sshos::encode(sshos::Msg{sshos::Welcome{}})));
+  REQUIRE(send_all(peer.get(), malformed_known_tag_message()));
+
+  // Preuve retenue : le PROCESSUS client doit sortir (rc=1), pas geler.
+  // Contre le code d'avant le correctif, ce REQUIRE échoue par expiration
+  // du délai (le processus ne sort jamais de lui-même).
+  int status = 0;
+  bool exited = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (std::chrono::steady_clock::now() < deadline) {
+    const pid_t r = ::waitpid(client.pid(), &status, WNOHANG);
+    if (r == client.pid()) {
+      exited = true;
+      break;
+    }
+    ::usleep(10 * 1000);
+  }
+  REQUIRE(exited);
+  CHECK(WIFEXITED(status));
+  CHECK_EQ(WEXITSTATUS(status), 1);
+}
+
+// Item 2 : reproduction directe du symptôme du rapport de tâche -- une
+// simple sonde (--status, --kill, la sonde d'attache initiale de
+// main.cpp) qui ouvre une connexion puis la referme SANS JAMAIS RIEN
+// ÉCRIRE évinçait le client attaché avant ce correctif (case
+// AcceptOutcome::Accepted de daemon.cpp appelait drop_client() sans
+// condition, avant même que la nouvelle connexion n'ait décliné une
+// quelconque intention). Ce test attache un vrai client (Hello/Welcome
+// complet, une première trame reçue), ouvre puis referme un second socket
+// sans y écrire le moindre octet, et vérifie que le premier reste attaché
+// (pas de HUP) ET reste pleinement fonctionnel (un Resize qu'il envoie
+// ensuite doit encore produire une trame reçue).
+TEST(daemon_mute_probe_does_not_evict_the_attached_client) {
+  const std::string name = unique_name() + "-muteprobe";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 2000);
+  REQUIRE(welcome.has_value());
+  CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os 2.0", "ssh_os", 2000));
+
+  // La sonde muette : ouvre puis referme, sans écrire un seul octet --
+  // exactement --status/--kill/la sonde d'attache initiale de main.cpp.
+  {
+    sshos::Fd probe = connect_retry(name);
+    REQUIRE(probe.valid());
+  }  // fermeture ici, sans avoir rien envoyé
+
+  // Laisse au démon le temps de traiter l'accept puis le HUP de la sonde
+  // (deux tours d'epoll au plus, synchrones et rapides) avant de vérifier
+  // que le premier client n'a rien vu passer.
+  ::usleep(100 * 1000);
+
+  // Preuve directe : le premier client n'a jamais reçu de HUP. Contre le
+  // code d'avant ce correctif, la sonde évince immédiatement le client
+  // (drop_client() inconditionnel à l'accept) : ce CHECK échoue.
+  pollfd pfd{client.get(), POLLIN, 0};
+  const int pr = ::poll(&pfd, 1, 200);
+  REQUIRE(pr >= 0);
+  if (pr > 0) {
+    CHECK((pfd.revents & (POLLHUP | POLLERR)) == 0);
+  }
+
+  // Preuve fonctionnelle : il reste pleinement attaché, pas seulement
+  // « pas encore fermé ». Contre le code d'avant ce correctif, ce CHECK
+  // échoue aussi (la connexion a déjà été fermée par la sonde précédente,
+  // wait_for_frame_containing rend faux dès le premier recv_one en échec).
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Resize{100, 30}})));
+  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 3000));
 }

@@ -289,6 +289,20 @@ int run_client(std::string_view socket_name) {
           break;
         }
       }
+      // Item 1 (voir le rapport de tâche) : même défaut que côté démon --
+      // Decoder::failed() (proto.hpp) documente qu'un pair qui viole le
+      // protocole laisse la connexion marquée en échec définitif, à charge
+      // pour l'appelant de la fermer. Personne ne le faisait ici non plus :
+      // next() ci-dessus aurait fini par ne plus jamais rien renvoyer sans
+      // que la boucle ne s'arrête, gelant le client en silence sur un démon
+      // qui ne dira plus jamais rien de valide. Terminer proprement (rc=1,
+      // destructeurs déroulés -- TtyGuard restaure le terminal) plutôt que
+      // de reboucler indéfiniment sur un décodeur inerte.
+      if (!stop && dec.failed()) {
+        std::fprintf(stderr, "\r\nsshos: message de protocole invalide recu du demon\r\n");
+        rc = 1;
+        stop = true;
+      }
       if (stop) break;
     }
   }
