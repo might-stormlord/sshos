@@ -3004,3 +3004,93 @@ TEST(session_shows_the_same_leader_in_the_panel_and_in_the_help) {
   sess.render(shown);
   CHECK(surface_contains(shown, "Ctrl+A puis :"));
 }
+
+// ---------------------------------------------------------------------------
+// Les accords qui s'enchaînent, vus de la session : c'est elle qui tient le
+// délai entre deux gestes d'une même série.
+// ---------------------------------------------------------------------------
+
+TEST(session_chains_repeatable_gestures_without_retyping_the_leader) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 24), 1);
+
+  arm_leader(sess);
+  for (int i = 0; i < 3; ++i) {
+    // Une seule frappe par pas, sans reprendre Ctrl+A -- et le temps passe
+    // entre les gestes, comme sous une vraie main.
+    plat.advance_steady(std::chrono::milliseconds(300));
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Down, 0, 0}});
+  }
+  Surface moved(80, 24);
+  sess.render(moved);
+  CHECK_EQ(title_row_of(moved, 24), 4);  // trois cellules plus bas
+}
+
+// La série expire. Passé le délai, la touche appartient de nouveau à
+// l'application : Bloc la reçoit, se déclare modifiée, et la fenêtre n'a
+// pas bougé.
+TEST(session_ends_the_series_after_its_window_and_gives_the_key_back) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  arm_leader(sess);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Down, 0, 0}});
+  Surface once(80, 24);
+  sess.render(once);
+  REQUIRE_EQ(title_row_of(once, 24), 2);
+
+  plat.advance_steady(std::chrono::seconds(5));
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'j', 0}});
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 24), 2);         // rien n'a bougé
+  CHECK(surface_contains(after, "Bloc *"));      // et Bloc a reçu la touche
+}
+
+// Ce qui rend la fenêtre de répétition sans danger : en série, une touche
+// qui ne s'enchaîne pas n'est ni exécutée ni avalée. Sans cette règle, un
+// « w » tapé dans un document une seconde après un déplacement fermerait la
+// fenêtre sous les doigts.
+TEST(session_never_lets_a_series_swallow_a_destructive_key) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE(title_row_of(s, 24) >= 0);
+
+  arm_leader(sess);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Right, 0, 0}});
+
+  // Aussitôt après, dans la fenêtre de répétition : « w » fermerait la
+  // fenêtre s'il était capté.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'w', 0}});
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(title_row_of(after, 24) >= 0);       // la fenêtre est toujours là
+  CHECK(surface_contains(after, "Bloc *"));  // et c'est Bloc qui a eu le « w »
+}
+
+// L'aide ne s'invite pas au milieu d'une série : elle répond à l'hésitation
+// de qui vient de taper le leader, pas à celle de qui pousse une fenêtre.
+TEST(session_does_not_pop_the_help_in_the_middle_of_a_series) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  plat.advance_steady(std::chrono::seconds(30));
+  arm_leader(sess);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Left, 0, 0}});
+
+  CHECK_EQ(sess.help_delay_ms(), -1);
+  plat.advance_steady(std::chrono::seconds(2));
+  sess.take_dirty();
+  Surface quiet(80, 24);
+  sess.render(quiet);
+  CHECK(!surface_contains(quiet, "Ctrl+A puis :"));
+}

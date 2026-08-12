@@ -175,6 +175,11 @@ class Session {
   // le dispatcheur, lui, reste sans horloge.
   std::chrono::steady_clock::time_point leader_stamp_{};
 
+  // Fin de la série en cours. Relue paresseusement, à la frappe suivante :
+  // une série qui expire sans que personne ne tape n'a rien à réveiller, et
+  // le démon n'a donc pas à raccourcir son sommeil pour elle.
+  std::chrono::steady_clock::time_point repeat_until_{};
+
   // Les modes souris DEC sont posés par le client à l'attache ; la bascule
   // les retire et les remet. TtyGuard les restaure à la sortie, donc une
   // souris laissée coupée ne survit pas à la session.

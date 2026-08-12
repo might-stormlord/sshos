@@ -62,6 +62,21 @@ struct LeaderResult {
   std::optional<Action> action;
 };
 
+// Un accord qui s'enchaîne : après lui, la touche suivante agit sans qu'on
+// reprenne le leader. Déplacer une fenêtre de dix cellules demandait sinon
+// dix Ctrl+A, ce qui rend le clavier inutilisable pour ce à quoi il sert le
+// plus. Seuls les gestes qu'on répète naturellement le sont -- pas les
+// bascules, qui n'ont aucun sens deux fois de suite.
+bool is_repeatable(Action a);
+
+// Idle : la frappe appartient à l'application.
+// Armed : le leader vient d'être tapé, la touche suivante est une commande.
+// Repeating : un geste enchaînable vient d'agir. Seuls les gestes
+//   enchaînables restent captés ; TOUT LE RESTE repart à l'application sans
+//   être consommé. C'est ce qui rend la fenêtre de répétition sans danger --
+//   au pire un « j » déplace au lieu de s'écrire, jamais un « w » ne ferme.
+enum class LeaderPhase { Idle, Armed, Repeating };
+
 // Accord à deux temps : une touche leader, puis une lettre. Le dispatcheur
 // ne connaît que la table ; c'est la session qui sait exécuter.
 class LeaderDispatch {
@@ -69,12 +84,23 @@ class LeaderDispatch {
   explicit LeaderDispatch(char32_t leader = U'a') : leader_(leader) {}
 
   LeaderResult feed(const KeyEvent& k);
-  bool armed() const { return armed_; }
+
+  LeaderPhase phase() const { return phase_; }
+  bool armed() const { return phase_ == LeaderPhase::Armed; }
+  bool repeating() const { return phase_ == LeaderPhase::Repeating; }
+
+  // La série n'a pas d'horloge à elle : c'est la session qui tient le délai
+  // et qui vient la clore. Le dispatcheur reste sans notion de temps, comme
+  // au premier jour -- une table qui saurait l'heure serait intestable.
+  void reset() { phase_ = LeaderPhase::Idle; }
+
   char32_t leader() const { return leader_; }
 
  private:
+  std::optional<Action> lookup(const KeyEvent& k) const;
+
   char32_t leader_;
-  bool armed_ = false;
+  LeaderPhase phase_ = LeaderPhase::Idle;
 };
 
 }  // namespace sshos

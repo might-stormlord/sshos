@@ -11,9 +11,9 @@ namespace {
 
 // Cadre du haut, en-tête, ligne vide, ... , cadre du bas.
 constexpr int kChrome = 4;
-// Bordure, marge, colonne des touches, séparation, colonne des effets,
-// marge, bordure.
-constexpr int kGutters = 6;
+// Bordure, marge, colonne des touches, séparation, colonne de la marque
+// « s'enchaîne », séparation, colonne des effets, marge, bordure.
+constexpr int kGutters = 7;
 
 // Mesurées une fois : la table est constante, et l'aide se redessine à
 // chaque trame tant qu'elle est ouverte.
@@ -88,15 +88,33 @@ void Help::draw(View v, const Theme& th, Border b,
   // pas par un test.
   const int right = rect_.x + rect_.w - 1;  // colonne de la bordure droite
   const int kw = std::min(keys_width(), std::max(0, right - x));
-  const int what_x = x + kw + 2;
+  // Une colonne à elle seule pour la marque « s'enchaîne » : l'accoler au
+  // libellé élargirait le cadre de la plus longue ligne, et l'y élider
+  // effacerait justement la marque.
+  const int flag_x = x + kw + 1;
+  const int what_x = x + kw + 3;
   const int what_room = std::max(0, right - what_x);
   const std::string mark = utf8 ? "…" : "~";
+  const std::string chain = utf8 ? "∙" : "+";
+
+  // L'en-tête porte la légende, au-dessus de la colonne qu'elle explique.
+  if (what_room > 0) {
+    v.text(flag_x, rect_.y + 1,
+           elide_to_cells(chain + maybe_fold(" s'enchaîne", utf8),
+                          what_room + 2, mark),
+           st);
+  }
 
   for (int i = 0; i < n; ++i) {
     const HelpRow& r = binding_help()[static_cast<size_t>(i)];
     const int y = rect_.y + 3 + i;
     if (y >= rect_.y + rect_.h - 1) break;
     v.text(x, y, elide_to_cells(maybe_fold(r.keys, utf8), kw, mark), keys);
+    // Une ligne s'enchaîne si ce qu'elle documente s'enchaîne. La marque est
+    // DÉRIVÉE, jamais recopiée : elle ne peut pas mentir sur la table.
+    if (!r.actions.empty() && is_repeatable(r.actions.front())) {
+      v.text(flag_x, y, chain, keys);
+    }
     v.text(what_x, y, elide_to_cells(maybe_fold(r.what, utf8), what_room, mark),
            st);
   }

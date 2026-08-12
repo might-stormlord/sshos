@@ -153,3 +153,35 @@ TEST(help_clips_its_table_on_a_short_terminal) {
   CHECK(all.find(sshos::binding_help().front().what) != std::string::npos);
   CHECK(all.find(sshos::binding_help().back().what) == std::string::npos);
 }
+
+// La marque « s'enchaîne » est dérivée de la table, jamais recopiée. Elle
+// doit donc se poser sur exactement les lignes qui s'enchaînent -- ni une de
+// plus, sinon elle ment ; ni une de moins, sinon elle est inutile.
+TEST(help_marks_exactly_the_gestures_that_chain) {
+  Help h = opened();
+  Surface s(80, 30);
+  View v = s.root();
+  h.layout(80, 30);
+  const Rect r = h.rect(80, 30);
+  h.draw(v, Theme::mono16(), Border::Unicode, "Ctrl+A", true);
+
+  int marked = 0;
+  int expected = 0;
+  const auto& rows = sshos::binding_help();
+  for (size_t i = 0; i < rows.size(); ++i) {
+    const int y = r.y + 3 + static_cast<int>(i);
+    if (y >= r.y + r.h - 1) break;
+    const std::string line = s.text_row(y);
+    const bool chains = !rows[i].actions.empty() &&
+                        sshos::is_repeatable(rows[i].actions.front());
+    const bool has_mark = line.find("∙") != std::string::npos;
+    CHECK(has_mark == chains);
+    if (has_mark) ++marked;
+    if (chains) ++expected;
+  }
+  // Et la légende de l'en-tête porte la même marque, sans quoi personne ne
+  // saurait ce qu'elle veut dire.
+  CHECK(s.text_row(r.y + 1).find("∙") != std::string::npos);
+  CHECK_EQ(marked, expected);
+  CHECK(expected >= 3);
+}

@@ -45,6 +45,13 @@ constexpr std::chrono::milliseconds kDragWatchdog{2000};
 // « Ctrl+A puis w » tapé d'un trait ne fasse jamais clignoter l'aide.
 constexpr std::chrono::milliseconds kHelpDelay{500};
 
+// Ce qui sépare deux gestes d'une même série. Généreux exprès : on pousse
+// une fenêtre, on regarde, on pousse encore. Le danger habituel d'une
+// fenêtre longue -- une frappe ordinaire prise pour une commande -- n'existe
+// pas ici, puisque la série ne retient QUE les gestes qui s'enchaînent et
+// rend tout le reste à l'application (input/shortcuts.cpp).
+constexpr std::chrono::milliseconds kRepeatWindow{1500};
+
 
 }  // namespace
 
@@ -642,6 +649,13 @@ void Session::on_input(const InputEvent& e) {
       menu_key(*k);
       return;
     }
+    // La série a-t-elle expiré ? Relue ici, à la frappe, plutôt que sur une
+    // minuterie : tant que personne ne tape, une série finie ne change rien
+    // à ce qui est à l'écran.
+    if (leader_.repeating() && plat_->steady_now() > repeat_until_) {
+      leader_.reset();
+    }
+
     // L'aide se retire à la PREMIÈRE touche, et cette touche garde son
     // effet : elle s'est ouverte parce que l'accord traînait, pas pour
     // installer un mode dont il faudrait ressortir.
@@ -653,6 +667,13 @@ void Session::on_input(const InputEvent& e) {
     const LeaderResult lr = leader_.feed(*k);
     if (lr.action.has_value()) {
       do_action(*lr.action);
+      // Un geste qui s'enchaîne rouvre sa fenêtre à chaque fois : c'est
+      // l'ÉCART entre deux gestes qui est borné, pas la durée totale de la
+      // série. Pousser une fenêtre à l'autre bout de l'écran ne demande donc
+      // qu'un seul accord.
+      if (leader_.repeating()) {
+        repeat_until_ = plat_->steady_now() + kRepeatWindow;
+      }
       return;
     }
     if (lr.consumed) {

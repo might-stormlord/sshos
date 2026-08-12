@@ -466,12 +466,12 @@ Et même quand ils arrivent, capturer globalement `Alt+Flèches` vole `M-<flèch
 
 | Raccourci | Action |
 |---|---|
-| `<leader>` `←↑↓→` | Déplacer la fenêtre |
-| `<leader>` `h` `j` `k` `l` | Idem, sans quitter la rangée de repos |
-| `<leader>` `Shift+←↑↓→` | Redimensionner la fenêtre |
-| `<leader>` `H` `J` `K` `L` | Idem — mêmes lettres, majuscules |
-| `<leader>` `Tab` / `Shift+Tab` | Fenêtre suivante / précédente |
-| `<leader>` `n` / `p` | Idem, sans dépendre de `Tab` |
+| `<leader>` `←↑↓→` | Déplacer la fenêtre — *s'enchaîne* |
+| `<leader>` `h` `j` `k` `l` | Idem, sans quitter la rangée de repos — *s'enchaîne* |
+| `<leader>` `Shift+←↑↓→` | Redimensionner la fenêtre — *s'enchaîne* |
+| `<leader>` `H` `J` `K` `L` | Idem — mêmes lettres, majuscules — *s'enchaîne* |
+| `<leader>` `Tab` / `Shift+Tab` | Fenêtre suivante / précédente — *s'enchaîne* |
+| `<leader>` `n` / `p` | Idem, sans dépendre de `Tab` — *s'enchaîne* |
 | `<leader>` `w` | Fermer la fenêtre |
 | `<leader>` `-` | Minimiser |
 | `<leader>` `z` | Maximiser (bascule) |
@@ -489,6 +489,30 @@ Les doublures `hjkl` et `HJKL` ne remplacent pas les flèches, elles s'y
 ajoutent : les flèches sont ce qu'essaie en premier qui vient d'un vrai
 bureau, `hjkl` ce que cherchent des doigts habitués à `vi`. Aucun des deux
 publics n'a à apprendre le geste de l'autre.
+
+**Les gestes marqués *s'enchaîne* gardent l'accord ouvert.** Un accord
+ordinaire ne dure qu'une touche, ce qui est juste pour une bascule mais
+absurde pour un déplacement : pousser une fenêtre de dix cellules
+demanderait dix `Ctrl+A`. Après un geste enchaînable, la touche suivante
+agit donc sans qu'on reprenne le leader, et ainsi de suite tant que l'écart
+entre deux gestes reste sous **1,5 s** — c'est l'écart qui est borné, pas la
+durée totale de la série, si bien qu'un seul accord suffit pour traverser
+l'écran.
+
+La fenêtre est longue exprès, et elle est pourtant sans danger : **en série,
+seuls les gestes enchaînables sont captés.** Tout le reste rend la main à
+l'application sans même être consommé. Un `w` tapé dans un document une
+seconde après un déplacement s'écrit donc dans le document ; il ne ferme
+pas la fenêtre. Le pire cas est qu'un `j` déplace au lieu de s'écrire —
+visible, et défait par le geste inverse. `<leader>` rouvre un accord franc
+depuis l'intérieur d'une série : on veut visiblement autre chose qu'un
+déplacement de plus.
+
+L'aide de `<leader>?` marque ces lignes d'un `∙` et porte la légende en
+en-tête, de sorte que le comportement se lise là où on le cherche. Elle ne
+s'ouvre en revanche jamais d'elle-même au milieu d'une série : le compte à
+rebours répond à l'hésitation de qui vient de taper le leader, pas à celle
+de qui pousse une fenêtre.
 
 **`Ctrl+Q` détache, il ne détruit pas.** C'est le geste que la main fait
 pour « quitter », et le laisser tuer la session serait le contraire exact

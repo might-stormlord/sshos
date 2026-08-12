@@ -46,23 +46,8 @@ constexpr KeyBinding kKeyBindings[] = {
 
 }  // namespace
 
-LeaderResult LeaderDispatch::feed(const KeyEvent& k) {
-  const bool is_leader =
-      k.key == Key::Char && k.ch == leader_ && (k.mods & mod::Ctrl) != 0;
-
-  if (!armed_) {
-    if (is_leader) {
-      armed_ = true;
-      return LeaderResult{true, std::nullopt};
-    }
-    return LeaderResult{false, std::nullopt};
-  }
-
-  // Un accord ne dure qu'une touche, quelle qu'elle soit : c'est ce qui
-  // empêche le bureau de rester armé indéfiniment après une faute de frappe.
-  armed_ = false;
-  if (is_leader) return LeaderResult{true, Action::LiteralLeader};
-
+// Cherche l'action d'une touche, dans l'une ou l'autre table.
+std::optional<Action> LeaderDispatch::lookup(const KeyEvent& k) const {
   if (k.key != Key::Char) {
     // `\033[Z` ne porte aucun paramètre, donc aucun bit Maj : le terminal
     // dit « Maj+Tab » par le NOM de la touche. Les terminaux qui envoient
@@ -76,17 +61,84 @@ LeaderResult LeaderDispatch::feed(const KeyEvent& k) {
       shift = true;
     }
     for (const auto& b : kKeyBindings) {
-      if (b.key == key && b.shift == shift) return LeaderResult{true, b.action};
+      if (b.key == key && b.shift == shift) return b.action;
     }
+    return std::nullopt;
+  }
+  for (const auto& b : kBindings) {
+    if (b.ch == k.ch) return b.action;
+  }
+  return std::nullopt;
+}
+
+LeaderResult LeaderDispatch::feed(const KeyEvent& k) {
+  const bool is_leader =
+      k.key == Key::Char && k.ch == leader_ && (k.mods & mod::Ctrl) != 0;
+
+  if (phase_ == LeaderPhase::Idle) {
+    if (is_leader) {
+      phase_ = LeaderPhase::Armed;
+      return LeaderResult{true, std::nullopt};
+    }
+    return LeaderResult{false, std::nullopt};
+  }
+
+  if (is_leader) {
+    // Armé, le leader répété s'émet littéralement -- sans quoi Ctrl+A
+    // deviendrait intapable pour l'application en dessous. En série, il
+    // ouvre un accord franc : on veut visiblement autre chose qu'un
+    // déplacement de plus.
+    if (phase_ == LeaderPhase::Armed) {
+      phase_ = LeaderPhase::Idle;
+      return LeaderResult{true, Action::LiteralLeader};
+    }
+    phase_ = LeaderPhase::Armed;
     return LeaderResult{true, std::nullopt};
   }
 
-  for (const auto& b : kBindings) {
-    if (b.ch == k.ch) return LeaderResult{true, b.action};
+  const std::optional<Action> a = lookup(k);
+
+  if (phase_ == LeaderPhase::Repeating) {
+    // La série ne retient QUE ce qui s'enchaîne. Tout le reste rend la main
+    // à l'application sans être consommé : c'est ce qui rend la fenêtre de
+    // répétition inoffensive. Sans cette règle, un « w » tapé dans un
+    // document une seconde après un déplacement fermerait la fenêtre.
+    if (a.has_value() && is_repeatable(*a)) return LeaderResult{true, a};
+    phase_ = LeaderPhase::Idle;
+    return LeaderResult{false, std::nullopt};
   }
-  // Consommée sans rien faire : l'utilisateur a commencé un accord, il ne
-  // s'attend pas à voir la lettre apparaître dans son document.
-  return LeaderResult{true, std::nullopt};
+
+  // Armé : l'accord ne dure qu'une touche, quelle qu'elle soit -- c'est ce
+  // qui empêche le bureau de rester armé indéfiniment après une faute de
+  // frappe. Sauf si le geste s'enchaîne : il ouvre alors une série, que la
+  // session bornera dans le temps.
+  phase_ = (a.has_value() && is_repeatable(*a)) ? LeaderPhase::Repeating
+                                                : LeaderPhase::Idle;
+  // Une touche sans liaison est consommée sans rien faire : l'utilisateur a
+  // commencé un accord, il ne s'attend pas à voir la lettre apparaître dans
+  // son document.
+  return LeaderResult{true, a};
+}
+
+// Les gestes qu'on répète vraiment : pousser une fenêtre, l'étirer, faire
+// le tour de la pile. Une bascule n'a aucun sens deux fois de suite, et
+// « fermer » enchaîné serait une machine à détruire des fenêtres.
+bool is_repeatable(Action a) {
+  switch (a) {
+    case Action::MoveLeft:
+    case Action::MoveRight:
+    case Action::MoveUp:
+    case Action::MoveDown:
+    case Action::GrowWidth:
+    case Action::ShrinkWidth:
+    case Action::GrowHeight:
+    case Action::ShrinkHeight:
+    case Action::NextWindow:
+    case Action::PrevWindow:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // L'ordre est celui de la spec §7.4 : ce qui sert le plus souvent d'abord.
