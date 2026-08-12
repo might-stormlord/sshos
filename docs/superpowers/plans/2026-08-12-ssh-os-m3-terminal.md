@@ -127,7 +127,7 @@ Les caractères pleine chasse (`char_width == 2`) occupent deux cellules ; écri
 
 **Tests :** écrire 80 caractères sur 80 colonnes ne descend pas d'une ligne ; le 81ᵉ descend ; `CUB` entre les deux annule l'attente ; un caractère double en colonne 80 descend entier ; les bornes de tous les déplacements ; `HT` s'arrête aux taquets.
 
-- [ ] Tâche 3 livrée : tests, mutations, commit
+- [x] Tâche 3 livrée : tests, mutations, commit
 
 ## Tâche 4 — L'écran : effacements, éditions, régions
 
