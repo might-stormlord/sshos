@@ -67,6 +67,11 @@ class Session {
   // Le client doit-il tout repeindre ? Consommé une seule fois.
   bool take_repaint();
 
+  // Le client doit-il être congédié ? La session, elle, continue de vivre
+  // dans le démon avec toutes ses fenêtres -- c'est toute la différence
+  // avec wants_quit(), qui arrête le démon. Consommé une seule fois.
+  bool take_detach();
+
   WinHitResult hit_window_at(int x, int y) const;
 
   // Appelée par le démon au détachement d'un client et à l'attache du
@@ -156,6 +161,7 @@ class Session {
   bool mouse_on_ = true;
   std::string out_of_band_;
   bool repaint_ = false;
+  bool detach_ = false;
 
   // Repeint demandé hors de toute entrée utilisateur : l'horloge qui change
   // de minute, une application qui appelle Host::invalidate(). HostImpl en

@@ -275,13 +275,48 @@ TEST(session_survives_a_terminal_smaller_than_the_minimum) {
   CHECK(s.text_row(0).find("petit") != std::string::npos);
 }
 
-TEST(session_quits_on_ctrl_q) {
+// Le geste que la main fait pour « quitter » doit DÉTACHER. S'il détruisait
+// la session, revenir donnerait un bureau vide -- soit exactement l'inverse
+// de ce que ce programme promet. Les deux drapeaux sont donc vérifiés :
+// detach_ levé ET quit_ intact, faute de quoi un futur raccourci qui lèverait
+// les deux passerait ici sans être vu.
+TEST(session_detaches_on_ctrl_q_and_keeps_the_session_alive) {
   FakePlatform plat;
   Session sess(plat, g_fds, 40, 12);
-  CHECK(!sess.wants_quit());
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'q', sshos::mod::Ctrl}});
+  CHECK(!sess.wants_quit());
+  CHECK(sess.take_detach());
+  // Consommé une seule fois : un démon qui relit le drapeau au tour suivant
+  // ne doit pas congédier une seconde fois le client qui vient d'arriver.
+  CHECK(!sess.take_detach());
+}
+
+TEST(session_detaches_on_the_leader_chord) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 40, 12);
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'd', 0}});
+  CHECK(!sess.wants_quit());
+  CHECK(sess.take_detach());
+}
+
+// Le pendant du test précédent : détruire la session pour de bon reste
+// possible, mais il faut le demander par son nom.
+TEST(session_quits_only_when_the_menu_says_so) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  for (char c : std::string("quitter")) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{
+        sshos::Key::Char, static_cast<char32_t>(c), 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
   CHECK(sess.wants_quit());
+  CHECK(!sess.take_detach());
 }
 
 // A1, second embranchement : quand la largeur suffit à accueillir le message
@@ -2073,7 +2108,7 @@ TEST(daemon_does_not_busy_loop_after_resize_without_hello) {
 // sort jamais de lui-même) alors que session_quits_on_ctrl_q continue de
 // passer sans changement -- preuve que les deux tests ne couvrent pas la
 // même zone, et que celui-ci couvre bien le maillon jusque-là non testé.
-TEST(daemon_quits_on_ctrl_q_received_over_the_wire) {
+TEST(daemon_quits_when_the_menu_asks_for_it_over_the_wire) {
   const std::string name = unique_name() + "-wire-input";
   DaemonHandle daemon(name);
   REQUIRE(daemon.valid());
@@ -2091,8 +2126,10 @@ TEST(daemon_quits_on_ctrl_q_received_over_the_wire) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  REQUIRE(send_all(client.get(),
-                    sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));
+  // L'entrée « Quitter la session » du menu, tapée sur le fil : c'est
+  // désormais le seul chemin qui arrête le démon (Ctrl+Q détache).
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{
+                                     "\x01 quitter\r"}})));
 
   int status = 0;
   bool exited = false;
@@ -2506,8 +2543,9 @@ TEST(daemon_processes_input_sent_just_before_the_client_closes) {
   // démon figé. On relève donc les résultats dans des booléens et on ne
   // tranche qu'après SIGCONT.
   const bool stopped = wait_until_stopped(daemon.pid(), 2000);
-  const bool sent = send_all(
-      client.get(), sshos::encode(sshos::Msg{sshos::Input{"\x11"}}));  // Ctrl+Q
+  const bool sent = send_all(  // « Quitter la session » au menu
+      client.get(),
+      sshos::encode(sshos::Msg{sshos::Input{"\x01 quitter\r"}}));
   // Fermeture immédiate : le FIN suit les octets sur le même socket, sans
   // laisser au démon la moindre occasion de se réveiller entre les deux.
   client.reset();
@@ -2606,6 +2644,85 @@ TEST(daemon_keeps_clicks_sent_just_before_the_client_closes) {
   // poubelle avec le HUP : la session affiche « clics: 0 » et cette attente
   // expire.
   CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 3", "ssh_os", 3000));
+}
+
+// Le scénario tel que l'utilisateur le vit, et la seule chose que ce
+// programme promet vraiment : je pars, je reviens, tout est là. Rien ne le
+// vérifiait de bout en bout -- les tests de rattachement existants portaient
+// sur un client TUÉ, jamais sur un départ volontaire, et c'est précisément
+// par là que le défaut est passé : Ctrl+Q, unique geste de sortie offert,
+// détruisait la session au lieu de congédier le client.
+//
+// Trois observables, dans l'ordre où elles se produisent :
+//   1. le client partant reçoit Detached -- le démon le congédie, il ne meurt
+//      pas avec lui ;
+//   2. le démon est toujours vivant après ;
+//   3. le rattachement retrouve la fenêtre Battement ouverte avant le départ.
+// Contre le code d'avant le correctif, (1) échoue déjà : le démon s'arrête,
+// le socket se ferme sans annonce.
+TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
+  const std::string name = unique_name() + "-detach";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd a = connect_retry(name);
+  REQUIRE(a.valid());
+  sshos::Hello hello = make_hello(80, 24);
+  hello.term = "xterm";
+  hello.utf8 = true;
+  REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
+
+  sshos::Decoder dec_a;
+  auto welcome = recv_one(a.get(), dec_a, 2000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  // Ouvre Battement par le menu, et attend de le VOIR : sans ce point de
+  // synchronisation, le Ctrl+Q pourrait doubler l'ouverture.
+  REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{
+                                "\x01 batt\r"}})));
+  // Puis un repeint complet forcé (<leader>r) AVANT de relever quoi que ce
+  // soit. Sans lui la trame est un delta, et un delta ne réémet que les
+  // cellules changées : la première tentative de ce test cherchait « source: »
+  // et le différentiel envoyait « ource: » -- le « s » se trouvait déjà là,
+  // hérité de la fenêtre Bloc dessous. Un motif ne survit à un delta que par
+  // chance ; le repeint retire la chance de l'équation.
+  REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "battements: 0",
+                                    "source: vivante", 3000));
+
+  REQUIRE(send_all(a.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));  // Ctrl+Q
+
+  bool detached = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (!detached) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) break;
+    const int left = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
+            .count());
+    auto m = recv_one(a.get(), dec_a, std::max(1, left));
+    if (!m) break;
+    if (std::holds_alternative<sshos::Detached>(*m)) detached = true;
+  }
+  CHECK(detached);
+  a.reset();
+
+  int status = 0;
+  CHECK_EQ(::waitpid(daemon.pid(), &status, WNOHANG), 0);  // toujours vivant
+
+  sshos::Fd b = connect_retry(name);
+  REQUIRE(b.valid());
+  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
+  sshos::Decoder dec_b;
+  auto welcome_b = recv_one(b.get(), dec_b, 3000);
+  REQUIRE(welcome_b.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome_b));
+
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "battements:", "ssh_os",
+                                  3000));
 }
 
 // Même round, second emplacement du même motif : la branche `pending`

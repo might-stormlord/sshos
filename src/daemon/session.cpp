@@ -60,6 +60,12 @@ bool Session::take_repaint() {
   return r;
 }
 
+bool Session::take_detach() {
+  const bool d = detach_;
+  detach_ = false;
+  return d;
+}
+
 // Ouvre l'application demandée, ou rappelle celle qui l'est déjà : cliquer
 // une épinglée deux fois de suite ne doit pas empiler deux instances.
 void Session::focus_or_open(const std::string& app_id) {
@@ -160,6 +166,9 @@ void Session::do_action(Action a) {
       return;
     case Action::ForceRepaint:
       repaint_ = true;
+      return;
+    case Action::Detach:
+      detach_ = true;
       return;
     case Action::NextWindow:
       wm_.focus_next();
@@ -538,8 +547,13 @@ void Session::on_input(const InputEvent& e) {
       cancel_drag();
       return;
     }
+    // Ctrl+Q DÉTACHE, il ne détruit rien. C'est le geste que la main fait
+    // pour « quitter », et le laisser tuer la session serait le contraire de
+    // ce que ce projet promet : on revient, tout est là. Détruire la session
+    // pour de bon se demande explicitement, par l'entrée « Quitter la
+    // session » du menu.
     if (k->key == Key::Char && k->ch == U'q' && (k->mods & mod::Ctrl) != 0) {
-      quit_ = true;
+      detach_ = true;
       return;
     }
     // La modale passe avant tout le reste : c'est ce que « modal » veut

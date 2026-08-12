@@ -599,6 +599,12 @@ int run_daemon(std::string_view socket_name) {
     // décision de composition.
     if (session.take_dirty()) clock.mark_dirty();
 
+    // Détachement demandé : on congédie le client et on garde TOUT. La
+    // session, ses fenêtres et les descripteurs que leurs applications
+    // surveillent continuent de vivre ici ; le prochain Hello retrouvera le
+    // bureau exactement dans cet état.
+    if (session.take_detach()) drop_client("detache, la session continue");
+
     // Composition : au plus une fois par intervalle, après avoir tout drainé.
     const auto now = FrameClock::Clock::now();
     if (client && client->differ && clock.delay_ms(now) == 0) {

@@ -19,6 +19,7 @@ constexpr Binding kBindings[] = {
     {U'w', Action::Close},          {U'm', Action::Minimize},
     {U'x', Action::MaximizeToggle}, {U'f', Action::FullscreenToggle},
     {U' ', Action::OpenMenu},       {U'o', Action::ToggleMouse},
+    {U'd', Action::Detach},
     {U'r', Action::ForceRepaint},
 };
 

@@ -22,6 +22,10 @@ enum class Action {
   MaximizeToggle,
   FullscreenToggle,
   OpenMenu,
+  // Quitter le CLIENT sans toucher à la session : le démon garde tout,
+  // le rattachement suivant retrouve le bureau tel quel. C'est la
+  // fonctionnalité phare du projet, et il lui faut un geste.
+  Detach,
   ToggleMouse,
   ForceRepaint,
   // La touche leader tapée deux fois : à transmettre littéralement à
