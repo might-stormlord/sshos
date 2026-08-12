@@ -26,6 +26,11 @@ struct MenuHitResult {
 class Menu {
  public:
   void open();
+
+  // Ancré au CURSEUR plutôt qu'au bouton du panneau : c'est ce qu'attend un
+  // clic droit, et c'est la sortie d'un bureau vide sans toucher au clavier.
+  void open_at(int x, int y);
+
   void close();
   bool is_open() const { return open_; }
 
@@ -50,6 +55,9 @@ class Menu {
   void refilter();
 
   bool open_ = false;
+  bool anchored_ = false;
+  int anchor_x_ = 0;
+  int anchor_y_ = 0;
   std::string query_;
   std::vector<MenuItem> all_;
   std::vector<MenuItem> shown_;

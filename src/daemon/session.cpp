@@ -6,6 +6,7 @@
 
 #include "app/catalog.hpp"
 #include "daemon/host.hpp"
+#include "render/width.hpp"
 #include "wm/decor.hpp"
 
 namespace sshos {
@@ -51,6 +52,10 @@ constexpr std::chrono::milliseconds kHelpDelay{500};
 // pas ici, puisque la série ne retient QUE les gestes qui s'enchaînent et
 // rend tout le reste à l'application (input/shortcuts.cpp).
 constexpr std::chrono::milliseconds kRepeatWindow{1500};
+
+// Ce qui sépare deux clics d'un double-clic. Généreux : à travers SSH, deux
+// appuis partis à 200 ms d'intervalle peuvent arriver bien plus espacés.
+constexpr std::chrono::milliseconds kDoubleClick{600};
 
 
 }  // namespace
@@ -374,7 +379,13 @@ void Session::on_fd_event(uint64_t key, uint32_t events) {
 
 void Session::ensure_window(const Rect& work) {
   (void)work;  // déjà relevée dans last_work_ par render()
-  if (!wm_.stack().empty()) return;
+  // UNE SEULE FOIS. S'attacher sur un écran vide sans savoir quoi faire est
+  // le pire premier contact possible, donc on amorce ; mais rouvrir à
+  // chaque trame rend la dernière fenêtre INFERMABLE, ce qui est pire
+  // encore -- le [×] semble ne rien faire. La suite appartient à
+  // l'utilisateur, bureau vide compris.
+  if (seeded_) return;
+  seeded_ = true;
   open_from_catalog(kDefaultApp);
 }
 
@@ -555,7 +566,17 @@ void Session::on_mouse(const MouseEvent& m) {
   }
 
   Window* wp = wm_.hit(m.x, m.y);
-  if (wp == nullptr) return;
+  if (wp == nullptr) {
+    // Clic DROIT sur le vide : le menu s'ouvre là où on a cliqué. C'est le
+    // geste qu'essaie en premier qui vient d'un vrai bureau, et c'est la
+    // sortie d'un écran vide sans toucher au clavier. Le clic gauche, lui,
+    // ne fait rien : ouvrir un menu dessus serait insupportable.
+    if (m.action == MouseAction::Press && m.button == 2) {
+      menu_.open_at(m.x, m.y);
+      dirty_ = true;
+    }
+    return;
+  }
   Window& w = *wp;
 
   // Un clic n'importe où sur une fenêtre non focalisée lui donne le focus
@@ -565,8 +586,40 @@ void Session::on_mouse(const MouseEvent& m) {
 
   const WinHitResult h = hit_window(w, m.x, m.y);
   drag_stamp_ = plat_->steady_now();
+
+  // Un double-clic ne se voit que d'ici : le hit-testing est sans mémoire.
+  // On le relève AVANT le switch pour que la position comparée soit celle
+  // de l'appui, et pas celle qu'un déplacement aurait déjà décalée.
+  const auto now = plat_->steady_now();
+  const bool doubled = m.action == MouseAction::Press &&
+                       m.x == last_click_x_ && m.y == last_click_y_ &&
+                       now - last_click_ <= kDoubleClick;
+  if (m.action == MouseAction::Press) {
+    last_click_ = now;
+    last_click_x_ = m.x;
+    last_click_y_ = m.y;
+    // Un double-clic reconnu remet le compteur à zéro : trois clics font un
+    // double puis un simple, pas deux doubles qui se chevauchent.
+    if (doubled) last_click_x_ = -1;
+  }
+
   switch (h.what) {
     case WinHit::TitleBar:
+      // Double-clic sur la barre de titre : maximise, puis rétablit. Le
+      // geste de tous les bureaux, et il n'existait qu'au clavier et au
+      // bouton [□].
+      if (doubled) {
+        wm_.set_mode(w.id,
+                     w.mode == WinMode::Maximized ? WinMode::Normal
+                                                  : WinMode::Maximized,
+                     last_work_);
+        break;
+      }
+      // Une fenêtre maximisée ou en plein écran ne se traîne pas : elle
+      // n'est pas là où user_rect le dit. La déplacer réécrirait EN SILENCE
+      // la géométrie de retour -- un simple clic pour prendre le focus
+      // suffisait à décaler la fenêtre au rétablissement suivant.
+      if (w.mode != WinMode::Normal) break;
       drag_ = Moving{w.id, m.x - w.display_rect.x, m.y - w.display_rect.y,
                      w.user_rect};
       break;
@@ -691,6 +744,28 @@ void Session::on_input(const InputEvent& e) {
   if (const auto* m = std::get_if<MouseEvent>(&e)) on_mouse(*m);
 }
 
+void Session::draw_empty_hint(View v, const Rect& work) const {
+  // Deux lignes centrées : ce qu'on voit, puis les deux gestes qui en
+  // sortent. Le clic droit d'abord, parce qu'il marche PARTOUT sur le vide
+  // et n'oblige pas à viser un bouton de trois cellules.
+  const bool utf8 = out_.utf8;
+  const std::string burger = utf8 ? "\xe2\x98\xb0" : "=";
+  const std::string lines[2] = {
+      "Bureau vide",
+      "Clic droit ici, ou " + burger + " en bas, pour ouvrir le menu",
+  };
+
+  Style st;
+  st.fg = theme_.panel_fg;
+  st.bg = theme_.desktop_bg;
+  const int top = work.y + (work.h - 2) / 2;
+  for (int i = 0; i < 2; ++i) {
+    const std::string txt = elide_to_cells(lines[i], work.w, "");
+    const int x = work.x + (work.w - text_cells(txt)) / 2;
+    v.text(x < work.x ? work.x : x, top + i, txt, st);
+  }
+}
+
 void Session::render(Surface& out) {
   watchdog();
 
@@ -735,6 +810,12 @@ void Session::render(Surface& out) {
   // un seul user_rect : c'est ce qui rend le redimensionnement du terminal
   // réversible.
   relayout(wm_, work, out.w(), out.h());
+
+  // Un bureau vide dit quoi faire, et le dit pour la SOURIS : c'est avec
+  // elle qu'on arrive, et le menu est à un clic. Sans cette ligne, fermer
+  // la dernière fenêtre laisse un écran nu où plus rien n'a l'air
+  // cliquable -- exactement l'impasse que l'amorce perpétuelle masquait.
+  if (wm_.stack().empty()) draw_empty_hint(v, work);
 
   // De l'arrière vers l'avant : la dernière peinte est celle du dessus.
   const WindowId focused = wm_.focused();

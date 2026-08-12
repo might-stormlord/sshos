@@ -109,6 +109,7 @@ class Session {
 
   Border border() const;
   void ensure_window(const Rect& work);
+  void draw_empty_hint(View v, const Rect& work) const;
 
   // Ferme une fenêtre en retirant d'abord ses surveillances : aucune entrée
   // epoll ne doit survivre au descripteur qu'elle désigne.
@@ -179,6 +180,18 @@ class Session {
   // une série qui expire sans que personne ne tape n'a rien à réveiller, et
   // le démon n'a donc pas à raccourcir son sommeil pour elle.
   std::chrono::steady_clock::time_point repeat_until_{};
+
+  // Une seule fenêtre d'amorce, au tout premier rendu. Un bureau VIDE est
+  // un état légitime : le rendu rouvrait une application à chaque trame dès
+  // que la pile se vidait, si bien que le [×] de la dernière fenêtre
+  // semblait ne rien faire. Signalé à l'usage.
+  bool seeded_ = false;
+
+  // Le dernier clic, pour reconnaître un double. La session est le seul
+  // endroit qui voie les deux appuis : le hit-testing est sans mémoire.
+  std::chrono::steady_clock::time_point last_click_{};
+  int last_click_x_ = -1;
+  int last_click_y_ = -1;
 
   // Les modes souris DEC sont posés par le client à l'attache ; la bascule
   // les retire et les remet. TtyGuard les restaure à la sortie, donc une

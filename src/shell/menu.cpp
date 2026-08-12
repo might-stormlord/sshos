@@ -31,6 +31,7 @@ bool contains_fold(const std::string& hay, const std::string& needle) {
 
 void Menu::open() {
   open_ = true;
+  anchored_ = false;
   query_.clear();
   sel_ = 0;
 
@@ -46,6 +47,16 @@ void Menu::open() {
   all_.push_back({"cmd:cut", "Battement : couper la source"});
   all_.push_back({"session:quit", "Quitter la session"});
   refilter();
+}
+
+void Menu::open_at(int x, int y) {
+  // Passe par open() pour que la TABLE reste construite en un seul endroit :
+  // une entrée ajoutée au menu du panneau doit apparaître au clic droit
+  // sans que personne ait à y penser.
+  open();
+  anchored_ = true;
+  anchor_x_ = x;
+  anchor_y_ = y;
 }
 
 void Menu::close() {
@@ -96,6 +107,21 @@ Rect Menu::rect(int cols, int rows) const {
   int h = std::min(rows - 1, want + kChrome);
   h = std::max(h, kChrome + 1);
   const int w = std::min(cols, kMenuWidth);
+
+  if (anchored_) {
+    // Le coin haut-gauche AU CURSEUR, puis ramené dans l'écran. Un menu
+    // contextuel qui déborde par la droite est le défaut le plus banal du
+    // genre, et le seul que personne ne pardonne : la moitié des entrées
+    // devient illisible.
+    int x = anchor_x_;
+    int y = anchor_y_;
+    if (x + w > cols) x = cols - w;
+    if (y + h > rows) y = rows - h;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    return Rect{x, y, w, h};
+  }
+
   // Ancré au bouton de menu du panneau, et poussé vers le haut : le menu
   // pousse depuis son bouton, il ne le recouvre pas.
   int y = rows - 1 - h;

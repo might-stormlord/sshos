@@ -3094,3 +3094,166 @@ TEST(session_does_not_pop_the_help_in_the_middle_of_a_series) {
   sess.render(quiet);
   CHECK(!surface_contains(quiet, "Ctrl+A puis :"));
 }
+
+// ---------------------------------------------------------------------------
+// Le bureau vide. Signalé à l'usage : « si il reste une fenêtre ouverte, je
+// ne peux pas la fermer ». La session rouvrait une application à CHAQUE
+// trame dès que la pile était vide, si bien que le [×] de la dernière
+// fenêtre semblait ne rien faire.
+// ---------------------------------------------------------------------------
+
+TEST(session_lets_the_desktop_be_empty_once_the_last_window_is_closed) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 24), 1);  // une fenêtre au démarrage
+
+  // [×] de la seule fenêtre : cadre {2,1,44,14}, dernier bouton en 42..44.
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+
+  // Et le bureau RESTE vide, trame après trame : c'est le rendu qui
+  // rouvrait, donc une seule vérification ne prouverait rien.
+  for (int i = 0; i < 5; ++i) {
+    Surface after(80, 24);
+    sess.render(after);
+    // 23 et non 24 : la ligne du panneau porte l'entrée ÉPINGLÉE « Bloc »,
+    // qui n'est pas une fenêtre et ne disparaît jamais.
+    if (title_row_of(after, 23) >= 0) {
+      th::fail(__FILE__, __LINE__,
+               "une fenetre est revenue toute seule au tour " +
+                   std::to_string(i));
+    }
+  }
+}
+
+// Une fenêtre au démarrage, oui -- s'attacher sur un écran vide sans savoir
+// quoi faire est le pire premier contact possible. Mais une seule fois : la
+// suite appartient à l'utilisateur.
+TEST(session_seeds_one_window_at_the_start_and_never_again) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE(title_row_of(s, 24) >= 0);
+
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+  Surface empty(80, 24);
+  sess.render(empty);
+  REQUIRE_EQ(title_row_of(empty, 23), -1);
+
+  // Un redimensionnement du bureau ne réamorce pas non plus.
+  sess.resize(100, 30);
+  Surface bigger(100, 30);
+  sess.render(bigger);
+  CHECK_EQ(title_row_of(bigger, 29), -1);
+}
+
+// Un bureau vide doit dire quoi faire, et le dire pour la SOURIS : c'est
+// avec elle qu'on arrive, et le menu est à un clic.
+TEST(session_says_what_to_do_when_the_desktop_is_empty) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+
+  Surface empty(80, 24);
+  sess.render(empty);
+  REQUIRE_EQ(title_row_of(empty, 23), -1);
+  CHECK(surface_contains(empty, "menu"));
+
+  // Et l'invite disparaît dès qu'une fenêtre existe.
+  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  Surface busy(80, 24);
+  sess.render(busy);
+  CHECK(!surface_contains(busy, "pour ouvrir"));
+}
+
+// Clic DROIT sur le bureau : le menu s'ouvre là où on a cliqué. C'est le
+// geste qu'on essaie en premier quand on vient d'un vrai bureau, et c'est
+// la sortie d'un écran vide sans toucher au clavier.
+TEST(session_opens_the_menu_on_a_right_click_on_the_desktop) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  // Loin de toute fenêtre : la fenêtre du démarrage occupe {2,1,44,14}.
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 2, 60, 18, 0}});
+  Surface opened(80, 24);
+  sess.render(opened);
+  // « Panneau : haut » n'existe QUE dans le menu -- « Bloc » se lirait
+  // aussi bien dans la barre des tâches.
+  CHECK(surface_contains(opened, "Panneau"));
+}
+
+// Le clic GAUCHE sur le vide ne fait toujours rien : il sert à défocaliser
+// ou à ne rien faire, et ouvrir un menu dessus serait insupportable.
+TEST(session_leaves_a_left_click_on_the_desktop_alone) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  press_at(sess, 60, 18);
+  release_at(sess, 60, 18);
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(!surface_contains(after, "Panneau"));
+}
+
+// Double-clic sur la barre de titre : maximise, puis rétablit. C'est le
+// geste de tous les bureaux, et il n'existait qu'au clavier et au bouton.
+TEST(session_maximizes_on_a_double_click_on_the_title_bar) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 24), 1);
+
+  // Deux appuis rapprochés sur la barre de titre, loin des boutons.
+  press_at(sess, 10, 1);
+  release_at(sess, 10, 1);
+  plat.advance_steady(std::chrono::milliseconds(120));
+  press_at(sess, 10, 1);
+  release_at(sess, 10, 1);
+  Surface big(80, 24);
+  sess.render(big);
+  // Maximisée : le cadre occupe toute la zone, ses boutons filent à droite.
+  CHECK(big.text_row(0).find("[") != std::string::npos);
+  CHECK(big.text_row(0).find("Bloc") != std::string::npos);
+
+  // Et le même geste rétablit.
+  plat.advance_steady(std::chrono::seconds(2));
+  press_at(sess, 10, 0);
+  release_at(sess, 10, 0);
+  plat.advance_steady(std::chrono::milliseconds(120));
+  press_at(sess, 10, 0);
+  release_at(sess, 10, 0);
+  Surface back(80, 24);
+  sess.render(back);
+  CHECK_EQ(title_row_of(back, 24), 1);
+}
+
+// Deux clics ESPACÉS ne font pas un double-clic : sinon toute paire de
+// prises de focus sur la barre de titre finirait par maximiser.
+TEST(session_does_not_take_two_slow_clicks_for_a_double_click) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  press_at(sess, 10, 1);
+  release_at(sess, 10, 1);
+  plat.advance_steady(std::chrono::seconds(2));
+  press_at(sess, 10, 1);
+  release_at(sess, 10, 1);
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 24), 1);  // toujours à sa place
+}
