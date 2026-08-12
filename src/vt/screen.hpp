@@ -20,6 +20,16 @@ struct CursorPos {
   int y = 0;
 };
 
+// Ce que DECSC met de côté. Aujourd'hui la position et le retour différé ;
+// la tâche 5 y ajoutera les attributs courants et la tâche 10 le jeu de
+// caractères, car DECRC restitue les trois -- une application qui sauve le
+// curseur au milieu d'un passage en gras attend de le retrouver en gras.
+struct SavedCursor {
+  int x = 0;
+  int y = 0;
+  bool wrap_pending = false;
+};
+
 // La grille et son curseur. Rien ici ne connaît le parseur : l'écran reçoit
 // des ordres déjà décodés, ce qui le rend testable sans passer par un seul
 // octet d'échappement.
@@ -67,6 +77,35 @@ class Screen {
   void clear_tab();       // TBC 0
   void clear_all_tabs();  // TBC 3
 
+  // Les effacements. `mode` reprend la numérotation du fil : 0 efface du
+  // curseur vers la fin, 1 du début jusqu'au curseur inclus, 2 la totalité.
+  // Tout autre mode ne fait rien -- le mode 3 (scrollback) appartient à la
+  // tâche 7 et sera traité au-dessus, pas ici.
+  void erase_display(int mode);  // ED
+  void erase_line(int mode);     // EL
+  void erase_chars(int n);       // ECH : n cellules sur place, rien ne bouge
+
+  // Les éditions. Toutes bornées, toutes sans effet hors de la région de
+  // défilement pour celles qui travaillent en lignes.
+  void insert_chars(int n);  // ICH : pousse la fin de ligne à droite
+  void delete_chars(int n);  // DCH : ramène la fin de ligne à gauche
+  void insert_lines(int n);  // IL
+  void delete_lines(int n);  // DL
+
+  // La région de défilement (DECSTBM), en lignes 0-indexées INCLUSES. Une
+  // région invalide est refusée telle quelle : c'est ce que fait xterm, et
+  // une application qui se trompe garde ainsi la région d'avant plutôt que
+  // de voir son écran se figer.
+  void set_scroll_region(int top, int bottom);
+  void reset_scroll_region();  // DECSTBM sans paramètre : pleine page
+  int scroll_top() const { return top_; }
+  int scroll_bottom() const { return bottom_; }
+
+  // DECSC / DECRC. Un DECRC sans DECSC préalable ramène à l'origine, ce qui
+  // est le comportement d'un terminal fraîchement allumé.
+  void save_cursor();
+  void restore_cursor();
+
   // Le texte d'une ligne, en UTF-8, sans les blancs de fin. Pour les tests
   // et pour le scrollback, qui range des lignes ROGNÉES.
   std::string line_text(int y) const;
@@ -76,6 +115,22 @@ class Screen {
   void scroll_up();    // le haut s'en va, une ligne vierge en bas
   void scroll_down();  // le bas s'en va, une ligne vierge en haut
   void reset_tabs();
+
+  // Le défilement d'une tranche quelconque. La région de DECSTBM n'est
+  // qu'un cas d'usage : IL et DL défilent la tranche qui va du curseur au
+  // bas de la région, et se ramènent ainsi aux mêmes deux fonctions.
+  void scroll_slice_up(int top, int bottom, int n);
+  void scroll_slice_down(int top, int bottom, int n);
+
+  // Efface les colonnes [x0, x1] d'une ligne en emportant les caractères
+  // pleine chasse que les bornes couperaient en deux.
+  void erase_span(int x0, int x1, int y);
+
+  // Efface LES DEUX moitiés du caractère pleine chasse qui occupe cette
+  // colonne, quelle que soit la moitié visée. Ce que clear_wide_at() laisse
+  // debout, celle-ci l'emporte : un décalage doit briser la paire avant de
+  // la déplacer, sinon une moitié voyage sans l'autre.
+  void break_wide_at(int x, int y);
 
   // Efface la MOITIÉ ORPHELINE d'un caractère pleine chasse qu'on vient de
   // recouvrir : sans cela, écrire un caractère simple sur la gauche d'un
@@ -90,6 +145,9 @@ class Screen {
   int cx_ = 0;
   int cy_ = 0;
   bool wrap_pending_ = false;
+  int top_ = 0;
+  int bottom_ = 0;  // posé à rows_ - 1 par le constructeur
+  SavedCursor saved_{};
   ScreenCell blank_{};
 };
 

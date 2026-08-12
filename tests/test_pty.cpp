@@ -325,11 +325,20 @@ TEST(pty_puts_the_guests_error_output_in_the_window) {
 // `trap` avec une commande, et non `trap ""` : un signal IGNORÉ à l'exec
 // reste ignoré chez les enfants, ce qui protégerait aussi le pipeline et
 // rendrait le test creux une seconde fois.
+//
+// Le marqueur d'amorçage passe PAR LE TUBE, et c'est tout le sujet. Émis
+// avant le pipeline (`printf pret; sleep 5 | cat`), il ne prouve rien : on
+// raccrochait alors que le pipeline n'était pas encore né, le shell
+// attrapait le HUP tout seul, puis lançait tranquillement ses cinq
+// secondes de `sleep` -- échec sept fois sur dix. Émis À GAUCHE et relayé
+// par `cat`, il ne peut arriver que si les DEUX membres tournent : le
+// gauche pour l'écrire, le droit pour le rendre. La garantie est causale
+// et non plus un pari sur l'ordre des fork.
 TEST(pty_hangs_up_the_whole_process_group) {
   Pty p;
   REQUIRE_EQ(p.spawn(shell_running(
-                 "trap 'printf RACCROCHE' HUP; printf 'pret'; "
-                 "sleep 5 | cat; printf 'FINI'")),
+                 "trap 'printf RACCROCHE' HUP; "
+                 "{ printf 'pret\\n'; sleep 5; } | cat; printf 'FINI'")),
              std::string());
   REQUIRE(read_until(p, "pret").find("pret") != std::string::npos);
 

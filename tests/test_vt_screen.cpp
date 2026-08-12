@@ -496,3 +496,540 @@ TEST(screen_keeps_the_column_across_a_reverse_index) {
   CHECK_EQ(s.cursor().x, 3);
   CHECK_EQ(s.cursor().y, 0);
 }
+
+// ---------------------------------------------------------------------------
+// Les effacements : ED, EL, ECH.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Une grille marquée : chaque ligne porte son propre chiffre répété, de
+// sorte qu'une transcription dise d'un coup d'œil ce qui a disparu et où.
+Screen marked(int cols, int rows) {
+  Screen s(cols, rows);
+  for (int y = 0; y < rows; ++y) {
+    s.move_to(0, y);
+    for (int x = 0; x < cols; ++x) s.print(static_cast<char32_t>(U'0' + y));
+  }
+  return s;
+}
+
+}  // namespace
+
+TEST(screen_erases_from_the_cursor_to_the_end_of_the_display) {
+  Screen s = marked(4, 3);
+  s.move_to(2, 1);
+  s.erase_display(0);
+
+  CHECK_EQ(dump(s), "0000/11/");
+  // Le curseur ne bouge pas : ED n'est pas un deplacement.
+  CHECK_EQ(s.cursor().x, 2);
+  CHECK_EQ(s.cursor().y, 1);
+}
+
+TEST(screen_erases_from_the_start_of_the_display_to_the_cursor) {
+  Screen s = marked(4, 3);
+  s.move_to(2, 1);
+  s.erase_display(1);
+
+  // La cellule SOUS le curseur part elle aussi.
+  CHECK_EQ(dump(s), "/   1/2222");
+}
+
+TEST(screen_erases_the_whole_display) {
+  Screen s = marked(4, 3);
+  s.move_to(2, 1);
+  s.erase_display(2);
+
+  CHECK_EQ(dump(s), "//");
+  CHECK_EQ(s.cursor().x, 2);
+  CHECK_EQ(s.cursor().y, 1);
+}
+
+TEST(screen_ignores_an_unknown_erase_display_mode) {
+  Screen s = marked(4, 2);
+  s.move_to(0, 0);
+  s.erase_display(9);
+
+  CHECK_EQ(dump(s), "0000/1111");
+}
+
+TEST(screen_erases_from_the_cursor_to_the_end_of_the_line) {
+  Screen s = marked(4, 2);
+  s.move_to(1, 0);
+  s.erase_line(0);
+
+  CHECK_EQ(dump(s), "0/1111");
+}
+
+TEST(screen_erases_from_the_start_of_the_line_to_the_cursor) {
+  Screen s = marked(4, 2);
+  s.move_to(1, 0);
+  s.erase_line(1);
+
+  CHECK_EQ(dump(s), "  00/1111");
+}
+
+TEST(screen_erases_the_whole_line) {
+  Screen s = marked(4, 2);
+  s.move_to(1, 0);
+  s.erase_line(2);
+
+  CHECK_EQ(dump(s), "/1111");
+}
+
+TEST(screen_erases_a_fixed_number_of_cells_without_moving_anything) {
+  Screen s = marked(6, 1);
+  s.move_to(1, 0);
+  s.erase_chars(2);
+
+  // ECH creuse un trou : la fin de ligne NE remonte PAS.
+  CHECK_EQ(dump(s), "0  000");
+  CHECK_EQ(s.cursor().x, 1);
+}
+
+TEST(screen_clamps_an_erase_of_more_cells_than_the_line_holds) {
+  Screen s = marked(6, 1);
+  s.move_to(4, 0);
+  s.erase_chars(999);
+
+  CHECK_EQ(dump(s), "0000");
+}
+
+// Un effacement qui tombe au milieu d'une pleine chasse doit l'emporter
+// entière. Sinon il reste une moitié, et le rendu peint un demi idéogramme.
+TEST(screen_erases_a_wide_character_whole_when_it_cuts_it_in_half) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "b");
+  REQUIRE_EQ(s.at(1, 0).width, 2);
+
+  s.move_to(2, 0);  // pile sur la SECONDE moitie
+  s.erase_line(0);
+
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(s.at(1, 0).width, 1);
+  CHECK_EQ(dump(s), "a");
+}
+
+TEST(screen_erases_a_wide_character_whole_at_the_far_end_of_a_span) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "b");
+
+  s.move_to(0, 0);
+  s.erase_chars(2);  // couvre 0 et 1 : la moitie droite est en 2
+
+  CHECK_EQ(s.at(2, 0).ch, U' ');
+  CHECK_EQ(s.at(2, 0).width, 1);
+  CHECK_EQ(dump(s), "   b");
+}
+
+// ---------------------------------------------------------------------------
+// Les éditions : ICH, DCH, IL, DL.
+// ---------------------------------------------------------------------------
+
+TEST(screen_inserts_cells_by_pushing_the_rest_of_the_line_right) {
+  Screen s(6, 1);
+  puts_ascii(s, "abcdef");
+  s.move_to(2, 0);
+  s.insert_chars(2);
+
+  // "ef" sort de la ligne par la droite et se perd.
+  CHECK_EQ(dump(s), "ab  cd");
+  CHECK_EQ(s.cursor().x, 2);
+}
+
+TEST(screen_deletes_cells_by_pulling_the_rest_of_the_line_left) {
+  Screen s(6, 1);
+  puts_ascii(s, "abcdef");
+  s.move_to(2, 0);
+  s.delete_chars(2);
+
+  CHECK_EQ(dump(s), "abef");
+}
+
+TEST(screen_treats_an_oversized_insert_as_a_line_erase) {
+  Screen s(6, 1);
+  puts_ascii(s, "abcdef");
+  s.move_to(2, 0);
+  s.insert_chars(99);
+
+  CHECK_EQ(dump(s), "ab");
+}
+
+TEST(screen_treats_an_oversized_delete_as_a_line_erase) {
+  Screen s(6, 1);
+  puts_ascii(s, "abcdef");
+  s.move_to(2, 0);
+  s.delete_chars(99);
+
+  CHECK_EQ(dump(s), "ab");
+}
+
+TEST(screen_ignores_an_edit_of_zero_cells) {
+  Screen s(6, 1);
+  puts_ascii(s, "abcdef");
+  s.move_to(2, 0);
+  s.insert_chars(0);
+  s.delete_chars(0);
+  s.erase_chars(0);
+
+  CHECK_EQ(dump(s), "abcdef");
+}
+
+TEST(screen_inserts_lines_and_drops_the_bottom_of_the_region) {
+  Screen s = marked(4, 4);
+  s.move_to(0, 1);
+  s.insert_lines(1);
+
+  // La ligne 3 tombe de l'ecran, une ligne vierge s'ouvre en 1.
+  CHECK_EQ(dump(s), "0000//1111/2222");
+}
+
+TEST(screen_deletes_lines_and_pulls_the_region_up) {
+  Screen s = marked(4, 4);
+  s.move_to(0, 1);
+  s.delete_lines(1);
+
+  CHECK_EQ(dump(s), "0000/2222/3333/");
+}
+
+// Le curseur reste où il est : IL et DL ne sont pas des déplacements.
+TEST(screen_keeps_the_cursor_where_it_is_across_a_line_edit) {
+  Screen s = marked(4, 4);
+  s.move_to(2, 1);
+  s.insert_lines(1);
+  CHECK_EQ(s.cursor().x, 2);
+  CHECK_EQ(s.cursor().y, 1);
+
+  s.delete_lines(1);
+  CHECK_EQ(s.cursor().x, 2);
+  CHECK_EQ(s.cursor().y, 1);
+}
+
+// ---------------------------------------------------------------------------
+// La région de défilement (DECSTBM).
+// ---------------------------------------------------------------------------
+
+TEST(screen_starts_with_a_region_that_covers_the_whole_page) {
+  Screen s(4, 5);
+  CHECK_EQ(s.scroll_top(), 0);
+  CHECK_EQ(s.scroll_bottom(), 4);
+}
+
+TEST(screen_scrolls_only_inside_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+  s.move_to(0, 2);  // au bas de la region
+  s.index();
+
+  // Les lignes 0 et 3 ne bougent pas d'un pouce.
+  CHECK_EQ(dump(s), "0000/2222//3333");
+}
+
+TEST(screen_scrolls_the_region_backwards_at_its_top) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+  s.move_to(0, 1);  // au sommet de la region
+  s.reverse_index();
+
+  CHECK_EQ(dump(s), "0000//1111/3333");
+}
+
+// Le curseur va à l'origine de l'écran : c'est ce que fait DECSTBM, et
+// c'est ce qui garantit qu'une application ne reste pas posée sur une
+// ligne qui vient de changer de sens.
+// L'origine visée est celle de l'ÉCRAN, pas celle de la région : DECSTBM
+// ramène en (0, 0) même quand la région commence plus bas. C'est le choix
+// de xterm tant que DECOM n'est pas armé, et le test le distingue puisque
+// la région posée ici démarre à la ligne 1 -- une origine de région
+// donnerait y == 1.
+TEST(screen_sends_the_cursor_home_when_the_region_changes) {
+  Screen s = marked(4, 4);
+  s.move_to(3, 3);
+  s.set_scroll_region(1, 2);
+
+  CHECK_EQ(s.cursor().x, 0);
+  CHECK_EQ(s.cursor().y, 0);
+}
+
+// Corollaire du précédent, écrit pour qu'on ne relise pas ce (0, 0) comme
+// un curseur coincé hors de sa région : la région borne le DÉFILEMENT, pas
+// les déplacements. On écrit au-dessus d'elle, on y descend, et rien ne
+// défile tant qu'on n'a pas atteint son bas.
+TEST(screen_lets_the_cursor_work_above_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+
+  s.print(U'X');
+  CHECK_EQ(s.cursor().x, 1);
+  CHECK_EQ(dump(s), "X000/1111/2222/3333");
+
+  s.carriage_return();
+  s.line_feed();
+  CHECK_EQ(s.cursor().y, 1);
+  CHECK_EQ(dump(s), "X000/1111/2222/3333");
+}
+
+TEST(screen_refuses_a_region_that_is_upside_down) {
+  Screen s(4, 4);
+  s.set_scroll_region(1, 2);
+  s.set_scroll_region(3, 1);  // refusee
+
+  CHECK_EQ(s.scroll_top(), 1);
+  CHECK_EQ(s.scroll_bottom(), 2);
+}
+
+TEST(screen_refuses_a_region_of_a_single_line) {
+  Screen s(4, 4);
+  s.set_scroll_region(2, 2);
+
+  // Une region d'une ligne ne peut pas defiler : xterm la refuse, et sans
+  // ce refus un LF au mauvais endroit effacerait la ligne a chaque tour.
+  CHECK_EQ(s.scroll_top(), 0);
+  CHECK_EQ(s.scroll_bottom(), 3);
+}
+
+TEST(screen_clamps_a_region_that_runs_past_the_bottom) {
+  Screen s(4, 4);
+  s.set_scroll_region(1, 99);
+
+  CHECK_EQ(s.scroll_top(), 1);
+  CHECK_EQ(s.scroll_bottom(), 3);
+}
+
+TEST(screen_reopens_the_region_to_the_whole_page) {
+  Screen s(4, 4);
+  s.set_scroll_region(1, 2);
+  s.reset_scroll_region();
+
+  CHECK_EQ(s.scroll_top(), 0);
+  CHECK_EQ(s.scroll_bottom(), 3);
+}
+
+// Sous la région, LF descend sans jamais faire défiler quoi que ce soit :
+// le curseur s'arrête au bas de l'écran.
+TEST(screen_does_not_scroll_when_the_cursor_sits_below_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(0, 1);
+  s.move_to(0, 3);
+  s.index();
+
+  CHECK_EQ(dump(s), "0000/1111/2222/3333");
+  CHECK_EQ(s.cursor().y, 3);
+}
+
+TEST(screen_ignores_a_line_insert_outside_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(0, 1);
+  s.move_to(0, 3);  // sous la region
+  s.insert_lines(1);
+  s.delete_lines(1);
+
+  CHECK_EQ(dump(s), "0000/1111/2222/3333");
+}
+
+// IL au bas de la région se réduit à effacer la ligne : ce qu'elle pousse
+// sort immédiatement de la région.
+TEST(screen_inserting_at_the_bottom_of_the_region_just_blanks_the_line) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+  s.move_to(0, 2);
+  s.insert_lines(1);
+
+  CHECK_EQ(dump(s), "0000/1111//3333");
+}
+
+TEST(screen_line_edits_stop_at_the_bottom_of_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+  s.move_to(0, 1);
+  s.delete_lines(1);
+
+  // Seules 1 et 2 tournent ; 3 reste dehors.
+  CHECK_EQ(dump(s), "0000/2222//3333");
+}
+
+// ---------------------------------------------------------------------------
+// DECSC / DECRC.
+// ---------------------------------------------------------------------------
+
+TEST(screen_restores_the_cursor_it_saved) {
+  Screen s(10, 4);
+  s.move_to(5, 2);
+  s.save_cursor();
+  s.move_to(0, 0);
+  s.restore_cursor();
+
+  CHECK_EQ(s.cursor().x, 5);
+  CHECK_EQ(s.cursor().y, 2);
+}
+
+// Le retour différé fait partie de l'état du curseur : le perdre ferait
+// sauter une ligne à la reprise.
+TEST(screen_restores_the_pending_wrap_it_saved) {
+  Screen s(4, 3);
+  puts_ascii(s, "abcd");
+  REQUIRE(s.wrap_pending());
+  s.save_cursor();
+
+  s.move_to(0, 0);
+  REQUIRE(!s.wrap_pending());
+  s.restore_cursor();
+
+  CHECK(s.wrap_pending());
+  CHECK_EQ(s.cursor().x, 3);
+
+  // Et il se consomme normalement : le prochain caractere descend.
+  s.print(U'z');
+  CHECK_EQ(dump(s), "abcd/z/");
+}
+
+TEST(screen_restores_to_the_origin_when_nothing_was_saved) {
+  Screen s(10, 4);
+  s.move_to(5, 2);
+  s.restore_cursor();
+
+  CHECK_EQ(s.cursor().x, 0);
+  CHECK_EQ(s.cursor().y, 0);
+}
+
+TEST(screen_clamps_a_restored_cursor_that_no_longer_fits) {
+  Screen s(10, 4);
+  s.move_to(9, 3);
+  s.save_cursor();
+  s.restore_cursor();
+
+  CHECK_EQ(s.cursor().x, 9);
+  CHECK_EQ(s.cursor().y, 3);
+}
+
+// Une édition qui déplace des cellules doit briser les paires pleine
+// chasse qu'elle coupe, sinon une moitié voyage sans l'autre et le rendu
+// peint un demi idéogramme quelque part sur la ligne.
+TEST(screen_breaks_a_wide_pair_the_insert_cuts_in_half) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "bc");
+  REQUIRE_EQ(s.at(1, 0).width, 2);
+
+  s.move_to(2, 0);  // sur la SECONDE moitie
+  s.insert_chars(1);
+
+  // Les deux moities sont parties ensemble.
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(s.at(1, 0).width, 1);
+  CHECK_EQ(dump(s), "a   bc");
+}
+
+TEST(screen_breaks_a_wide_pair_the_delete_cuts_in_half) {
+  Screen s(6, 1);
+  puts_ascii(s, "ab");
+  s.print(kWide);  // colonnes 2 et 3
+  puts_ascii(s, "c");
+
+  s.move_to(1, 0);
+  s.delete_chars(2);  // emporte 'b' et la premiere moitie
+
+  // DCH supprime DEUX colonnes, pas trois : la moitie survivante devient un
+  // blanc et se decale avec le reste. Fermer le trou entierement
+  // reviendrait a supprimer une colonne de plus que demande.
+  CHECK_EQ(dump(s), "a c");
+  for (int x = 0; x < 6; ++x) CHECK_EQ(s.at(x, 0).width, 1);
+}
+
+// Poussée contre le bord droit, une pleine chasse perd sa seconde moitié
+// hors de la ligne : la première ne doit pas rester seule.
+TEST(screen_does_not_leave_a_half_wide_against_the_right_edge) {
+  Screen s(6, 1);
+  puts_ascii(s, "abc");
+  s.print(kWide);  // colonnes 3 et 4
+  REQUIRE_EQ(s.at(3, 0).width, 2);
+
+  s.move_to(0, 0);
+  s.insert_chars(1);  // la premiere moitie arrive en 4, la seconde en 5
+
+  // Elle tient encore : rien ne doit avoir change de nature.
+  CHECK_EQ(s.at(4, 0).width, 2);
+  CHECK_EQ(s.at(5, 0).width, 0);
+
+  s.move_to(0, 0);
+  s.insert_chars(1);  // cette fois la seconde moitie tombe de la ligne
+  CHECK_EQ(s.at(5, 0).ch, U' ');
+  CHECK_EQ(s.at(5, 0).width, 1);
+}
+
+
+// Un ECH de zéro cellule ne doit RIEN toucher -- pas même la moitié du
+// caractère large sur lequel le curseur se trouve. C'est le refus de la
+// plage vide, dans erase_span, qui l'assure : il vient AVANT le nettoyage
+// des bords, sinon un effacement de rien casserait une paire.
+TEST(screen_erasing_zero_cells_spares_the_wide_pair_under_the_cursor) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "b");
+  REQUIRE_EQ(s.at(1, 0).width, 2);
+
+  s.move_to(2, 0);  // sur la seconde moitie
+  s.erase_chars(0);
+
+  CHECK_EQ(s.at(1, 0).width, 2);
+  CHECK_EQ(s.at(1, 0).ch, kWide);
+  CHECK_EQ(s.at(2, 0).width, 0);
+}
+
+// DCH posé sur la seconde moitié d'un caractère large : sa première moitié
+// ne doit pas rester seule derrière le décalage.
+TEST(screen_breaks_the_wide_pair_under_the_delete_cursor) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "bc");
+
+  s.move_to(2, 0);
+  s.delete_chars(1);
+
+  CHECK_EQ(s.at(1, 0).width, 1);
+  CHECK_EQ(s.at(1, 0).ch, U' ');
+  CHECK_EQ(dump(s), "a bc");
+}
+
+// Le curseur sur la PREMIÈRE moitié d'une paire, cette fois : si l'une des
+// deux moitiés survit à la rupture, le décalage la transporte, et il reste
+// un caractère large déclaré sur deux colonnes dont la seconde est un
+// blanc ordinaire -- une grille qui ment sur sa propre géométrie.
+TEST(screen_carries_no_half_wide_through_an_insert) {
+  Screen s(6, 1);
+  puts_ascii(s, "a");
+  s.print(kWide);  // colonnes 1 et 2
+  puts_ascii(s, "b");
+  REQUIRE_EQ(s.at(1, 0).width, 2);
+
+  s.move_to(1, 0);  // sur la PREMIERE moitie
+  s.insert_chars(2);
+
+  CHECK_EQ(dump(s), "a    b");
+  for (int x = 0; x < 6; ++x) CHECK_EQ(s.at(x, 0).width, 1);
+}
+
+// Au-DESSUS de la région, l'édition de lignes ne fait rien non plus. Ce
+// cas-là est le vrai enjeu de la garde : sous la région, la tranche part à
+// l'envers et le défilement la refuse tout seul ; au-dessus, elle serait
+// parfaitement valide et emporterait des lignes que l'application a
+// justement déclarées fixes.
+TEST(screen_ignores_a_line_edit_above_the_region) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(2, 3);
+  s.move_to(0, 0);
+
+  s.insert_lines(1);
+  CHECK_EQ(dump(s), "0000/1111/2222/3333");
+
+  s.delete_lines(1);
+  CHECK_EQ(dump(s), "0000/1111/2222/3333");
+}

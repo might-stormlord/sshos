@@ -127,7 +127,7 @@ Les caractères pleine chasse (`char_width == 2`) occupent deux cellules ; écri
 
 **Tests :** écrire 80 caractères sur 80 colonnes ne descend pas d'une ligne ; le 81ᵉ descend ; `CUB` entre les deux annule l'attente ; un caractère double en colonne 80 descend entier ; les bornes de tous les déplacements ; `HT` s'arrête aux taquets.
 
-- [x] Tâche 3 livrée : tests, mutations, commit
+- [x] Tâche 3 livrée : tests, mutations, commit — `4e010c7`, 39 tests, 41 mutations (1 équivalente)
 
 ## Tâche 4 — L'écran : effacements, éditions, régions
 
@@ -139,7 +139,17 @@ Le piège : `IL`/`DL` hors région ne font rien, et une région rétrécie ne d�
 
 **Tests :** chaque mode de `ED`/`EL` sur une grille marquée ; `IL` au bas de la région ; `DL` en haut ; `DECSTBM` à une seule ligne ; `DECSC`/`DECRC` restitue les attributs ; un défilement pousse la ligne sortante au scrollback (tâche 7) et pas ailleurs.
 
-- [ ] Tâche 4 livrée : tests, mutations, commit
+- [x] Tâche 4 livrée : tests, mutations, commit — 43 tests, 51 mutations (4 équivalentes)
+
+Deux parties de l'énoncé sont **reportées, faute de matière** : `DECSC` ne
+sauve pour l'instant que la position et le retour différé, parce que les
+attributs naissent à la tâche 5 et le jeu de caractères à la tâche 10 —
+`SavedCursor` les attend, champ commenté à l'appui. Et la ligne qui sort
+par le haut n'est poussée nulle part puisque le scrollback est la tâche 7.
+Le point d'accroche est prêt : `scroll_up()` est une façade d'une ligne
+au-dessus de `scroll_slice_up(top_, bottom_, 1)`, gardée exprès parce
+qu'elle est le seul chemin du défilement naturel — `IL` et `DL` appellent
+la primitive directement, et n'ont pas à alimenter l'historique.
 
 ## Tâche 5 — SGR
 

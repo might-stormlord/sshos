@@ -35,6 +35,7 @@ void append_utf8(std::string& out, char32_t cp) {
 Screen::Screen(int cols, int rows)
     : cols_(std::max(1, cols)), rows_(std::max(1, rows)) {
   grid_.assign(static_cast<size_t>(cols_) * static_cast<size_t>(rows_), ScreenCell{});
+  bottom_ = rows_ - 1;
   reset_tabs();
 }
 
@@ -71,16 +72,50 @@ void Screen::clear_wide_at(int x, int y) {
   }
 }
 
-void Screen::scroll_up() {
-  // Rotation plutôt que recopie ligne à ligne : une seule passe, et la
-  // ligne recyclée est celle qui sortait de l'écran.
-  std::rotate(grid_.begin(), grid_.begin() + cols_, grid_.end());
-  std::fill(grid_.end() - cols_, grid_.end(), ScreenCell{});
+void Screen::scroll_up() { scroll_slice_up(top_, bottom_, 1); }
+
+void Screen::scroll_down() { scroll_slice_down(top_, bottom_, 1); }
+
+// Rotation plutôt que recopie ligne à ligne : une seule passe, et les
+// lignes recyclées sont exactement celles qui sortaient de la tranche.
+//
+// Les deux gardes sur `n` sont écrites larges -- `n <= 0` et `n >= height`
+// -- alors que seul leur bord extérieur est porteur : ce sont `n < 0` et
+// `n > height` qui feraient sortir `cut` de [first, last] et partir
+// std::rotate hors des bornes. Pour n == 0 et n == height exactement, le
+// chemin général retomberait sur ses pieds, d'où deux mutations
+// équivalentes, volontairement non couvertes. Elles restent écrites ainsi
+// pour que le lecteur n'ait pas à refaire cette vérification.
+void Screen::scroll_slice_up(int top, int bottom, int n) {
+  if (n <= 0 || top < 0 || bottom >= rows_ || top > bottom) return;
+  const int height = bottom - top + 1;
+  const auto first = grid_.begin() + static_cast<std::ptrdiff_t>(top) * cols_;
+  const auto last =
+      grid_.begin() + static_cast<std::ptrdiff_t>(bottom + 1) * cols_;
+  if (n >= height) {
+    // Tout sort : inutile de faire tourner ce qui va disparaître.
+    std::fill(first, last, ScreenCell{});
+    return;
+  }
+  const auto cut = first + static_cast<std::ptrdiff_t>(n) * cols_;
+  std::rotate(first, cut, last);
+  std::fill(last - static_cast<std::ptrdiff_t>(n) * cols_, last, ScreenCell{});
 }
 
-void Screen::scroll_down() {
-  std::rotate(grid_.begin(), grid_.end() - cols_, grid_.end());
-  std::fill(grid_.begin(), grid_.begin() + cols_, ScreenCell{});
+void Screen::scroll_slice_down(int top, int bottom, int n) {
+  if (n <= 0 || top < 0 || bottom >= rows_ || top > bottom) return;
+  const int height = bottom - top + 1;
+  const auto first = grid_.begin() + static_cast<std::ptrdiff_t>(top) * cols_;
+  const auto last =
+      grid_.begin() + static_cast<std::ptrdiff_t>(bottom + 1) * cols_;
+  if (n >= height) {
+    std::fill(first, last, ScreenCell{});
+    return;
+  }
+  const auto cut = last - static_cast<std::ptrdiff_t>(n) * cols_;
+  std::rotate(first, cut, last);
+  std::fill(first, first + static_cast<std::ptrdiff_t>(n) * cols_,
+            ScreenCell{});
 }
 
 void Screen::print(char32_t cp) {
@@ -131,9 +166,13 @@ void Screen::print(char32_t cp) {
 
 void Screen::line_feed() {
   wrap_pending_ = false;
-  if (cy_ + 1 >= rows_) {
+  if (cy_ == bottom_) {
+    // Au bas de la région : c'est la région qui tourne, pas l'écran.
     scroll_up();
-  } else {
+  } else if (cy_ + 1 < rows_) {
+    // Sous la région, on descend jusqu'au bas de l'écran sans rien faire
+    // défiler -- une application qui laisse son curseur sous la région n'a
+    // pas demandé à ce que la page bouge.
     ++cy_;
   }
 }
@@ -171,9 +210,9 @@ void Screen::index() { line_feed(); }
 
 void Screen::reverse_index() {
   wrap_pending_ = false;
-  if (cy_ == 0) {
+  if (cy_ == top_) {
     scroll_down();
-  } else {
+  } else if (cy_ > 0) {
     --cy_;
   }
 }
@@ -218,6 +257,154 @@ void Screen::clear_tab() {
 
 void Screen::clear_all_tabs() {
   std::fill(tabs_.begin(), tabs_.end(), false);
+}
+
+// ---------------------------------------------------------------------------
+// Les effacements et les éditions.
+// ---------------------------------------------------------------------------
+
+void Screen::erase_span(int x0, int x1, int y) {
+  if (y < 0 || y >= rows_) return;
+  // La borne gauche est DÉFENSIVE et non observable : aucun appelant ne
+  // passe un x0 négatif (tous partent de 0, de cx_, ou de cols_ - n avec n
+  // borné). Elle reste parce qu'elle sépare une erreur d'appelant d'un
+  // accès hors grille, pour un coût nul. La borne droite, elle, est bel et
+  // bien porteuse : c'est elle qui absorbe les comptes trop grands d'ECH.
+  x0 = std::max(0, x0);
+  x1 = std::min(cols_ - 1, x1);
+  if (x0 > x1) return;
+  // Les deux bornes peuvent tomber au milieu d'un caractère pleine chasse.
+  // On emporte d'abord sa moitié restée dehors, sinon le rendu peint un
+  // demi idéogramme collé au bord de la plage effacée.
+  clear_wide_at(x0, y);
+  clear_wide_at(x1, y);
+  for (int x = x0; x <= x1; ++x) cell(x, y) = ScreenCell{};
+}
+
+void Screen::erase_display(int mode) {
+  if (mode == 0) {
+    erase_span(cx_, cols_ - 1, cy_);
+    for (int y = cy_ + 1; y < rows_; ++y) erase_span(0, cols_ - 1, y);
+  } else if (mode == 1) {
+    for (int y = 0; y < cy_; ++y) erase_span(0, cols_ - 1, y);
+    erase_span(0, cx_, cy_);
+  } else if (mode == 2) {
+    for (int y = 0; y < rows_; ++y) erase_span(0, cols_ - 1, y);
+  }
+  // Le mode 3 vide le scrollback : il ne concerne pas la grille, et sera
+  // traité au-dessus d'elle à la tâche 7.
+}
+
+void Screen::erase_line(int mode) {
+  if (mode == 0) {
+    erase_span(cx_, cols_ - 1, cy_);
+  } else if (mode == 1) {
+    erase_span(0, cx_, cy_);
+  } else if (mode == 2) {
+    erase_span(0, cols_ - 1, cy_);
+  }
+}
+
+void Screen::erase_chars(int n) {
+  // Pas de garde sur n : un compte nul ou négatif donne une plage vide ou
+  // renversée, qu'erase_span refuse déjà. La re-tester ici ne discrimine
+  // rien -- la mutation qui la relâchait survivait à toute la suite.
+  erase_span(cx_, cx_ + n - 1, cy_);
+}
+
+void Screen::break_wide_at(int x, int y) {
+  const ScreenCell& c = at(x, y);
+  if (c.width == 2 && x + 1 < cols_) {
+    cell(x, y) = ScreenCell{};
+    cell(x + 1, y) = ScreenCell{};
+  } else if (c.width == 0 && x > 0) {
+    cell(x, y) = ScreenCell{};
+    cell(x - 1, y) = ScreenCell{};
+  }
+}
+
+void Screen::insert_chars(int n) {
+  if (n <= 0 || cx_ >= cols_) return;
+  const int room = cols_ - cx_;
+  // Ce bornage-ci ne change PAS le résultat : erase_span borne déjà sa
+  // plage et la boucle de décalage ne tourne pas pour un n trop grand. Il
+  // n'est là que contre le débordement de `cx_ + n`, qui serait un
+  // comportement indéfini et non un grand nombre. Le bornage de
+  // delete_chars, lui, est porteur -- `cols_ - n` y devient négatif et
+  // emporterait la ligne entière au lieu de sa seule queue.
+  n = std::min(n, room);
+  // Le curseur peut être posé sur la seconde moitié d'une pleine chasse :
+  // décaler cette moitié sans sa jumelle ferait voyager un demi caractère.
+  break_wide_at(cx_, cy_);
+  // Ce qui sort de la ligne par la droite est perdu : il n'y a pas de
+  // débordement d'une ligne sur la suivante, une édition reste chez elle.
+  // Le décalage se fait de la droite vers la gauche pour ne pas écraser sa
+  // propre source.
+  for (int x = cols_ - 1; x >= cx_ + n; --x) cell(x, cy_) = at(x - n, cy_);
+  erase_span(cx_, cx_ + n - 1, cy_);
+  // Le décalage a pu pousser la première moitié d'une pleine chasse contre
+  // le bord droit, sa seconde étant tombée de la ligne.
+  if (at(cols_ - 1, cy_).width == 2) cell(cols_ - 1, cy_) = ScreenCell{};
+}
+
+void Screen::delete_chars(int n) {
+  if (n <= 0 || cx_ >= cols_) return;
+  const int room = cols_ - cx_;
+  n = std::min(n, room);
+  break_wide_at(cx_, cy_);
+  // La coupe elle-même peut tomber au milieu d'une pleine chasse : sa
+  // première moitié part avec ce qu'on supprime, sa seconde survivrait.
+  break_wide_at(cx_ + n, cy_);
+  for (int x = cx_; x + n < cols_; ++x) cell(x, cy_) = at(x + n, cy_);
+  erase_span(cols_ - n, cols_ - 1, cy_);
+}
+
+void Screen::insert_lines(int n) {
+  // Hors région, IL ne fait rien : c'est la règle qui empêche une
+  // application de pousser des lignes dans une zone qu'elle a elle-même
+  // déclarée fixe.
+  if (n <= 0 || cy_ < top_ || cy_ > bottom_) return;
+  scroll_slice_down(cy_, bottom_, n);
+}
+
+void Screen::delete_lines(int n) {
+  if (n <= 0 || cy_ < top_ || cy_ > bottom_) return;
+  scroll_slice_up(cy_, bottom_, n);
+}
+
+// ---------------------------------------------------------------------------
+// La région de défilement et le curseur sauvé.
+// ---------------------------------------------------------------------------
+
+void Screen::set_scroll_region(int top, int bottom) {
+  top = std::max(0, top);
+  bottom = std::min(rows_ - 1, bottom);
+  // Une région de moins de deux lignes ne peut pas défiler : on la refuse
+  // au lieu de la subir, et la région précédente reste en place.
+  if (bottom - top < 1) return;
+  top_ = top;
+  bottom_ = bottom;
+  // DECSTBM ramène le curseur à l'origine de l'écran.
+  cx_ = 0;
+  cy_ = 0;
+  wrap_pending_ = false;
+}
+
+void Screen::reset_scroll_region() {
+  top_ = 0;
+  bottom_ = rows_ - 1;
+  cx_ = 0;
+  cy_ = 0;
+  wrap_pending_ = false;
+}
+
+void Screen::save_cursor() { saved_ = SavedCursor{cx_, cy_, wrap_pending_}; }
+
+void Screen::restore_cursor() {
+  // Bornée : entre la sauvegarde et la reprise, l'écran a pu rétrécir.
+  cx_ = std::clamp(saved_.x, 0, cols_ - 1);
+  cy_ = std::clamp(saved_.y, 0, rows_ - 1);
+  wrap_pending_ = saved_.wrap_pending && cx_ == cols_ - 1;
 }
 
 std::string Screen::line_text(int y) const {
