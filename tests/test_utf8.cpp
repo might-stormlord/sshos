@@ -114,3 +114,24 @@ TEST(encode_utf8_accepts_scalar_boundaries) {
   // U+10FFFF : maximum valide
   CHECK_EQ(sshos::encode_utf8(U'\U0010FFFF'), std::string("\xf4\x8f\xbf\xbf"));
 }
+
+// --------------------------------------------------------------------------
+// Le repli des accents : la seule façon d'écrire les libellés du bureau en
+// français correct une seule fois, et de les rendre lisibles au client qui
+// n'annonce pas l'UTF-8.
+// --------------------------------------------------------------------------
+
+TEST(fold_to_ascii_keeps_french_readable_without_utf8) {
+  CHECK(sshos::fold_to_ascii("Déplacer la fenêtre") == "Deplacer la fenetre");
+  CHECK(sshos::fold_to_ascii("Précédente, à côté") == "Precedente, a cote");
+  CHECK(sshos::fold_to_ascii("abc") == "abc");
+  CHECK(sshos::fold_to_ascii("") == "");
+  // Ce que la table ne connaît pas tombe sur '?', jamais en octets bruts :
+  // un client sans UTF-8 afficherait sinon du charabia.
+  CHECK(sshos::fold_to_ascii("日") == "?");
+  // Et le résultat est bien de l'ASCII pur.
+  const std::string out = sshos::fold_to_ascii("œuvre — « ça »");
+  for (const char c : out) {
+    CHECK((static_cast<unsigned char>(c) & 0x80) == 0);
+  }
+}

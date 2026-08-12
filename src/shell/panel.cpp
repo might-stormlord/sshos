@@ -3,6 +3,8 @@
 #include <algorithm>
 
 #include "app/catalog.hpp"
+#include "common/utf8.hpp"
+#include "render/width.hpp"
 
 namespace sshos {
 namespace {
@@ -19,35 +21,10 @@ constexpr int kClockCells = 5;
 
 constexpr int kVerticalCols = 16;
 
-// Compte les cellules d'affichage d'une chaîne UTF-8 en comptant les octets
-// qui NE sont PAS des continuations. Exact ici parce que tout ce que le
-// panneau écrit fait une cellule de large : libellés ASCII (les deux
-// applications du catalogue posent des titres ASCII), plus ●, », … et ☰,
-// tous de largeur 1 sous la chasse ambiguë étroite que le démon
-// installe à chaque attache (daemon.cpp, set_ambiguous_wide(false)).
-int cells_of(const std::string& s) {
-  int n = 0;
-  for (const char c : s) {
-    if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++n;
-  }
-  return n;
-}
-
-// Coupe à `cells` cellules au plus, jamais au milieu d'une séquence UTF-8,
-// et marque la coupure.
+// La coupure elle-même vit dans render/width.hpp : l'aide en a besoin aussi,
+// pour la même raison et avec les mêmes pièges de largeur.
 std::string elide(const std::string& s, int cells, bool utf8) {
-  if (cells_of(s) <= cells) return s;
-  const int keep = cells - 1;  // une cellule pour la marque de coupure
-  int seen = 0;
-  size_t i = 0;
-  while (i < s.size()) {
-    if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) {
-      if (seen == keep) break;
-      ++seen;
-    }
-    ++i;
-  }
-  return s.substr(0, i) + (utf8 ? "…" : "~");
+  return elide_to_cells(s, cells, utf8 ? "…" : "~");
 }
 
 }  // namespace
@@ -186,7 +163,7 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   // glyphe ; sans UTF-8 le mot seul reste lisible, là où un point
   // d'interrogation ne dirait rien.
   const std::string menu = utf8_ ? "☰ ssh_os" : "ssh_os";
-  const int menu_w = cells_of(menu);
+  const int menu_w = text_cells(menu);
   items_.push_back(
       {PanelHit::MenuButton, -1, 0, false, Rect{x, y, menu_w, 1}, menu});
   x += menu_w + 1;
@@ -202,7 +179,7 @@ void Panel::layout_horizontal(const WindowManager& wm) {
     int cx = start_x;
     int n = 0;
     for (const auto& e : entries) {
-      const int w = cells_of(entry_text(e, kLabelCells));
+      const int w = text_cells(entry_text(e, kLabelCells));
       if (cx + w > end) break;
       cx += w + 1;
       ++n;
@@ -210,13 +187,26 @@ void Panel::layout_horizontal(const WindowManager& wm) {
     return n;
   };
 
-  int end = clock_x - 1;
+  // Le rappel du leader se réserve sa place AVANT les tâches, et seulement
+  // s'il ne coûte aucune entrée : on mesure la barre en le supposant là, et
+  // on ne le garde que si tout tient encore. Une barre pleine appartient à
+  // quelqu'un qui n'a plus besoin qu'on lui rappelle la touche.
+  //
+  // La garde décide donc à elle seule : quand elle passe, toutes les entrées
+  // tiennent déjà dans l'espace réduit, et `end` réduit ou non donne le même
+  // dessin. Une mutation qui oublierait la réduction serait indiscernable --
+  // c'est voulu, pas un trou : la place ne peut pas manquer là où l'on vient
+  // de vérifier qu'elle ne manque pas.
+  const int hint_w = hint_.empty() ? 0 : text_cells(hint_);
+  const bool show_hint = hint_w > 0 && fits(clock_x - 1 - hint_w - 1) == total;
+  int end = show_hint ? clock_x - 1 - hint_w - 1 : clock_x - 1;
+
   int shown = fits(end);
-  int over_w = 0;
   if (shown < total) {
     // Les libellés sont déjà à leur minimum : ce qui dépasse se replie sur
-    // un compteur, plutôt que de disparaître sans le dire.
-    over_w = 1 + static_cast<int>(std::to_string(total).size());
+    // un compteur, plutôt que de disparaître sans le dire. Le rappel a
+    // forcément cédé la place à ce stade -- sa garde exige que TOUT tienne.
+    const int over_w = 1 + static_cast<int>(std::to_string(total).size());
     end = clock_x - 1 - over_w - 1;
     shown = fits(end);
   }
@@ -224,7 +214,7 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   for (int i = 0; i < shown; ++i) {
     const PanelEntry& e = entries[static_cast<size_t>(i)];
     const std::string t = entry_text(e, kLabelCells);
-    const int cw = cells_of(t);
+    const int cw = text_cells(t);
     // Rien d'ouvert : le clic doit LANCER, et Session a besoin du rang au
     // catalogue pour savoir quoi. Dès qu'une fenêtre existe, c'est elle que
     // le clic vise, et le rang cède la place à son identifiant.
@@ -238,9 +228,14 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   const int hidden = total - shown;
   if (hidden > 0) {
     const std::string t = (utf8_ ? "»" : ">") + std::to_string(hidden);
-    const int w = cells_of(t);
+    const int w = text_cells(t);
     items_.push_back({PanelHit::Overflow, hidden, 0, false,
                       Rect{clock_x - 1 - w, y, w, 1}, t});
+  }
+
+  if (show_hint) {
+    items_.push_back({PanelHit::Hint, -1, 0, false,
+                      Rect{clock_x - 1 - hint_w, y, hint_w, 1}, hint_});
   }
 }
 
@@ -265,6 +260,14 @@ void Panel::layout_vertical(const WindowManager& wm) {
   const std::vector<PanelEntry> entries = build_entries(wm);
   const int total = static_cast<int>(entries.size());
   int room = std::max(0, bottom - clock_h - y);
+
+  // Même règle qu'à l'horizontale, en lignes plutôt qu'en colonnes : le
+  // rappel prend la ligne juste au-dessus de l'horloge tant qu'il ne coûte
+  // aucune entrée.
+  const int hint_w = hint_.empty() ? 0 : text_cells(hint_);
+  const bool show_hint = hint_w > 0 && hint_w <= w && total <= room - 1;
+  if (show_hint) --room;
+
   const bool folds = total > room;
   if (folds) room = std::max(0, room - 1);  // une ligne pour le compteur
 
@@ -282,6 +285,11 @@ void Panel::layout_vertical(const WindowManager& wm) {
   if (hidden > 0) {
     const std::string t = (utf8_ ? "»" : ">") + std::to_string(hidden);
     items_.push_back({PanelHit::Overflow, hidden, 0, false, Rect{x, y, w, 1}, t});
+  }
+
+  if (show_hint) {
+    items_.push_back({PanelHit::Hint, -1, 0, false,
+                      Rect{x, bottom - clock_h - 1, w, 1}, hint_});
   }
 }
 
@@ -302,12 +310,16 @@ void Panel::draw(View v, const Theme& th, const std::string& clock_text,
         v.text(it.r.x + 1, it.r.y + 1, clock_text, base);
       } else {
         // Calé à droite dans la place que layout() lui a réservée.
-        const int pad = std::max(0, kClockCells - cells_of(clock_text));
+        const int pad = std::max(0, kClockCells - text_cells(clock_text));
         v.text(it.r.x + pad, it.r.y, clock_text, base);
       }
       continue;
     }
-    v.text(it.r.x, it.r.y, it.text, it.focused ? hot : base);
+    // Le rappel porte l'accent sans être une tâche : il doit se remarquer
+    // d'un bureau vide, où il est la seule chose à lire, sans se disputer la
+    // lecture avec la fenêtre active quand la barre se remplit.
+    const bool highlit = it.focused || it.what == PanelHit::Hint;
+    v.text(it.r.x, it.r.y, it.text, highlit ? hot : base);
   }
 }
 

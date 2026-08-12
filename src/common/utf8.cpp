@@ -86,4 +86,52 @@ std::string encode_utf8(char32_t cp) {
   return out;
 }
 
+std::string fold_to_ascii(std::string_view s) {
+  struct Fold {
+    char32_t cp;
+    const char* to;
+  };
+  // Latin-1 supplément et Latin étendu-A, restreints à ce qu'un bureau
+  // francophone écrit vraiment. Les ligatures rendent DEUX lettres, d'où
+  // des chaînes plutôt que des caractères.
+  static constexpr Fold kFolds[] = {
+      {U'à', "a"},  {U'â', "a"},  {U'ä', "a"},  {U'á', "a"},  {U'ã', "a"},
+      {U'å', "a"},  {U'ç', "c"},  {U'è', "e"},  {U'é', "e"},  {U'ê', "e"},
+      {U'ë', "e"},  {U'ì', "i"},  {U'í', "i"},  {U'î', "i"},  {U'ï', "i"},
+      {U'ñ', "n"},  {U'ò', "o"},  {U'ó', "o"},  {U'ô', "o"},  {U'ö', "o"},
+      {U'õ', "o"},  {U'ù', "u"},  {U'ú', "u"},  {U'û', "u"},  {U'ü', "u"},
+      {U'ý', "y"},  {U'ÿ', "y"},  {U'æ', "ae"}, {U'œ', "oe"}, {U'ß', "ss"},
+      {U'À', "A"},  {U'Â', "A"},  {U'Ä', "A"},  {U'Á', "A"},  {U'Ã', "A"},
+      {U'Å', "A"},  {U'Ç', "C"},  {U'È', "E"},  {U'É', "E"},  {U'Ê', "E"},
+      {U'Ë', "E"},  {U'Ì', "I"},  {U'Í', "I"},  {U'Î', "I"},  {U'Ï', "I"},
+      {U'Ñ', "N"},  {U'Ò', "O"},  {U'Ó', "O"},  {U'Ô', "O"},  {U'Ö', "O"},
+      {U'Õ', "O"},  {U'Ù', "U"},  {U'Ú', "U"},  {U'Û', "U"},  {U'Ü', "U"},
+      {U'Ý', "Y"},  {U'Æ', "AE"}, {U'Œ', "OE"},
+      // Ponctuation typographique : elle arrive par les titres que les
+      // applications posent, et vaut mieux qu'un point d'interrogation.
+      {U'’', "'"},  {U'‘', "'"},  {U'“', "\""}, {U'”', "\""}, {U'–', "-"},
+      {U'—', "-"},  {U'…', "..."}, {U'«', "\""}, {U'»', "\""},
+  };
+
+  std::string out;
+  size_t i = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    i += utf8_decode(s, i, cp);
+    if (cp < 0x80) {
+      out += static_cast<char>(cp);
+      continue;
+    }
+    const char* to = nullptr;
+    for (const auto& f : kFolds) {
+      if (f.cp == cp) {
+        to = f.to;
+        break;
+      }
+    }
+    out += (to != nullptr) ? to : "?";
+  }
+  return out;
+}
+
 }  // namespace sshos

@@ -271,6 +271,14 @@ int run_daemon(std::string_view socket_name) {
       const int pending_timeout = static_cast<int>(std::max<long long>(0, remaining.count()));
       timeout = (timeout < 0) ? pending_timeout : std::min(timeout, pending_timeout);
     }
+    // L'aide qui s'ouvre d'elle-même après un accord resté en l'air. Sans ce
+    // repli, elle attendrait le réveil suivant -- au mieux la seconde de
+    // l'horloge ci-dessus, au pire la frappe que l'utilisateur ne sait
+    // justement pas quelle est.
+    const int help_delay = session.help_delay_ms();
+    if (help_delay >= 0) {
+      timeout = (timeout < 0) ? help_delay : std::min(timeout, help_delay);
+    }
     const int n = ::epoll_wait(ep.get(), evs, 16, timeout);
     if (n < 0) {
       if (errno == EINTR) continue;

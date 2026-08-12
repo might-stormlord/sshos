@@ -365,3 +365,156 @@ TEST(clock_reports_a_change_only_when_the_rendered_text_changes) {
   CHECK(!c.text().empty());
   CHECK(!c.date().empty());
 }
+
+// ---------------------------------------------------------------------------
+// Le rappel de la touche leader. C'est la moitié « permanente » de la parade
+// du §16 : l'aide dit quoi faire, le rappel dit qu'elle existe. Il ne doit
+// jamais coûter une entrée de tâche -- une barre pleine appartient à
+// quelqu'un qui n'a plus besoin qu'on lui rappelle la touche, et un bureau
+// vide, l'état du débutant, a toute la place du monde.
+// ---------------------------------------------------------------------------
+
+TEST(panel_shows_the_leader_reminder_when_there_is_room) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  p.set_hint("^A = aide");
+  WindowManager wm;
+  p.layout(wm, 80, 24, true);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  CHECK(s.text_row(23).find("^A = aide") != std::string::npos);
+}
+
+TEST(panel_drops_the_reminder_before_dropping_a_task) {
+  WindowManager wm;
+  const Rect work{0, 0, 80, 23};
+
+  // Assez de fenêtres hors catalogue pour saturer la barre : chaque titre
+  // distinct produit sa propre entrée.
+  for (int i = 0; i < 6; ++i) {
+    auto* w = wm.open(std::make_unique<Bloc>(), work);
+    REQUIRE(w != nullptr);
+    w->title = "Fenetre" + std::to_string(i);
+  }
+
+  // La preuve tient en une comparaison : sur une barre pleine, le panneau
+  // qui porte un rappel doit rendre EXACTEMENT le même dessin que celui qui
+  // n'en porte pas. Le rappel a donc cédé la place entièrement, sans coûter
+  // ni une entrée ni une cellule de repli.
+  Panel with_hint;
+  with_hint.set_edge(PanelEdge::Bottom);
+  with_hint.set_hint("^A = aide");
+  with_hint.layout(wm, 80, 24, true);
+  Surface a(80, 24);
+  View va = a.root();
+  with_hint.draw(va, Theme::mono16(), "10:05");
+
+  Panel bare;
+  bare.set_edge(PanelEdge::Bottom);
+  bare.layout(wm, 80, 24, true);
+  Surface b(80, 24);
+  View vb = b.root();
+  bare.draw(vb, Theme::mono16(), "10:05");
+
+  CHECK(a.text_row(23) == b.text_row(23));
+  CHECK(a.text_row(23).find("^A = aide") == std::string::npos);
+}
+
+// Le rappel est cliquable : c'est ce qui le rend utile à qui essaie la
+// souris avant le clavier. Un rappel qui ne répondrait pas au clic
+// enseignerait surtout que le bureau ne réagit pas.
+TEST(panel_reports_a_click_on_the_leader_reminder) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  p.set_hint("^A = aide");
+  WindowManager wm;
+  // Profil ASCII exprès : text_row() rend des OCTETS, et le ☰ du bouton de
+  // menu en prend trois à lui seul. Sous UTF-8, l'indice rendu par find()
+  // ne serait pas la colonne, et ce test viserait deux cellules à côté.
+  p.layout(wm, 80, 24, false);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  const std::string row = s.text_row(23);
+  const size_t at = row.find("^A = aide");
+  REQUIRE(at != std::string::npos);
+
+  CHECK(p.hit(static_cast<int>(at), 23).what == PanelHit::Hint);
+  CHECK(p.hit(static_cast<int>(at) + 8, 23).what == PanelHit::Hint);
+  // Et le hit-test ne déborde ni d'un côté ni de l'autre.
+  CHECK(p.hit(static_cast<int>(at) - 1, 23).what != PanelHit::Hint);
+  CHECK(p.hit(static_cast<int>(at) + 9, 23).what != PanelHit::Hint);
+}
+
+// Sur un bord vertical le rappel prend la ligne juste au-dessus de
+// l'horloge, avec la même règle de priorité.
+TEST(panel_puts_the_reminder_above_the_clock_on_a_vertical_edge) {
+  Panel p;
+  p.set_edge(PanelEdge::Left);
+  p.set_hint("^A = aide");
+  WindowManager wm;
+  p.layout(wm, 16, 24, true);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05", "Mon 10 Aug");
+  // Horloge sur les deux dernières lignes, rappel juste au-dessus.
+  CHECK(s.text_row(21).find("^A = aide") != std::string::npos);
+  CHECK(p.hit(3, 21).what == PanelHit::Hint);
+}
+
+// Sans rappel posé, rien ne change : Panel::set_hint() n'est pas obligatoire
+// et un panneau qui n'en a pas ne doit pas réserver de place fantôme.
+TEST(panel_reserves_nothing_when_no_reminder_is_set) {
+  Panel bare;
+  bare.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  bare.layout(wm, 80, 24, true);
+
+  Surface s(80, 24);
+  View v = s.root();
+  bare.draw(v, Theme::mono16(), "10:05");
+  const std::string row = s.text_row(23);
+  CHECK(row.find("aide") == std::string::npos);
+  CHECK(row.find("^") == std::string::npos);
+}
+
+// Le pendant vertical du test précédent : sur un bord vertical la place se
+// compte en LIGNES, et le rappel doit céder la sienne à une tâche plutôt
+// que de la lui prendre.
+TEST(panel_drops_the_vertical_reminder_before_dropping_a_task) {
+  WindowManager wm;
+  const Rect work{0, 0, 64, 24};
+  for (int i = 0; i < 24; ++i) {
+    auto* w = wm.open(std::make_unique<Bloc>(), work);
+    REQUIRE(w != nullptr);
+    w->title = "F" + std::to_string(i);
+  }
+
+  Panel with_hint;
+  with_hint.set_edge(PanelEdge::Left);
+  with_hint.set_hint("^A = aide");
+  with_hint.layout(wm, 80, 24, true);
+  Surface a(80, 24);
+  View va = a.root();
+  with_hint.draw(va, Theme::mono16(), "10:05", "Mon 10 Aug");
+
+  Panel bare;
+  bare.set_edge(PanelEdge::Left);
+  bare.layout(wm, 80, 24, true);
+  Surface b(80, 24);
+  View vb = b.root();
+  bare.draw(vb, Theme::mono16(), "10:05", "Mon 10 Aug");
+
+  for (int y = 0; y < 24; ++y) {
+    if (a.text_row(y) != b.text_row(y)) {
+      th::fail(__FILE__, __LINE__,
+               "le rappel a coute une ligne de tache, ligne " +
+                   std::to_string(y) + " : |" + a.text_row(y) + "| vs |" +
+                   b.text_row(y) + "|");
+    }
+  }
+}

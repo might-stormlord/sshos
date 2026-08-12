@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include "input/events.hpp"
 
@@ -28,10 +29,30 @@ enum class Action {
   Detach,
   ToggleMouse,
   ForceRepaint,
+  // La table elle-même, affichée. Le §16 de la spec donne « la touche
+  // leader est peu découvrable » comme risque, et cette aide comme parade.
+  ShowHelp,
   // La touche leader tapée deux fois : à transmettre littéralement à
   // l'application, sans quoi elle deviendrait intapable sous le bureau.
   LiteralLeader,
 };
+
+// Une ligne de l'aide. `actions` n'est pas décoratif : c'est lui qui permet
+// au test de couverture d'exiger que tout ce qui est atteignable au clavier
+// soit documenté. Une ligne sans action documenterait du vide, et une
+// action sans ligne serait une fonction que personne ne peut trouver --
+// exactement le défaut que cette aide existe pour corriger.
+struct HelpRow {
+  const char* keys;
+  const char* what;
+  std::vector<Action> actions;
+};
+
+const std::vector<HelpRow>& binding_help();
+
+// Toutes les actions que la table associe à une touche. Le pendant du
+// précédent : le test croise les deux listes.
+std::vector<Action> bound_actions();
 
 // Deux états qu'un seul optional ne sait pas dire : quand Ctrl+A ARME le
 // dispatcheur, il n'y a pas d'action à exécuter et la touche ne doit

@@ -40,4 +40,16 @@ size_t utf8_decode(std::string_view s, size_t pos, char32_t& out);
 // render/ que ce placement anticipe, pas le nombre actuel.
 std::string encode_utf8(char32_t cp);
 
+// Rabat les lettres accentuées latines sur leur base ASCII : « Fenêtre »
+// devient « Fenetre ». Sert au seul cas où l'accent ne peut pas passer --
+// un client qui n'annonce pas l'UTF-8, à qui le démon enverrait sinon deux
+// octets que son terminal afficherait en charabia.
+//
+// Les composants du bureau écrivent donc leur texte en français correct,
+// une seule fois, et le rabattent au dernier moment ; c'est ce qui évite
+// que chaque libellé existe en deux versions à tenir d'accord.
+// Tout ce qui n'est pas une lettre latine accentuée connue tombe sur '?',
+// faute de mieux, plutôt que de partir en octets bruts.
+std::string fold_to_ascii(std::string_view s);
+
 }  // namespace sshos

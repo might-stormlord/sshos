@@ -10,7 +10,7 @@
 
 namespace sshos {
 
-enum class PanelHit { None, Body, MenuButton, Pinned, Task, Overflow, Clock };
+enum class PanelHit { None, Body, MenuButton, Pinned, Task, Overflow, Clock, Hint };
 
 struct PanelHitResult {
   PanelHit what = PanelHit::None;
@@ -43,6 +43,13 @@ class Panel {
  public:
   void set_edge(PanelEdge e) { edge_ = e; }
   PanelEdge edge() const { return edge_; }
+
+  // Le rappel de la touche leader, posé juste avant l'horloge. Il cède la
+  // place dès que la barre des tâches en a besoin : c'est un rappel, pas
+  // une information, et un bureau chargé appartient à quelqu'un qui n'en a
+  // plus besoin. À l'inverse, un bureau vide -- l'état du débutant -- a
+  // toute la place du monde et le montre donc toujours.
+  void set_hint(std::string h) { hint_ = std::move(h); }
 
   // Une ligne sur un bord horizontal, seize colonnes sur un bord vertical :
   // une entrée de tâche ne tient pas dans moins.
@@ -77,6 +84,7 @@ class Panel {
   PanelEdge edge_ = PanelEdge::Bottom;
   Rect rect_{};
   bool utf8_ = false;
+  std::string hint_;
   std::vector<Item> items_;
 };
 

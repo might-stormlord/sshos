@@ -467,7 +467,9 @@ Et même quand ils arrivent, capturer globalement `Alt+Flèches` vole `M-<flèch
 | Raccourci | Action |
 |---|---|
 | `<leader>` `←↑↓→` | Déplacer la fenêtre |
+| `<leader>` `h` `j` `k` `l` | Idem, sans quitter la rangée de repos |
 | `<leader>` `Shift+←↑↓→` | Redimensionner la fenêtre |
+| `<leader>` `H` `J` `K` `L` | Idem — mêmes lettres, majuscules |
 | `<leader>` `Tab` / `Shift+Tab` | Fenêtre suivante / précédente |
 | `<leader>` `n` / `p` | Idem, sans dépendre de `Tab` |
 | `<leader>` `w` | Fermer la fenêtre |
@@ -477,8 +479,21 @@ Et même quand ils arrivent, capturer globalement `Alt+Flèches` vole `M-<flèch
 | `<leader>` `Espace` | Ouvrir le menu |
 | `<leader>` `m` | Bascule du tracking souris |
 | `<leader>` `r` | Repaint complet forcé |
+| `<leader>` `?` | Afficher la table des accords |
+| `<leader>` `d` | Détacher le client, la session survit |
 | `<leader>` `<leader>` | Émettre l'octet leader littéral à l'application |
+| `Ctrl+Q` | Détacher — le geste réflexe, sans accord |
 | `Shift+PgUp` / `PgDn` | Scrollback du terminal focalisé |
+
+Les doublures `hjkl` et `HJKL` ne remplacent pas les flèches, elles s'y
+ajoutent : les flèches sont ce qu'essaie en premier qui vient d'un vrai
+bureau, `hjkl` ce que cherchent des doigts habitués à `vi`. Aucun des deux
+publics n'a à apprendre le geste de l'autre.
+
+**`Ctrl+Q` détache, il ne détruit pas.** C'est le geste que la main fait
+pour « quitter », et le laisser tuer la session serait le contraire exact
+de ce que ce projet promet. Détruire la session pour de bon se demande
+explicitement, par l'entrée « Quitter la session » du menu.
 
 `Shift+Tab` est retenu parce que son encodage (`\e[Z`) est, lui, universel.
 
@@ -661,7 +676,7 @@ Panneau unique, barre de chemin, liste triée dossiers d'abord. `Entrée` descen
 
 ### 9.4 Éditeur — environ 800 lignes
 
-Buffer en vecteur de lignes — pas de gap buffer : pour les tailles de fichiers concernées, c'est plus simple et suffisant. Navigation aux flèches, `Ctrl+S` enregistrer, `Ctrl+Q` quitter avec confirmation si modifié, recherche simple. **Pas de coloration syntaxique.** Il arrive en dernier, et c'est assumé : on peut déjà lancer `vim` dans une fenêtre Terminal.
+Buffer en vecteur de lignes — pas de gap buffer : pour les tailles de fichiers concernées, c'est plus simple et suffisant. Navigation aux flèches, `Ctrl+S` enregistrer, `Ctrl+X` quitter avec confirmation si modifié, recherche simple. **Pas `Ctrl+Q`** : le bureau l'intercepte pour détacher (§7.4) et l'éditeur ne le verrait jamais. C'est la contrepartie assumée d'un geste de détachement sans accord ; une application qui tient absolument à `Ctrl+Q` devra passer par le mode pass-through. **Pas de coloration syntaxique.** Il arrive en dernier, et c'est assumé : on peut déjà lancer `vim` dans une fenêtre Terminal.
 
 ---
 
@@ -895,6 +910,6 @@ Toolchain vérifiée sur la machine cible : g++ 15.2.0, CMake 4.2.3, GNU Make 4.
 | Le corpus golden se régénère sans être relu | Assertions de propriété en mécanisme principal, 6-10 goldens en appoint, diff imprimé à la régénération |
 | Les frames golden ne couvrent pas le rendu réel du terminal client | Liste manuelle §13.6 |
 | Un désaccord de largeur de glyphe ne se répare jamais de lui-même | Quatre règles du §4.1, table Unicode embarquée, sonde EA à l'attache, repaint forcé `<leader>r` |
-| La touche leader est peu découvrable pour qui vient d'un vrai bureau | Rappel permanent dans le panneau, `<leader>` seul ouvre une aide, accords `Alt` activables |
+| La touche leader est peu découvrable pour qui vient d'un vrai bureau | **Livré au jalon 2** : rappel `^A = aide` dans le panneau, cliquable, qui cède la place aux tâches quand la barre se remplit ; `<leader>` laissé en l'air 500 ms ouvre la table des accords, que `<leader>?` et le clic sur le rappel ouvrent aussi. Accords `Alt` toujours en réserve |
 | `logind` tue le démon malgré tout (`KillUserProcesses=yes`) | Détection et avertissement au premier lancement, parade documentée |
 | Volume total 12 000–15 000 lignes | Découpage en jalons livrables ; le jalon 3 suffit à rendre le projet utile |

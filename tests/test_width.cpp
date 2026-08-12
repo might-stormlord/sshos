@@ -1,3 +1,5 @@
+#include <string>
+
 #include "harness.hpp"
 #include "render/cell.hpp"
 #include "render/width.hpp"
@@ -115,4 +117,66 @@ TEST(width_ambiguous_getter) {
   CHECK_EQ(sshos::ambiguous_wide(), false);
 
   // Vérifier état final restauré (important pour ne pas contaminer autres tests)
+}
+
+// ---------------------------------------------------------------------------
+// text_cells / elide_to_cells : la mesure et la coupure partagées par le
+// panneau et l'aide. Elles portent l'invariant qui compte pour un cadre --
+// ce qui sort ne dépasse JAMAIS le budget donné, marque de coupure comprise.
+// ---------------------------------------------------------------------------
+
+TEST(text_cells_counts_cells_not_bytes_nor_codepoints) {
+  CHECK_EQ(sshos::text_cells("abc"), 3);
+  CHECK_EQ(sshos::text_cells(""), 0);
+  // « è » fait deux octets et une cellule.
+  CHECK_EQ(sshos::text_cells("fenêtre"), 7);
+  // Un idéogramme fait une cellule de plus qu'un point de code.
+  CHECK_EQ(sshos::text_cells("日本"), 4);
+  // Un combinant n'en prend aucune.
+  CHECK_EQ(sshos::text_cells("e\xcc\x81"), 1);
+}
+
+TEST(elide_to_cells_never_exceeds_its_budget) {
+  const char* samples[] = {"abcdefghij", "fenêtre modifiée", "日本語のファイル",
+                           "a", "", "ааааааааああ"};
+  for (const char* s : samples) {
+    for (int budget = 0; budget <= 12; ++budget) {
+      const std::string cut = sshos::elide_to_cells(s, budget, "…");
+      if (sshos::text_cells(cut) > budget) {
+        th::fail(__FILE__, __LINE__,
+                 std::string("« ") + s + " » coupe a " +
+                     std::to_string(budget) + " rend " +
+                     std::to_string(sshos::text_cells(cut)) + " cellules");
+      }
+    }
+  }
+}
+
+TEST(elide_to_cells_leaves_what_already_fits_untouched) {
+  CHECK(sshos::elide_to_cells("abc", 3, "…") == "abc");
+  CHECK(sshos::elide_to_cells("abc", 9, "…") == "abc");
+  CHECK(sshos::elide_to_cells("fenêtre", 7, "…") == "fenêtre");
+}
+
+TEST(elide_to_cells_marks_the_cut_and_never_splits_a_sequence) {
+  const std::string cut = sshos::elide_to_cells("fenêtre", 5, "…");
+  CHECK_EQ(sshos::text_cells(cut), 5);
+  CHECK(cut == "fenê…");
+
+  // Pleine chasse : couper à 3 ne peut garder qu'UN idéogramme, pas un et
+  // demi -- il n'existe pas de demi-cellule.
+  const std::string wide = sshos::elide_to_cells("日本語", 3, "…");
+  CHECK(wide == "日…");
+}
+
+// Le budget compte la marque. Sans ça, une élision « à 8 cellules » en
+// rendrait neuf et écraserait la bordure d'à côté (défaut vu à la sonde de
+// l'aide à 40x12).
+TEST(elide_to_cells_counts_the_mark_inside_the_budget) {
+  CHECK_EQ(sshos::text_cells(sshos::elide_to_cells("abcdefgh", 4, "…")), 4);
+  CHECK_EQ(sshos::text_cells(sshos::elide_to_cells("abcdefgh", 4, "...")), 4);
+  // Et quand même la marque ne tient pas, rien ne sort : mieux vaut du vide
+  // qu'un signe qui déborde.
+  CHECK(sshos::elide_to_cells("abcdefgh", 2, "...").empty());
+  CHECK(sshos::elide_to_cells("abcdefgh", 0, "…").empty());
 }

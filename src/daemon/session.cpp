@@ -40,6 +40,11 @@ constexpr char kDefaultApp[] = "bloc";
 // chaque composition.
 constexpr std::chrono::milliseconds kDragWatchdog{2000};
 
+// Un accord resté en l'air aussi longtemps n'est pas un accord : c'est une
+// hésitation. Assez court pour répondre à qui cherche, assez long pour que
+// « Ctrl+A puis w » tapé d'un trait ne fasse jamais clignoter l'aide.
+constexpr std::chrono::milliseconds kHelpDelay{500};
+
 
 }  // namespace
 
@@ -64,6 +69,34 @@ bool Session::take_detach() {
   const bool d = detach_;
   detach_ = false;
   return d;
+}
+
+int Session::help_delay_ms() const {
+  if (!leader_.armed() || help_.is_open()) return -1;
+  const auto due = leader_stamp_ + kHelpDelay;
+  const auto now = plat_->steady_now();
+  if (now >= due) return 0;
+  return static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(due - now).count());
+}
+
+// La touche leader est un caractère qu'on tape avec Ctrl ; « Ctrl+A » et
+// « ^A » en sont les deux écritures d'usage. Une minuscule se montre en
+// capitale, comme sur le capuchon de la touche.
+std::string Session::leader_label() const {
+  const char32_t c = leader_.leader();
+  const char up = (c >= U'a' && c <= U'z')
+                      ? static_cast<char>(c - U'a' + U'A')
+                      : static_cast<char>(c);
+  return std::string("Ctrl+") + up;
+}
+
+std::string Session::panel_hint() const {
+  const char32_t c = leader_.leader();
+  const char up = (c >= U'a' && c <= U'z')
+                      ? static_cast<char>(c - U'a' + U'A')
+                      : static_cast<char>(c);
+  return std::string("^") + up + " = aide";
 }
 
 // Ouvre l'application demandée, ou rappelle celle qui l'est déjà : cliquer
@@ -170,6 +203,9 @@ void Session::do_action(Action a) {
     case Action::Detach:
       detach_ = true;
       return;
+    case Action::ShowHelp:
+      help_.open();
+      return;
     case Action::NextWindow:
       wm_.focus_next();
       return;
@@ -244,6 +280,12 @@ bool Session::take_dirty() {
   // appelée que lorsque la frame est déjà sale, elle ne peut donc pas être
   // ce qui découvre qu'une minute a tourné.
   if (clock_.update(*plat_)) dirty_ = true;
+  // L'accord est resté en l'air assez longtemps : la main hésite, on lui
+  // montre la table.
+  if (help_delay_ms() == 0) {
+    help_.open();
+    dirty_ = true;
+  }
   const bool d = dirty_;
   dirty_ = false;
   return d;
@@ -438,6 +480,14 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // L'aide se retire au premier clic, où qu'il tombe. Elle ne prend pas le
+  // clic pour autant : ce n'est pas un dialogue, rien n'y est à répondre.
+  if (help_.is_open()) {
+    help_.close();
+    dirty_ = true;
+    return;
+  }
+
   // Le menu passe devant tout : ouvert, il prend le clic ou se referme.
   if (menu_.is_open()) {
     const MenuHitResult mh = menu_.hit(m.x, m.y);
@@ -461,6 +511,12 @@ void Session::on_mouse(const MouseEvent& m) {
     switch (ph.what) {
       case PanelHit::MenuButton:
         menu_.open();
+        break;
+      case PanelHit::Hint:
+        // Le rappel dit quelle touche ouvre l'aide ; le cliquer l'ouvre
+        // aussi. Quelqu'un qui ne connaît pas encore le clavier du bureau a
+        // toutes les raisons d'essayer la souris d'abord.
+        help_.open();
         break;
       case PanelHit::Pinned: {
         const auto& cat = catalog();
@@ -586,12 +642,24 @@ void Session::on_input(const InputEvent& e) {
       menu_key(*k);
       return;
     }
+    // L'aide se retire à la PREMIÈRE touche, et cette touche garde son
+    // effet : elle s'est ouverte parce que l'accord traînait, pas pour
+    // installer un mode dont il faudrait ressortir.
+    if (help_.is_open()) {
+      help_.close();
+      dirty_ = true;
+    }
+
     const LeaderResult lr = leader_.feed(*k);
     if (lr.action.has_value()) {
       do_action(*lr.action);
       return;
     }
-    if (lr.consumed) return;
+    if (lr.consumed) {
+      // Le leader vient d'armer : c'est d'ici que part le compte à rebours.
+      if (leader_.armed()) leader_stamp_ = plat_->steady_now();
+      return;
+    }
     if (Window* w = wm_.find(wm_.focused())) w->app->on_key(*k);
     return;
   }
@@ -688,6 +756,7 @@ void Session::render(Surface& out) {
   // La disposition du panneau est recalculee dans tous les cas : c'est elle
   // que le hit-test consulte, et un panneau caché reste un panneau dont on
   // doit savoir où il serait.
+  panel_.set_hint(panel_hint());
   panel_.layout(wm_, out.w(), out.h(), out_.utf8);
   const Window* front = wm_.find(focused);
   if (front == nullptr || front->mode != WinMode::Fullscreen) {
@@ -698,7 +767,12 @@ void Session::render(Surface& out) {
   menu_.layout(out.w(), out.h());
   menu_.draw(v, theme_, border());
 
-  // Et la modale par-dessus le menu : elle est la dernière chose posée
+  // Puis l'aide par-dessus le menu : elle peut s'ouvrir pendant qu'il est
+  // là, et c'est elle qu'on vient de demander.
+  help_.layout(out.w(), out.h());
+  help_.draw(v, theme_, border(), leader_label(), out_.utf8);
+
+  // Et la modale par-dessus tout : elle est la dernière chose posée
   // parce qu'elle est la seule à laquelle on puisse répondre.
   modal_.layout(out.w(), out.h());
   modal_.draw(v, theme_, border());

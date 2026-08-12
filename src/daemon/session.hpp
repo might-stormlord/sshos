@@ -12,6 +12,7 @@
 #include "render/surface.hpp"
 #include "render/theme.hpp"
 #include "shell/clock.hpp"
+#include "shell/help.hpp"
 #include "shell/menu.hpp"
 #include "shell/modal.hpp"
 #include "shell/panel.hpp"
@@ -72,6 +73,14 @@ class Session {
   // avec wants_quit(), qui arrête le démon. Consommé une seule fois.
   bool take_detach();
 
+  // Millisecondes avant que l'aide ne doive s'ouvrir toute seule : -1 si
+  // rien ne l'attend, 0 si c'est dû maintenant. Le démon la replie dans le
+  // délai de son epoll_wait, exactement comme il le fait déjà pour le
+  // chien de garde de glissement -- sans quoi l'aide n'apparaîtrait qu'à la
+  // frappe suivante, c'est-à-dire jamais, puisqu'elle existe précisément
+  // pour celui qui ne sait pas quoi taper.
+  int help_delay_ms() const;
+
   WinHitResult hit_window_at(int x, int y) const;
 
   // Appelée par le démon au détachement d'un client et à l'attache du
@@ -122,6 +131,12 @@ class Session {
   // Les frappes vont au menu tant qu'il est ouvert, jamais à l'application.
   void menu_key(const KeyEvent& k);
   void focus_or_open(const std::string& app_id);
+
+  // « Ctrl+A » tel qu'il se tape aujourd'hui, pour l'en-tête de l'aide, et
+  // « ^A = aide » pour le rappel du panneau. Tous deux dérivés de la touche
+  // configurée, jamais écrits en dur.
+  std::string leader_label() const;
+  std::string panel_hint() const;
   void on_mouse(const MouseEvent& m);
   void watchdog();
 
@@ -153,7 +168,12 @@ class Session {
   Clock clock_;
   Menu menu_;
   Modal modal_;
+  Help help_;
   LeaderDispatch leader_;
+
+  // Instant où le leader a armé. Sert au seul compte à rebours de l'aide ;
+  // le dispatcheur, lui, reste sans horloge.
+  std::chrono::steady_clock::time_point leader_stamp_{};
 
   // Les modes souris DEC sont posés par le client à l'attache ; la bascule
   // les retire et les remet. TtyGuard les restaure à la sortie, donc une

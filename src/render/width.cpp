@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdint>
 
+#include "common/utf8.hpp"
+
 namespace sshos {
 namespace {
 
@@ -56,6 +58,39 @@ int char_width(char32_t cp) {
   if (g_ambiguous_wide && in(kAmbiguous, cp)) return 2;
   if (in(kWide, cp)) return 2;
   return 1;
+}
+
+int text_cells(std::string_view s) {
+  int n = 0;
+  size_t i = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    i += utf8_decode(s, i, cp);
+    n += char_width(cp);
+  }
+  return n;
+}
+
+std::string elide_to_cells(std::string_view s, int cells, std::string_view mark) {
+  if (cells <= 0) return std::string();
+  if (text_cells(s) <= cells) return std::string(s);
+
+  const int keep = cells - text_cells(mark);
+  // Même la marque ne tient pas : rien ne tient. Mieux vaut une cellule vide
+  // qu'un signe de coupure qui déborderait sur la bordure d'à côté.
+  if (keep < 0) return std::string();
+
+  int seen = 0;
+  size_t i = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    const size_t used = utf8_decode(s, i, cp);
+    const int cw = char_width(cp);
+    if (seen + cw > keep) break;
+    seen += cw;
+    i += used;
+  }
+  return std::string(s.substr(0, i)) + std::string(mark);
 }
 
 }  // namespace sshos

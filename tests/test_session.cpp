@@ -954,7 +954,7 @@ TEST(session_emits_the_mouse_toggle_out_of_band) {
 
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'o', 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'm', 0}});
 
   const std::string oob = sess.take_out_of_band();
   CHECK(oob.find("\033[?1002l") != std::string::npos);
@@ -964,7 +964,7 @@ TEST(session_emits_the_mouse_toggle_out_of_band) {
   // Et la bascule bascule : le second accord remet la souris.
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'o', 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'm', 0}});
   const std::string back = sess.take_out_of_band();
   CHECK(back.find("\033[?1002h") != std::string::npos);
   CHECK(back.find("\033[?1006h") != std::string::npos);
@@ -2215,9 +2215,10 @@ TEST(daemon_carries_the_mouse_toggle_ahead_of_the_frame) {
   auto welcome = recv_one(client.get(), dec, 2000);
   REQUIRE(welcome.has_value());
 
-  // Ctrl+A puis 'o' : la bascule souris. \x01 est Ctrl+A sur le fil.
+  // Ctrl+A puis 'm' : la bascule souris (spec §7.4). \x01 est Ctrl+A sur
+  // le fil.
   REQUIRE(send_all(client.get(),
-                   sshos::encode(sshos::Msg{sshos::Input{"\x01o"}})));
+                   sshos::encode(sshos::Msg{sshos::Input{"\x01m"}})));
   CHECK(wait_for_frame_containing(client.get(), dec, "\033[?1002l",
                                   "\033[?1006l", 3000));
 }
@@ -2856,4 +2857,150 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
   // Le socket garantit l'ordre : le clic est traité avant le Resize.
   REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{sshos::Resize{80, 24}})));
   CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "ssh_os", 3000));
+}
+
+// ---------------------------------------------------------------------------
+// L'aide de découvrabilité (§16 : « la touche leader est peu découvrable
+// pour qui vient d'un vrai bureau »). Elle ne se teste pas sur son contenu
+// -- c'est le rôle du golden -- mais sur les trois chemins qui l'ouvrent et
+// sur celui qui la referme.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Arme l'accord et laisse-le en l'air, comme une main qui hésite.
+void arm_leader(Session& s) {
+  s.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+}
+
+}  // namespace
+
+TEST(session_opens_the_help_when_the_leader_chord_is_left_hanging) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  // Au repos, rien n'attend : le démon ne doit pas se réveiller pour rien.
+  CHECK_EQ(sess.help_delay_ms(), -1);
+
+  // L'horloge avance AVANT l'armement, et c'est essentiel : l'estampille
+  // par défaut et l'origine de l'horloge du double valent toutes deux
+  // l'époque. Sans ce décalage, le test passerait à l'identique même si
+  // l'armement n'estampillait rien -- une mutation l'a montré.
+  plat.advance_steady(std::chrono::seconds(30));
+
+  arm_leader(sess);
+  const int delay = sess.help_delay_ms();
+  CHECK(delay > 0);
+  CHECK(delay <= 500);
+
+  // Un accord tapé d'un trait ne doit JAMAIS faire clignoter l'aide : à
+  // 400 ms elle n'est toujours pas due.
+  plat.advance_steady(std::chrono::milliseconds(400));
+  CHECK(sess.help_delay_ms() > 0);
+  sess.take_dirty();
+  Surface early(80, 24);
+  sess.render(early);
+  CHECK(!surface_contains(early, "Ctrl+A puis :"));
+
+  plat.advance_steady(std::chrono::milliseconds(150));
+  CHECK_EQ(sess.help_delay_ms(), 0);
+  // C'est take_dirty() qui la découvre : render() n'est appelée que sur une
+  // trame déjà sale et ne pourrait donc jamais se salir elle-même.
+  CHECK(sess.take_dirty());
+  Surface shown(80, 24);
+  sess.render(shown);
+  CHECK(surface_contains(shown, "Ctrl+A puis :"));
+  CHECK(surface_contains(shown, "Maximiser (bascule)"));
+
+  // Ouverte, elle cesse de se réclamer : sans ça le démon tournerait à
+  // 0 ms de délai tant qu'elle est à l'écran.
+  CHECK_EQ(sess.help_delay_ms(), -1);
+}
+
+// La touche qui referme l'aide GARDE son effet. L'aide s'est ouverte parce
+// que l'accord traînait, pas pour installer un mode dont il faudrait
+// ressortir : la faire avaler une frappe punirait l'hésitation.
+TEST(session_closes_the_help_on_the_next_key_without_eating_it) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  // La fenêtre part de la première marche de la cascade : sa barre de
+  // titre est en ligne 1, elle passera en ligne 0 une fois maximisée.
+  REQUIRE_EQ(title_row_of(s, 24), 1);
+
+  arm_leader(sess);
+  plat.advance_steady(std::chrono::milliseconds(600));
+  sess.take_dirty();
+  Surface shown(80, 24);
+  sess.render(shown);
+  REQUIRE(surface_contains(shown, "Ctrl+A puis :"));
+
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'z', 0}});
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(!surface_contains(after, "Ctrl+A puis :"));
+  CHECK_EQ(title_row_of(after, 24), 0);  // et 'z' a bien maximisé
+}
+
+TEST(session_opens_the_help_on_the_question_mark_chord) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  arm_leader(sess);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'?', 0}});
+  Surface shown(80, 24);
+  sess.render(shown);
+  CHECK(surface_contains(shown, "Ctrl+A puis :"));
+
+  // Un clic, n'importe où, la retire -- et ne fait rien d'autre : ce n'est
+  // pas un dialogue, il n'y a rien à y répondre.
+  press_at(sess, 40, 12);
+  Surface gone(80, 24);
+  sess.render(gone);
+  CHECK(!surface_contains(gone, "Ctrl+A puis :"));
+}
+
+// Le rappel du panneau et l'aide sont les deux moitiés de la même parade :
+// le premier dit quelle touche, la seconde dit quoi en faire. Le cliquer
+// doit donc ouvrir la seconde -- qui ne connaît pas encore le clavier du
+// bureau a toutes les raisons d'essayer la souris.
+TEST(session_opens_the_help_when_the_panel_reminder_is_clicked) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const std::string row = s.text_row(23);
+  const size_t at = row.find("^A = aide");
+  REQUIRE(at != std::string::npos);
+
+  press_at(sess, static_cast<int>(at) + 1, 23);
+  Surface shown(80, 24);
+  sess.render(shown);
+  CHECK(surface_contains(shown, "Ctrl+A puis :"));
+}
+
+// Le leader est configurable (spec §7.4) : ni l'en-tête de l'aide ni le
+// rappel du panneau ne doivent nommer Ctrl+A en dur. Rien ne permet encore
+// d'en changer -- le fichier de configuration arrive plus tard -- donc ce
+// test vérifie ce qui est vérifiable aujourd'hui : que les deux textes
+// s'accordent sur la MÊME touche, celle du dispatcheur.
+TEST(session_shows_the_same_leader_in_the_panel_and_in_the_help) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  CHECK(surface_contains(s, "^A = aide"));
+
+  arm_leader(sess);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'?', 0}});
+  Surface shown(80, 24);
+  sess.render(shown);
+  CHECK(surface_contains(shown, "Ctrl+A puis :"));
 }

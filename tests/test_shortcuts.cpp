@@ -1,5 +1,9 @@
+#include <string>
+#include <vector>
+
 #include "harness.hpp"
 #include "input/shortcuts.hpp"
+#include "render/width.hpp"
 
 using sshos::Action;
 using sshos::Key;
@@ -7,9 +11,12 @@ using sshos::KeyEvent;
 using sshos::LeaderDispatch;
 using sshos::LeaderResult;
 
+namespace mod = sshos::mod;
+
 namespace {
 KeyEvent ctrl(char32_t c) { return KeyEvent{Key::Char, c, sshos::mod::Ctrl}; }
 KeyEvent plain(char32_t c) { return KeyEvent{Key::Char, c, 0}; }
+KeyEvent arrow(Key k, uint8_t mods) { return KeyEvent{k, 0, mods}; }
 }  // namespace
 
 // L'ambiguïté que la spec ne pouvait pas exprimer avec un seul optional :
@@ -71,12 +78,13 @@ TEST(leader_disarms_on_an_unbound_key_without_leaking_it) {
   CHECK(!d.armed());
 }
 
-// Une touche qui n'est pas un caractère désarme aussi : une flèche après
-// l'accord ne doit pas rester en attente indéfiniment.
+// Une touche qui n'est pas un caractère désarme aussi. Échap sert
+// d'exemple depuis que les flèches ont une liaison : ce qui compte est
+// qu'AUCUNE touche ne laisse l'accord en attente indéfiniment.
 TEST(leader_disarms_on_a_non_character_key) {
   LeaderDispatch d;
   d.feed(ctrl(U'a'));
-  const LeaderResult r = d.feed(KeyEvent{Key::Up, 0, 0});
+  const LeaderResult r = d.feed(KeyEvent{Key::Escape, 0, 0});
   CHECK(r.consumed);
   CHECK(!r.action.has_value());
   CHECK(!d.armed());
@@ -92,10 +100,28 @@ TEST(leader_covers_every_action_of_the_table) {
       {plain(U'L'), Action::GrowWidth},       {plain(U'H'), Action::ShrinkWidth},
       {plain(U'J'), Action::GrowHeight},      {plain(U'K'), Action::ShrinkHeight},
       {plain(U'n'), Action::NextWindow},      {plain(U'p'), Action::PrevWindow},
-      {plain(U'w'), Action::Close},           {plain(U'm'), Action::Minimize},
-      {plain(U'x'), Action::MaximizeToggle},  {plain(U'f'), Action::FullscreenToggle},
-      {plain(U' '), Action::OpenMenu},        {plain(U'o'), Action::ToggleMouse},
-      {plain(U'r'), Action::ForceRepaint},
+      {plain(U'w'), Action::Close},           {plain(U'-'), Action::Minimize},
+      {plain(U'z'), Action::MaximizeToggle},  {plain(U'f'), Action::FullscreenToggle},
+      {plain(U' '), Action::OpenMenu},        {plain(U'm'), Action::ToggleMouse},
+      {plain(U'r'), Action::ForceRepaint},    {plain(U'd'), Action::Detach},
+      {plain(U'?'), Action::ShowHelp},
+      // Le chemin principal de la spec §7.4, celui qu'un utilisateur venu
+      // d'un vrai bureau essaie en premier. Il avait disparu de la table
+      // sans que rien ne le signale, faute d'un test qui l'exige.
+      {arrow(Key::Left, 0), Action::MoveLeft},
+      {arrow(Key::Right, 0), Action::MoveRight},
+      {arrow(Key::Up, 0), Action::MoveUp},
+      {arrow(Key::Down, 0), Action::MoveDown},
+      {arrow(Key::Left, mod::Shift), Action::ShrinkWidth},
+      {arrow(Key::Right, mod::Shift), Action::GrowWidth},
+      {arrow(Key::Up, mod::Shift), Action::ShrinkHeight},
+      {arrow(Key::Down, mod::Shift), Action::GrowHeight},
+      {arrow(Key::Tab, 0), Action::NextWindow},
+      {arrow(Key::Tab, mod::Shift), Action::PrevWindow},
+      // Les deux écritures de « Maj+Tab » se rejoignent : `\033[Z` le dit
+      // par le nom de la touche, `\033[1;2I` par le modificateur.
+      {arrow(Key::BackTab, 0), Action::PrevWindow},
+      {arrow(Key::BackTab, mod::Shift), Action::PrevWindow},
   };
   for (const auto& e : table) {
     LeaderDispatch d;
@@ -113,4 +139,54 @@ TEST(leader_key_is_configurable) {
   CHECK(!d.armed());
   CHECK(d.feed(ctrl(U'b')).consumed);
   CHECK(d.armed());
+}
+
+// Le garde-fou contre la dérive qui a rendu ce round nécessaire : la table
+// des raccourcis s'était éloignée de la spec §7.4 -- flèches et Tab
+// disparues, `m` volé à la bascule souris -- sans qu'aucun test ne s'en
+// aperçoive, parce que chaque test vérifiait la table telle qu'elle était.
+// Celui-ci ne vérifie pas une liaison : il vérifie que rien d'atteignable
+// au clavier n'échappe à l'aide, donc à l'utilisateur.
+TEST(every_bound_action_appears_in_the_help) {
+  for (const Action a : sshos::bound_actions()) {
+    bool documented = false;
+    for (const auto& row : sshos::binding_help()) {
+      for (const Action ra : row.actions) documented = documented || ra == a;
+    }
+    if (!documented) {
+      th::fail(__FILE__, __LINE__,
+               "action " + std::to_string(static_cast<int>(a)) +
+                   " liee au clavier mais absente de l'aide");
+    }
+  }
+}
+
+// Et la réciproque : une ligne d'aide qui documenterait un accord retiré
+// enverrait l'utilisateur taper dans le vide.
+TEST(the_help_documents_nothing_that_is_not_bound) {
+  const std::vector<Action> bound = sshos::bound_actions();
+  for (const auto& row : sshos::binding_help()) {
+    for (const Action ra : row.actions) {
+      bool exists = false;
+      for (const Action b : bound) exists = exists || b == ra;
+      if (!exists) {
+        th::fail(__FILE__, __LINE__,
+                 std::string("l'aide annonce « ") + row.keys +
+                     " » qui n'est lie a rien");
+      }
+    }
+  }
+}
+
+// L'aide se lit dans un cadre : deux lignes qui ne tiennent pas dans la
+// même largeur se liraient de travers. Rien ne l'impose au compilateur --
+// d'où ce test, qui borne aussi la table pour qu'elle reste affichable sur
+// un terminal étroit.
+TEST(the_help_stays_within_a_readable_width) {
+  for (const auto& row : sshos::binding_help()) {
+    CHECK(sshos::text_cells(row.keys) <= 20);
+    CHECK(sshos::text_cells(row.what) <= 30);
+    CHECK(sshos::text_cells(row.keys) > 0);
+    CHECK(sshos::text_cells(row.what) > 0);
+  }
 }

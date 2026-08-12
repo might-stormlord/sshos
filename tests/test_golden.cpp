@@ -185,12 +185,12 @@ TEST(golden_two_overlapping_windows) {
 TEST(golden_a_minimized_window_keeps_its_panel_entry) {
   GOLDEN("fenetre_reduite", [](Session& s) {
     s.open_from_catalog("battement");
-    chord(s, U'm');
+    chord(s, U'-');
   });
 }
 
 TEST(golden_a_maximized_window) {
-  GOLDEN("fenetre_maximisee", [](Session& s) { chord(s, U'x'); });
+  GOLDEN("fenetre_maximisee", [](Session& s) { chord(s, U'z'); });
 }
 
 TEST(golden_a_fullscreen_window_hides_the_panel) {
@@ -207,9 +207,17 @@ TEST(golden_the_menu_open_and_filtered) {
 
 TEST(golden_the_modal_asking_before_a_close) {
   GOLDEN("modale_ouverte", [](Session& s) {
-    key(s, sshos::Key::Char, U'z');  // Bloc se déclare modifiée
+    key(s, sshos::Key::Char, U'x');  // Bloc se déclare modifiée
     chord(s, U'w');
   });
+}
+
+// L'aide est la parade au risque « la touche leader est peu découvrable »
+// du §16. Elle a donc un golden : c'est la seule page de ce bureau qu'un
+// utilisateur lira MOT À MOT, et une colonne décalée s'y voit tout de
+// suite.
+TEST(golden_the_help_overlay) {
+  GOLDEN("aide_ouverte", [](Session& s) { chord(s, U'?'); });
 }
 
 TEST(golden_the_panel_on_the_left_edge) {
