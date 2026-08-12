@@ -99,7 +99,7 @@ L'environnement : le shell vient de `getpwuid()`, **pas de `$SHELL`** — l'envi
 
 **Tests :** un enfant qui rapporte son masque de signaux le trouve vide ; un enfant qui rapporte la disposition de `SIGPIPE` la trouve à `SIG_DFL` ; `yes | head -1` se termine ; un descripteur ouvert avant le `fork` n'est pas visible dans `/proc/<enfant>/fd` ; `TIOCSWINSZ` puis `stty size` dans l'enfant rend la bonne taille ; `$SHELL` menteur n'est pas suivi ; le delta arrive, l'environnement du démon non.
 
-- [ ] Tâche 1 livrée : tests, mutations, commit
+- [x] Tâche 1 livrée : tests, mutations, commit — `6b97b88`, 20 tests, 23 mutations
 
 ## Tâche 2 — La machine à états du parseur
 
@@ -113,7 +113,7 @@ Le `ParserSink` est un contrat pur (`print(char32_t)`, `execute(uint8_t)`, `csi(
 
 **Tests :** table de séquences → appels attendus ; la même table rejouée octet par octet ; un UTF-8 tronqué en fin de morceau se recolle ; un octet invalide rend `U+FFFD` sans casser l'état ; `CsiIgnore` avale jusqu'au final ; les paramètres vides valent le défaut.
 
-- [ ] Tâche 2 livrée : tests, mutations, commit
+- [x] Tâche 2 livrée : tests, mutations, commit — `7a56afc`, 22 tests, 29 mutations
 
 ## Tâche 3 — L'écran : grille, curseur, retour à la ligne différé
 
