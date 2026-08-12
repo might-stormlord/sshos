@@ -513,6 +513,27 @@ void release_at(Session& s, int x, int y) {
   s.on_input(sshos::InputEvent{m});
 }
 
+// Le bouton DROIT. Un clic droit envoie deux évènements comme les autres :
+// s'en tenir à l'appui dans un test laisserait passer un menu qui se
+// rouvre à chaque relâchement.
+void right_press(Session& s, int x, int y) {
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Press;
+  m.button = 2;
+  m.x = x;
+  m.y = y;
+  s.on_input(sshos::InputEvent{m});
+}
+
+void right_release(Session& s, int x, int y) {
+  sshos::MouseEvent m;
+  m.action = sshos::MouseAction::Release;
+  m.button = 2;
+  m.x = x;
+  m.y = y;
+  s.on_input(sshos::InputEvent{m});
+}
+
 // La géométrie du cadre, relevée sur la surface : la première ligne qui
 // porte le titre.
 bool surface_contains(const Surface& s, const std::string& needle) {
@@ -3166,11 +3187,15 @@ TEST(session_says_what_to_do_when_the_desktop_is_empty) {
   REQUIRE_EQ(title_row_of(empty, 23), -1);
   CHECK(surface_contains(empty, "menu"));
 
-  // Et l'invite disparaît dès qu'une fenêtre existe.
+  // Et l'invite disparaît dès qu'une fenêtre existe. On vise « le menu »,
+  // pas « pour ouvrir » : l'invite est peinte AVANT les fenêtres, et le
+  // cadre {2,1,44,14} s'arrête pile sur la colonne où « pour ouvrir »
+  // commence. Le test ne passait que par accident de géométrie -- il
+  // laissait vivre une invite dessinée en permanence.
   REQUIRE(sess.open_from_catalog("bloc") != 0u);
   Surface busy(80, 24);
   sess.render(busy);
-  CHECK(!surface_contains(busy, "pour ouvrir"));
+  CHECK(!surface_contains(busy, "le menu"));
 }
 
 // Clic DROIT sur le bureau : le menu s'ouvre là où on a cliqué. C'est le
@@ -3189,7 +3214,20 @@ TEST(session_opens_the_menu_on_a_right_click_on_the_desktop) {
   sess.render(opened);
   // « Panneau : haut » n'existe QUE dans le menu -- « Bloc » se lirait
   // aussi bien dans la barre des tâches.
-  CHECK(surface_contains(opened, "Panneau"));
+  REQUIRE(surface_contains(opened, "Panneau"));
+
+  // Et il s'ouvre AU CURSEUR, pas sur son bouton. Ancre en 60, largeur du
+  // menu 34, écran 80 : ramené en 46, donc les entrées vers la colonne 47.
+  // Ancré au bouton il serait en 1, et `open_at` ne servirait à rien.
+  int row = -1;
+  for (int y = 0; y < 24; ++y) {
+    if (opened.text_row(y).find("Panneau") != std::string::npos) {
+      row = y;
+      break;
+    }
+  }
+  REQUIRE(row >= 0);
+  CHECK(opened.text_row(row).find("Panneau") > std::string::size_type(40));
 }
 
 // Le clic GAUCHE sur le vide ne fait toujours rien : il sert à défocaliser
@@ -3256,4 +3294,124 @@ TEST(session_does_not_take_two_slow_clicks_for_a_double_click) {
   Surface after(80, 24);
   sess.render(after);
   CHECK_EQ(title_row_of(after, 24), 1);  // toujours à sa place
+}
+
+// La position de l'invite n'est pas cosmétique : au bord ou tout en bas de
+// la zone, elle se confond avec le panneau et cesse d'être ce qu'on regarde
+// en premier sur un écran par ailleurs nu.
+TEST(session_centres_the_empty_desktop_hint) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+
+  Surface empty(80, 24);
+  sess.render(empty);
+
+  int row = -1;
+  for (int y = 0; y < 23; ++y) {
+    if (empty.text_row(y).find("Bureau vide") != std::string::npos) {
+      row = y;
+      break;
+    }
+  }
+  REQUIRE(row >= 0);
+  // Zone de travail {0, 0, 80, 23}, deux lignes centrées : le haut en 10.
+  CHECK_EQ(row, (23 - 2) / 2);
+  // « Bureau vide » fait 11 cellules sur 80.
+  CHECK_EQ(empty.text_row(row).find("Bureau vide"),
+           std::string::size_type((80 - 11) / 2));
+}
+
+// Un clic droit envoie un appui ET un relâchement. Si les deux ouvraient,
+// le clic qui referme le menu le rouvrirait aussitôt : plus moyen d'en
+// sortir à la souris, ce qui est le défaut d'origine sous une autre forme.
+TEST(session_does_not_reopen_the_menu_on_the_release_of_the_click_that_closed_it) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  right_press(sess, 60, 18);
+  right_release(sess, 60, 18);
+  Surface opened(80, 24);
+  sess.render(opened);
+  REQUIRE(surface_contains(opened, "Panneau"));
+
+  // Un second clic droit, hors du menu : il le referme, et son relâchement
+  // ne doit surtout pas le rouvrir.
+  right_press(sess, 2, 20);
+  right_release(sess, 2, 20);
+  Surface closed(80, 24);
+  sess.render(closed);
+  CHECK(!surface_contains(closed, "Panneau"));
+}
+
+// Un double-clic se mesure d'APPUI à APPUI. Compter depuis le relâchement
+// ferait d'un bouton tenu longtemps puis recliqué un double-clic, ce qu'il
+// n'est pas.
+TEST(session_measures_a_double_click_from_press_to_press) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  REQUIRE_EQ(title_row_of(s, 23), 1);
+
+  press_at(sess, 10, 1);
+  plat.advance_steady(std::chrono::milliseconds(500));  // bouton tenu
+  release_at(sess, 10, 1);
+  plat.advance_steady(std::chrono::milliseconds(200));
+  press_at(sess, 10, 1);
+  release_at(sess, 10, 1);
+
+  // 700 ms d'appui à appui : au-delà de la fenêtre, donc pas un double.
+  // Depuis le relâchement il n'y aurait que 200 ms, et la fenêtre serait
+  // maximisée à tort.
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK_EQ(title_row_of(after, 23), 1);
+}
+
+// Une coordonnée négative n'est pas théorique : le parseur SGR fait
+// `param - 1`, donc `CSI <2;0;0M` livre (-1, -1). Le menu doit rester à
+// l'écran plutôt que d'être dessiné hors champ.
+TEST(session_keeps_the_menu_on_screen_after_a_right_click_at_the_origin) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 2, -1, -1, 0}});
+  Surface opened(80, 24);
+  sess.render(opened);
+  CHECK(surface_contains(opened, "Panneau"));
+}
+
+// L'invite nomme le bouton du panneau par son glyphe. Sur un client qui
+// n'annonce pas UTF-8, un ☰ brut se lirait en mojibake de trois cellules
+// et désignerait un bouton qui, lui, s'est bien replié en « = ».
+TEST(session_falls_back_to_ascii_in_the_empty_desktop_hint) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  press_at(sess, 44, 1);
+  release_at(sess, 44, 1);
+
+  Surface ascii(80, 24);
+  sess.render(ascii);
+  REQUIRE(surface_contains(ascii, "Bureau vide"));
+  CHECK(surface_contains(ascii, "ou = en bas"));
+
+  sshos::OutputProfile p;
+  p.depth = sshos::ColorDepth::TrueColor;
+  p.utf8 = true;
+  sess.set_output(p);
+
+  Surface uni(80, 24);
+  sess.render(uni);
+  CHECK(surface_contains(uni, "ou \xe2\x98\xb0 en bas"));
 }

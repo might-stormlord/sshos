@@ -257,7 +257,7 @@ Le liant. `attach()` ouvre le PTY et le confie à `Host::watch` ; `on_io()` lit 
 
 La molette fait défiler le scrollback quand l'écran alterné est inactif ; quand il est actif, elle est transmise à l'invité — comportement des vrais émulateurs.
 
-La fenêtre affiche `[processus terminé (code 1) — Entrée pour fermer]` et **reste ouverte**, pour qu'on puisse lire la dernière erreur. `can_close()` sur un processus vivant demande confirmation, puis `SIGHUP` au groupe de processus, puis `SIGKILL` après un délai de grâce.
+La fenêtre affiche `[processus terminé (code 1) — Entrée ou clic pour fermer]` et **reste ouverte**, pour qu'on puisse lire la dernière erreur. Un **clic** dans la zone cliente d'un terminal mort la ferme aussi : une fonction qui n'a qu'un raccourci est incomplète. `can_close()` sur un processus vivant demande confirmation, puis `SIGHUP` au groupe de processus, puis `SIGKILL` après un délai de grâce.
 
 **Tests :** la grille arrive dans la `View` ; un titre `OSC 2` remonte au cadre ; le curseur suit ; un redimensionnement pose la bonne taille ; la souris n'est transmise que si le mode est actif ; goldens d'un écran de terminal.
 

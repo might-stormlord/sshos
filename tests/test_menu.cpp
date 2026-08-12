@@ -183,3 +183,76 @@ TEST(menu_never_leaves_the_screen) {
     CHECK(r.y + r.h <= dim.second);
   }
 }
+
+// ---------------------------------------------------------------------------
+// L'ancrage au curseur. C'est toute la différence entre un menu contextuel
+// et un menu de panneau : sans lui, `open_at` ne serait qu'un `open` plus
+// long à écrire.
+// ---------------------------------------------------------------------------
+
+TEST(menu_anchors_itself_to_the_cursor) {
+  Menu m;
+  m.open_at(30, 5);
+  const Rect r = m.rect(80, 24);
+  CHECK_EQ(r.x, 30);
+  CHECK_EQ(r.y, 5);
+}
+
+// Un menu contextuel qui déborde par la droite est le défaut le plus banal
+// du genre, et le seul que personne ne pardonne : la moitié des entrées
+// devient illisible.
+TEST(menu_pulls_itself_back_inside_the_screen) {
+  const std::pair<int, int> corners[] = {{78, 22}, {79, 23}, {0, 23}, {78, 0}};
+  for (const auto& c : corners) {
+    Menu m;
+    m.open_at(c.first, c.second);
+    const Rect r = m.rect(80, 24);
+    CHECK(r.x >= 0);
+    CHECK(r.y >= 0);
+    CHECK(r.x + r.w <= 80);
+    CHECK(r.y + r.h <= 24);
+  }
+}
+
+// Une coordonnée négative n'est pas théorique : le parseur SGR fait
+// `param - 1`, donc un client qui envoie `CSI <2;0;0M` livre (-1, -1).
+TEST(menu_survives_a_negative_anchor) {
+  Menu m;
+  m.open_at(-1, -1);
+  const Rect r = m.rect(80, 24);
+  CHECK(r.x >= 0);
+  CHECK(r.y >= 0);
+}
+
+// Sans ancre, le menu reste collé à son bouton et pousse vers le haut : il
+// ne recouvre pas le panneau d'où il sort.
+TEST(menu_without_an_anchor_grows_from_its_panel_button) {
+  Menu m;
+  m.open();
+  const Rect r = m.rect(80, 24);
+  CHECK_EQ(r.x, 0);
+  CHECK_EQ(r.y + r.h, 23);
+}
+
+// open() après open_at() doit OUBLIER l'ancre, sinon le menu du panneau
+// resterait collé au dernier clic droit, longtemps après.
+TEST(menu_forgets_its_anchor_when_reopened_from_the_button) {
+  Menu m;
+  m.open_at(30, 5);
+  REQUIRE_EQ(m.rect(80, 24).x, 30);
+  m.open();
+  CHECK_EQ(m.rect(80, 24).x, 0);
+}
+
+// Et open_at() construit la MÊME table que open() : une entrée ajoutée au
+// menu du panneau doit apparaître au clic droit sans que personne y pense.
+TEST(menu_opened_at_the_cursor_carries_the_same_entries) {
+  Menu a;
+  Menu b;
+  a.open();
+  b.open_at(10, 10);
+  REQUIRE_EQ(a.visible().size(), b.visible().size());
+  for (size_t i = 0; i < a.visible().size(); ++i) {
+    CHECK_EQ(a.visible()[i].id, b.visible()[i].id);
+  }
+}

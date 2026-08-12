@@ -486,6 +486,11 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // INVARIANT : au-delà de cette ligne, tout est un appui. Les glissements
+  // ont consommé leurs relâchements plus haut, et rien d'autre ne réagit
+  // au relâchement ni au survol. Les branches qui suivent ne re-testent
+  // donc PAS `m.action` -- le faire suggérerait que l'invariante ne tient
+  // pas, et masquerait sa disparition si quelqu'un la supprimait.
   if (m.action != MouseAction::Press) return;
 
   // Et la modale passe devant le menu : rien derrière un dialogue modal
@@ -571,7 +576,7 @@ void Session::on_mouse(const MouseEvent& m) {
     // geste qu'essaie en premier qui vient d'un vrai bureau, et c'est la
     // sortie d'un écran vide sans toucher au clavier. Le clic gauche, lui,
     // ne fait rien : ouvrir un menu dessus serait insupportable.
-    if (m.action == MouseAction::Press && m.button == 2) {
+    if (m.button == 2) {
       menu_.open_at(m.x, m.y);
       dirty_ = true;
     }
@@ -591,17 +596,14 @@ void Session::on_mouse(const MouseEvent& m) {
   // On le relève AVANT le switch pour que la position comparée soit celle
   // de l'appui, et pas celle qu'un déplacement aurait déjà décalée.
   const auto now = plat_->steady_now();
-  const bool doubled = m.action == MouseAction::Press &&
-                       m.x == last_click_x_ && m.y == last_click_y_ &&
+  const bool doubled = m.x == last_click_x_ && m.y == last_click_y_ &&
                        now - last_click_ <= kDoubleClick;
-  if (m.action == MouseAction::Press) {
-    last_click_ = now;
-    last_click_x_ = m.x;
-    last_click_y_ = m.y;
-    // Un double-clic reconnu remet le compteur à zéro : trois clics font un
-    // double puis un simple, pas deux doubles qui se chevauchent.
-    if (doubled) last_click_x_ = -1;
-  }
+  last_click_ = now;
+  last_click_x_ = m.x;
+  last_click_y_ = m.y;
+  // Un double-clic reconnu remet le compteur à zéro : trois clics font un
+  // double puis un simple, pas deux doubles qui se chevauchent.
+  if (doubled) last_click_x_ = -1;
 
   switch (h.what) {
     case WinHit::TitleBar:
@@ -760,6 +762,12 @@ void Session::draw_empty_hint(View v, const Rect& work) const {
   st.bg = theme_.desktop_bg;
   const int top = work.y + (work.h - 2) / 2;
   for (int i = 0; i < 2; ++i) {
+    // Le rognage est DÉFENSIF et non observable aujourd'hui : le panneau
+    // est peint après l'invite et View::text clippe déjà au bord de la
+    // surface, si bien qu'aucune des quatre positions de panneau ne
+    // distingue une invite rognée d'une invite qui déborde. Il redeviendra
+    // porteur le jour où l'invite passera dans une sous-vue, ou passera
+    // après le panneau. Mutation déclarée équivalente, pas couverte.
     const std::string txt = elide_to_cells(lines[i], work.w, "");
     const int x = work.x + (work.w - text_cells(txt)) / 2;
     v.text(x < work.x ? work.x : x, top + i, txt, st);
