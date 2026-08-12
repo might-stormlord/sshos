@@ -22,6 +22,8 @@ using sshos::Surface;
 using sshos::Theme;
 using sshos::View;
 using sshos::WinMode;
+using sshos::Window;
+using sshos::WindowId;
 using sshos::WindowManager;
 
 namespace {
@@ -173,9 +175,12 @@ TEST(panel_hit_test_matches_its_layout) {
   CHECK_EQ(menu_cells, 8);
   CHECK(task_cells > 0);
 
-  // « Battement » fait neuf cellules : la deuxième épinglée doit être
-  // coupée à huit, marque de coupure comprise, d'où dix cellules crochets
-  // inclus. Sans cette assertion, un panneau qui n'élide rien reste vert.
+  // La fenêtre ouverte ici l'a été sans passer par le catalogue : son app_id
+  // est vide, donc aucune entrée épinglée ne la revendique et les deux du
+  // catalogue restent vierges. « Battement » fait neuf cellules : la seconde
+  // doit être coupée à huit, marque comprise, plus la cellule de marque
+  // d'état -- neuf en tout. Sans cette assertion, un panneau qui n'élide
+  // rien reste vert.
   int pinned_cells[2] = {0, 0};
   for (int x = 0; x < 80; ++x) {
     const PanelHitResult h = p.hit(x, 23);
@@ -183,8 +188,119 @@ TEST(panel_hit_test_matches_its_layout) {
       ++pinned_cells[h.index];
     }
   }
-  CHECK_EQ(pinned_cells[0], 6);   // [Bloc]
-  CHECK_EQ(pinned_cells[1], 10);  // [Batteme…]
+  CHECK_EQ(pinned_cells[0], 5);  // marque + « Bloc »
+  CHECK_EQ(pinned_cells[1], 9);  // marque + « Batteme… »
+}
+
+// Le point de la fusion : une application épinglée QU'ON LANCE ne se
+// dédouble pas. Avant, la barre montrait « [Bloc] » d'un côté et « ●Bloc »
+// de l'autre -- deux cibles pour une seule application, à trente cellules
+// d'écart.
+TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  REQUIRE(w != nullptr);
+  w->app_id = "bloc";  // ce que pose open_from_catalog
+  p.layout(wm, 80, 24, true);
+
+  // Plus aucune cellule ne répond « épinglée numéro 0 » : l'entrée de Bloc
+  // est devenue la tâche. Battement, lui, n'est pas lancé et reste épinglé.
+  int bloc_pinned = 0;
+  int battement_pinned = 0;
+  int tasks = 0;
+  WindowId hit_win = 0;
+  for (int x = 0; x < 80; ++x) {
+    const PanelHitResult h = p.hit(x, 23);
+    if (h.what == PanelHit::Pinned && h.index == 0) ++bloc_pinned;
+    if (h.what == PanelHit::Pinned && h.index == 1) ++battement_pinned;
+    if (h.what == PanelHit::Task) {
+      ++tasks;
+      hit_win = h.win;
+    }
+  }
+  CHECK_EQ(bloc_pinned, 0);
+  CHECK(battement_pinned > 0);
+  CHECK_EQ(tasks, 5);  // « ●Bloc »
+  CHECK_EQ(hit_win, w->id);
+}
+
+// Deux fenêtres de la même application partagent UNE entrée, qui dit
+// combien, et dont les clics successifs font le tour du groupe.
+TEST(panel_folds_several_windows_of_one_application_into_one_entry) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  Window* a = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  Window* b = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  REQUIRE(a != nullptr);
+  REQUIRE(b != nullptr);
+  a->app_id = "bloc";
+  b->app_id = "bloc";
+  wm.focus(b->id);
+  p.layout(wm, 80, 24, false);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  const std::string row = s.text_row(23);
+  CHECK(row.find("*Bloc(2)") != std::string::npos);
+  // Une seule entrée, donc un seul « Bloc » dans toute la barre.
+  CHECK_EQ(row.find("Bloc"), row.rfind("Bloc"));
+
+  // Le clic vise la SUIVANTE du groupe, pas celle qui a déjà la main :
+  // sans quoi cliquer une entrée à deux fenêtres réduirait la fenêtre au
+  // lieu de montrer l'autre, et la seconde deviendrait inatteignable.
+  WindowId target = 0;
+  for (int x = 0; x < 80 && target == 0; ++x) {
+    const PanelHitResult h = p.hit(x, 23);
+    if (h.what == PanelHit::Task) target = h.win;
+  }
+  CHECK_EQ(target, a->id);
+}
+
+// Le bord vertical distingue lui aussi une entrée lancée d'une entrée qui ne
+// l'est pas. Rien ne le vérifiait : une mutation qui rendait TOUT « épinglé »
+// sur ce bord passait la suite entière, et cliquer la fenêtre ouverte aurait
+// relancé l'application au lieu de la rappeler.
+TEST(panel_tells_a_running_entry_from_an_idle_one_on_a_vertical_edge) {
+  Panel p;
+  p.set_edge(PanelEdge::Left);
+  WindowManager wm;
+  Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 64, 24});
+  REQUIRE(w != nullptr);
+  w->app_id = "bloc";
+  p.layout(wm, 80, 24, true);
+
+  // Ligne 0 : le bouton de menu. Puis une ligne par entrée, catalogue en
+  // tête -- Bloc lancé, Battement non.
+  const PanelHitResult live = p.hit(2, 1);
+  CHECK(live.what == PanelHit::Task);
+  CHECK_EQ(live.win, w->id);
+
+  const PanelHitResult idle = p.hit(2, 2);
+  CHECK(idle.what == PanelHit::Pinned);
+  CHECK_EQ(idle.index, 1);
+  CHECK_EQ(idle.win, 0u);
+}
+
+// Une fenêtre qu'aucune entrée du catalogue ne revendique garde la sienne :
+// sans cette boucle elle disparaîtrait de la barre.
+TEST(panel_keeps_an_entry_for_a_window_no_catalog_entry_claims) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  REQUIRE(w != nullptr);
+  w->app_id = "venu-d-ailleurs";
+  w->title = "Ailleurs";
+  p.layout(wm, 80, 24, false);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  CHECK(s.text_row(23).find("*Ailleurs") != std::string::npos);
 }
 
 // Le hit-test dit ce que le dessin montre. Sur toute la longueur du

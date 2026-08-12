@@ -18,6 +18,23 @@ struct PanelHitResult {
   WindowId win = 0;  // renseigné pour Task uniquement
 };
 
+// Une entrée de barre : UNE application, ouverte ou non. Épingler et lancer
+// ne produisent pas deux entrées mais une seule, qui change d'état -- c'est
+// ce que font les barres modernes, et c'est ce qui empêche « Bloc » de
+// figurer deux fois à trente centimètres d'écart dès qu'on le lance.
+struct PanelEntry {
+  int catalog_index = -1;  // -1 : fenêtre sans entrée au catalogue
+  std::string label;
+  // La fenêtre qu'un clic active. Zéro quand rien n'est ouvert : le clic
+  // lance alors l'application. Quand plusieurs fenêtres partagent l'entrée,
+  // c'est la SUIVANTE après celle qui a la main -- cliquer plusieurs fois
+  // fait donc le tour du groupe.
+  WindowId target = 0;
+  int count = 0;
+  bool focused = false;    // l'une d'elles a la main
+  bool minimized = false;  // toutes sont réduites
+};
+
 // La barre des tâches. Elle calcule sa disposition UNE fois, dans layout(),
 // et draw() comme hit() lisent cette même liste : c'est la seule façon de
 // garantir que ce qu'on clique est ce qu'on voit. La même discipline que
@@ -53,6 +70,9 @@ class Panel {
   }
   void layout_horizontal(const WindowManager& wm);
   void layout_vertical(const WindowManager& wm);
+
+  std::vector<PanelEntry> build_entries(const WindowManager& wm) const;
+  std::string entry_text(const PanelEntry& e, int label_cells) const;
 
   PanelEdge edge_ = PanelEdge::Bottom;
   Rect rect_{};
