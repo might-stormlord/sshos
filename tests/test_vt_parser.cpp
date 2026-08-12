@@ -287,6 +287,11 @@ TEST(vt_parser_caps_the_number_of_parameters) {
 // part à la poubelle plutôt que d'être devinée.
 TEST(vt_parser_throws_away_a_sequence_it_cannot_read) {
   CHECK_EQ(run("\033[1?2m""A"), std::string("p:41 "));
+  // Le marqueur suivi DIRECTEMENT du final : sans ce cas, une machine qui
+  // accepterait le marqueur tardif passerait quand même, parce que le
+  // chiffre d'après la ferait basculer dans l'état qui avale.
+  CHECK_EQ(run("\033[1?m""A"), std::string("p:41 "));
+  CHECK_EQ(run("\033[1>m""A"), std::string("p:41 "));
   CHECK_EQ(run("\033[\x7f""1m"), std::string("c:1m "));  // DEL ignoré
 }
 
@@ -484,4 +489,12 @@ TEST(vt_parser_never_prints_a_codepoint_that_cannot_exist) {
                    std::to_string(static_cast<uint32_t>(g.worst)));
     }
   }
+}
+
+// DEL est ignoré au sol, comme dans xterm. L'imprimer poserait une cellule
+// parasite là où l'invité n'a rien voulu écrire -- et les vieux terminaux
+// en émettent en remplissage.
+TEST(vt_parser_ignores_del_at_ground_level) {
+  CHECK_EQ(run("a\x7f""b"), std::string("p:61 p:62 "));
+  CHECK_EQ(run("\x7f"), std::string());
 }

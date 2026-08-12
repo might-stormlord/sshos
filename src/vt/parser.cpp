@@ -276,6 +276,11 @@ void Parser::step(uint8_t b) {
         else state_ = VtState::CsiIntermediate;
         return;
       }
+      // Note : en CsiEntry la liste d'intermédiaires est forcément vide --
+      // on y arrive après clear_sequence() -- si bien que le débordement
+      // testé juste au-dessus ne peut pas s'y produire. La garde est là
+      // pour la symétrie avec CsiParam, où elle est bien atteignable.
+      //
       // Le marqueur privé (`?`, `>`, `<`, `=`) n'est légal qu'ICI, en tête.
       // Il voyage avec les intermédiaires : le puits reçoit `?` et `h`, et
       // sait donc lire `\033[?25h` sans qu'on invente un troisième champ.
