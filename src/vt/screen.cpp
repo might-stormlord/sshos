@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "render/width.hpp"
+#include "vt/scrollback.hpp"
 
 namespace sshos {
 namespace {
@@ -78,7 +79,27 @@ void Screen::clear_wide_at(int x, int y) {
   }
 }
 
-void Screen::scroll_up() { scroll_slice_up(top_, bottom_, 1); }
+// LE SEUL chemin qui alimente l'historique. La façade d'une ligne
+// au-dessus de la primitive existe pour ça : `IL` et `DL` déplacent des
+// lignes sans faire défiler la page, et appellent la primitive
+// directement.
+//
+// Trois conditions, et chacune coûterait cher à oublier :
+//
+// - pas d'écran alterné : le défilement de `vim` n'appartient pas à
+//   l'historique du shell ;
+// - la région doit être la PAGE ENTIÈRE. Une région est une zone que
+//   l'application s'est réservée ; ce qui en sort n'est pas sorti de la
+//   page, et une application à en-tête fixe empoisonnerait l'historique à
+//   chaque rafraîchissement.
+void Screen::scroll_up() {
+  if (scrollback_ != nullptr && !alt_ && top_ == 0 && bottom_ == rows_ - 1) {
+    scrollback_->push(&grid_[static_cast<size_t>(top_) *
+                             static_cast<size_t>(cols_)],
+                      static_cast<size_t>(cols_));
+  }
+  scroll_slice_up(top_, bottom_, 1);
+}
 
 void Screen::scroll_down() { scroll_slice_down(top_, bottom_, 1); }
 
@@ -162,10 +183,11 @@ void Screen::print(char32_t cp) {
   // pas au moment où la dernière colonne a été écrite. C'est toute la
   // différence entre une ligne de largeur pleine qui s'affiche droite et
   // une qui saute une ligne sur deux.
-  // Le retour en attente n'est CONSULTÉ que si le mode 7 est actif. Le
-  // drapeau, lui, reste posé : rallumer le retour automatique juste après
-  // avoir rempli la ligne doit faire descendre le caractère suivant, comme
-  // si le mode n'avait jamais été éteint.
+  //
+  // Il n'est CONSULTÉ que si le mode 7 est actif ; le drapeau, lui, reste
+  // posé. Rallumer le retour automatique juste après avoir rempli la ligne
+  // fait donc descendre le caractère suivant, comme si le mode n'avait
+  // jamais été éteint.
   if (wrap_pending_ && autowrap_) {
     wrap_pending_ = false;
     cx_ = 0;

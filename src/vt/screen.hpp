@@ -8,6 +8,8 @@
 
 namespace sshos {
 
+class Scrollback;
+
 // Une cellule de la grille. `width` vaut 2 sur la première moitié d'un
 // caractère pleine chasse et 0 sur la seconde, jamais 2 deux fois de suite
 // -- c'est ce qui permet au rendu de sauter la moitié droite sans la
@@ -22,6 +24,7 @@ struct ScreenCell {
   char32_t ch = U' ';
   uint8_t width = 1;
   Style style{};
+  bool operator==(const ScreenCell&) const = default;
 };
 
 struct CursorPos {
@@ -86,6 +89,16 @@ class Screen {
   // l'écran alterné : le défilement de `vim` n'appartient pas à
   // l'historique du shell.
   bool alt_screen() const { return alt_; }
+
+  // L'HISTORIQUE, s'il y en a un. Nul par défaut : une grille sans
+  // historique se comporte exactement comme avant, et c'est ce qui permet
+  // de la tester seule.
+  //
+  // Une SEULE chose l'alimente : la ligne qui sort par le haut d'un
+  // défilement naturel, celui que provoque un saut de ligne au bas de la
+  // page. Ni `IL`, ni `DL`, ni un défilement de région, ni l'écran
+  // alterné -- voir `scroll_up()`.
+  void set_scrollback(Scrollback* sb) { scrollback_ = sb; }
 
   void print(char32_t cp);
 
@@ -211,6 +224,7 @@ class Screen {
   // par tampon -- sans cela le `\0337` d'un `vim` écrase la position que
   // le shell avait sauvée, et son `\0338` d'après le ramène ailleurs.
   SavedCursor parked_decsc_{};
+  Scrollback* scrollback_ = nullptr;
   // Ce que rend une lecture HORS grille. Rien à voir avec erased() : ce
   // n'est pas un effacement, c'est l'absence de cellule, et elle ne prend
   // donc jamais le fond courant.
