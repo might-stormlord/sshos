@@ -144,7 +144,10 @@ Le piège : `IL`/`DL` hors région ne font rien, et une région rétrécie ne d�
 Deux parties de l'énoncé sont **reportées, faute de matière** : `DECSC` ne
 sauve pour l'instant que la position et le retour différé, parce que les
 attributs naissent à la tâche 5 et le jeu de caractères à la tâche 10 —
-`SavedCursor` les attend, champ commenté à l'appui. Et la ligne qui sort
+`SavedCursor` les attend, champ commenté à l'appui. *(Le report des
+attributs est **soldé** à la tâche 5, commit `e599680` : `SavedCursor`
+porte le style et `DECRC` le rend. Reste le jeu de caractères, tâche 10.)*
+Et la ligne qui sort
 par le haut n'est poussée nulle part puisque le scrollback est la tâche 7.
 Le point d'accroche est prêt : `scroll_up()` est une façade d'une ligne
 au-dessus de `scroll_slice_up(top_, bottom_, 1)`, gardée exprès parce
@@ -161,7 +164,19 @@ Les pièges : `38;5;n` et `38;2;r;g;b` consomment des paramètres et un `SGR` ma
 
 **Tests :** table de séquences → attributs attendus ; un `38;5` tronqué n'emporte pas le reste ; `SGR 0` remet tout ; les couleurs vives 90-97 et 100-107.
 
-- [ ] Tâche 5 livrée : tests, mutations, commit
+- [x] Tâche 5 livrée : tests, mutations, commit — `d06ad0f` (SGR) et `e599680`
+  (le stylo), 50 tests, 58 mutations (1 équivalente)
+
+La tâche a débordé de ses fichiers, et c'était juste : `apply_sgr` seul
+n'aurait eu **aucun appelant possible**, faute d'un endroit où ranger le
+style. `ScreenCell` porte donc un `Style`, `Screen` un stylo courant, et
+l'effacement peint le fond courant (`bce`, cf. le commit). Sans cela, les
+tâches 7 (scrollback) et 8 (redimensionnement) se seraient construites sur
+une grille sans couleur, et leurs tests auraient été à rouvrir.
+
+Ce qui reste au liant (tâche 13) : appeler `apply_sgr` sur une copie de
+`screen.pen()` et la reposer par `set_pen()`. L'écran ne connaît toujours
+pas le parseur.
 
 ## Tâche 6 — Les modes `DECSET`/`DECRST`
 
