@@ -307,8 +307,12 @@ TEST(sgr_rejects_an_out_of_range_truecolour_component) {
 // d'un mode qu'on ne connaît pas est impossible ; s'arrêter là est le seul
 // choix qui ne décale rien de garanti.
 TEST(sgr_skips_an_unknown_extended_colour_mode) {
+  // Le mode choisi ici est `9`, qui est AUSSI le code du barré : un
+  // introducteur qui ne consommerait pas son mode le laisserait se relire
+  // comme un attribut, et le test ne verrait rien si on se contentait de
+  // vérifier que le gras a survécu.
   const Style s = sgr("1;38;9;4");
-  CHECK_EQ(s.attrs & attr::Bold, attr::Bold);
+  CHECK_EQ(s.attrs, attr::Bold | attr::Underline);
   CHECK(s.fg == Color::def());
 }
 

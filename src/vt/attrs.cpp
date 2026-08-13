@@ -112,6 +112,15 @@ void apply_sgr(const Params& params, Style& style) {
       case 4:
         // `4:0` éteint, `4:1` à `4:5` posent un style de trait qu'on ne
         // distingue pas. Un `4` nu pose, comme toujours.
+        //
+        // `end > i + 1` dit « seulement s'il y a vraiment un
+        // sous-paramètre », et n'est PAS observable : la retirer ferait
+        // lire le paramètre voisin comme s'il appartenait au groupe, mais
+        // le seul voisin qui déclencherait l'extinction à tort est un `0`
+        // -- lequel est un reset, et efface aussitôt la conséquence.
+        // Mutation équivalente, gardée parce qu'elle porte l'intention :
+        // elle redeviendra porteuse le jour où un code voisin valant zéro
+        // cessera de tout remettre à plat.
         if (end > i + 1 && param_or(params, i + 1, 1) == 0) {
           style.attrs &= ~attr::Underline;
         } else {
