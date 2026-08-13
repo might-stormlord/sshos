@@ -1,4 +1,4 @@
-ssh_os                                 PROCESSEUR           
+ssh_os                                                      
  Terminal         Bloc                            [_][o][x] 
  Fichiers       |taille: 42x12                             |
  Editeur        |clics: 1                                  |

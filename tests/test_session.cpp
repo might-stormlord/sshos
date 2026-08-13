@@ -1982,7 +1982,12 @@ TEST(daemon_dirty_overflow_closes_the_connection) {
   // 1000 de marge) est le seuil validé par la maquette autonome
   // (repro_dirty2.cpp, voir rapport de tâche) : tout dépassement de ce seuil
   // ne peut venir que de l'étape 2.
-  REQUIRE(wait_for_avail_at_least(client.get(), 174243, 12000));
+  // Le seuil est un ORDRE DE GRANDEUR, pas une mesure : il doit seulement
+  // prouver que l'etape 2 a commence a partir, donc depasser franchement
+  // ce que l'etape 1 seule laisse dans le tampon. Il etait ecrit a l'octet
+  // pres (174 243), ce qui le rendait solidaire du CONTENU du bureau --
+  // ajouter des cadres au fond d'ecran suffisait a le faire tomber.
+  REQUIRE(wait_for_avail_at_least(client.get(), 200000, 12000));
 
   // Étape 3 : ce repaint (603 243 octets) doit déborder le plafond compte
   // tenu du reliquat non vidé de l'étape 2, avec off_ encore > 0 — Dirty.

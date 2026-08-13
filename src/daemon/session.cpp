@@ -944,7 +944,11 @@ void Session::render(Surface& out) {
   if (half >= 18) {
     sysinfo_.draw(v.sub(Rect{work.x + work.w - half + 1, work.y, half - 2,
                              work.h}),
-                  theme_);
+                  theme_, border());
+    // La signature occupe la moitie GAUCHE, celle que le widget laisse
+    // libre.
+    SysInfo::draw_banner(v.sub(Rect{work.x, work.y, work.w - half, work.h}),
+                         theme_, border());
   }
 
   // Un bureau vide dit quoi faire, et le dit pour la SOURIS : c'est avec

@@ -34,11 +34,60 @@ std::string read_file(const std::string& path) {
   return out;
 }
 
-std::string bar(int percent, int width) {
+// La couleur d'une jauge, et elle SEULE porte de la couleur : les cadres
+// et les titres restent sobres. Une couleur qui signifie « tout va bien »
+// partout ne signifie plus rien ; ici elle ne sert qu'a alerter.
+Color gauge_color(int percent) {
+  if (percent >= 85) return Color::indexed(1);   // rouge
+  if (percent >= 60) return Color::indexed(3);   // jaune
+  return Color::indexed(2);                      // vert
+}
+
+std::string bar(int percent, int width, Border b) {
+  const std::string full = b == Border::Unicode ? "\u2588" : "#";
+  const std::string empty = b == Border::Unicode ? "\u00b7" : ".";
   std::string out;
   const int filled = width * std::clamp(percent, 0, 100) / 100;
-  for (int i = 0; i < width; ++i) out += (i < filled) ? "|" : " ";
+  for (int i = 0; i < width; ++i) out += (i < filled) ? full : empty;
   return out;
+}
+
+// Un cadre titre. Le titre s'incruste DANS le trait du haut : une ligne de
+// titre separee couterait une ligne sur quatre dans une boite de quatre.
+void frame(View v, const Rect& r, std::string_view title, const Style& st,
+           Border b) {
+  if (r.w < 4 || r.h < 2) return;
+  const bool uni = b == Border::Unicode;
+  const std::string tl = uni ? "\u250c" : "+", tr = uni ? "\u2510" : "+";
+  const std::string bl = uni ? "\u2514" : "+", br = uni ? "\u2518" : "+";
+  const std::string h = uni ? "\u2500" : "-", vv = uni ? "\u2502" : "|";
+
+  std::string top = tl + " " + std::string(title) + " ";
+  const int used = 1 + 1 + static_cast<int>(title.size()) + 1;
+  for (int i = used; i < r.w - 1; ++i) top += h;
+  top += tr;
+  v.text(r.x, r.y, top, st);
+
+  for (int y = r.y + 1; y < r.y + r.h - 1; ++y) {
+    v.text(r.x, y, vv, st);
+    v.text(r.x + r.w - 1, y, vv, st);
+  }
+  std::string bottom = bl;
+  for (int i = 1; i < r.w - 1; ++i) bottom += h;
+  bottom += br;
+  v.text(r.x, r.y + r.h - 1, bottom, st);
+}
+
+// Une boite « compteur » : un grand chiffre, puis sa jauge.
+void counter_box(View v, const Rect& r, std::string_view title,
+                 const std::string& value, int percent, const Style& chrome,
+                 const Style& body, Border b) {
+  frame(v, r, title, chrome, b);
+  if (r.h < 3 || r.w < 6) return;
+  v.text(r.x + 2, r.y + 1, value, body);
+  Style g = body;
+  g.fg = gauge_color(percent);
+  v.text(r.x + 2, r.y + 2, bar(percent, r.w - 4, b), g);
 }
 
 // Un débit lisible. Les octets bruts sont illisibles au-delà du millier, et
@@ -159,72 +208,133 @@ void SysInfo::apply(int64_t now_ms, std::string_view stat,
   sampled_ = true;
 }
 
-void SysInfo::draw(View v, const Theme& th) const {
+void SysInfo::draw(View v, const Theme& th, Border b) const {
   const int w = v.w();
   const int h = v.h();
-  if (w < 16 || h < 4) return;  // trop etroit : mieux vaut ne rien dire
+  if (w < 24 || h < 8) return;  // trop etroit : mieux vaut ne rien dire
 
-  Style title;
-  title.fg = th.panel_fg;
-  title.attrs = attr::Bold;
+  Style chrome;
+  chrome.fg = th.panel_fg;
   Style body;
   body.fg = th.panel_fg;
+  body.attrs = attr::Bold;
 
-  const int barw = std::max(4, w / 3);
+  // DEUX COLONNES de compteurs quand la place le permet, une sinon. Les
+  // boites font quatre lignes : le trait du haut porte le titre, puis le
+  // chiffre, puis la jauge, puis le trait du bas.
+  const bool two = w >= 26;
+  const int bw = two ? w / 2 : w;
+  const int bh = 4;
+
+  const int cpu_pct = cores_.empty() ? 0 : cores_[0];
+  const uint64_t used_kb =
+      mem_.total_kb > mem_.available_kb ? mem_.total_kb - mem_.available_kb : 0;
+  const int mem_pct =
+      mem_.total_kb == 0 ? 0 : static_cast<int>(used_kb * 100 / mem_.total_kb);
+
   int y = 0;
-
-  // --- le processeur
-  v.text(0, y++, "PROCESSEUR", title);
-  if (y < h) {
-    v.text(0, y++,
-           "charge " + two_decimals(load_.size() > 0 ? load_[0] : 0) + "  " +
-               two_decimals(load_.size() > 1 ? load_[1] : 0) + "  " +
-               two_decimals(load_.size() > 2 ? load_[2] : 0),
-           body);
-  }
-  // L'indice 0 est le TOTAL : les coeurs le disent deja.
-  for (size_t i = 1; i < cores_.size() && y < h; ++i) {
-    Style st = body;
-    if (cores_[i] >= 80) st.fg = Color::indexed(1);
-    v.text(0, y++,
-           std::to_string(i - 1) + "[" + bar(cores_[i], barw) + "] " +
-               std::to_string(cores_[i]) + "%",
-           st);
+  counter_box(v, Rect{0, y, bw, bh}, "CPU", std::to_string(cpu_pct) + "%",
+              cpu_pct, chrome, body, b);
+  if (two) {
+    counter_box(v, Rect{bw, y, w - bw, bh}, "MEM",
+                std::to_string(mem_pct) + "%", mem_pct, chrome, body, b);
+    y += bh;
+  } else {
+    y += bh;
+    counter_box(v, Rect{0, y, bw, bh}, "MEM", std::to_string(mem_pct) + "%",
+                mem_pct, chrome, body, b);
+    y += bh;
   }
 
-  // --- la memoire
-  if (y < h) ++y;
-  if (y < h) v.text(0, y++, "MEMOIRE", title);
-  if (y < h) {
-    const uint64_t used = mem_.total_kb > mem_.available_kb
-                              ? mem_.total_kb - mem_.available_kb
-                              : 0;
-    const int pct = mem_.total_kb == 0
-                        ? 0
-                        : static_cast<int>(used * 100 / mem_.total_kb);
-    v.text(0, y++,
-           "[" + bar(pct, barw) + "] " + std::to_string(used / 1024) + "/" +
-               std::to_string(mem_.total_kb / 1024) + "Mo",
-           body);
+  // Le reseau et la charge : deux chiffres chacun, pas de jauge -- un debit
+  // n'a pas de maximum connu, et une jauge sans plafond ment.
+  if (y + bh <= h) {
+    const std::string down = b == Border::Unicode ? "\u2193" : "v";
+    const std::string up = b == Border::Unicode ? "\u2191" : "^";
+    frame(v, Rect{0, y, bw, bh}, "RESEAU", chrome, b);
+    v.text(2, y + 1, down + " " + rate(rx_per_s_), body);
+    v.text(2, y + 2, up + " " + rate(tx_per_s_), body);
+    if (two) {
+      frame(v, Rect{bw, y, w - bw, bh}, "CHARGE", chrome, b);
+      v.text(bw + 2, y + 1, two_decimals(load_.size() > 0 ? load_[0] : 0), body);
+      v.text(bw + 2, y + 2,
+             two_decimals(load_.size() > 1 ? load_[1] : 0) + " " +
+                 two_decimals(load_.size() > 2 ? load_[2] : 0),
+             body);
+    }
+    y += bh;
   }
 
-  // --- le reseau
-  if (y < h) ++y;
-  if (y < h) v.text(0, y++, "RESEAU", title);
-  if (y < h) v.text(0, y++, "recu  " + rate(rx_per_s_), body);
-  if (y < h) v.text(0, y++, "emis  " + rate(tx_per_s_), body);
+  // Les processus, CINQ au plus. Au-dela, la liste cesse de repondre a « a
+  // cause de qui ? » pour devenir un mur de texte -- c'est ce qui rendait
+  // le fond illisible.
+  constexpr size_t kMaxRows = 5;
+  const int want = static_cast<int>(std::min(kMaxRows, rows_.size())) + 2;
+  if (y + 3 <= h) {
+    const int box_h = std::min(want, h - y);
+    frame(v, Rect{0, y, w, box_h}, "PROCESSUS", chrome, b);
+    int line = y + 1;
+    for (size_t i = 0; i < rows_.size() && i < kMaxRows; ++i) {
+      if (line >= y + box_h - 1) break;
+      const ProcRow& r = rows_[i];
+      Style pct = body;
+      pct.fg = gauge_color(r.cpu_percent);
+      const std::string head = std::to_string(r.cpu_percent) + "%";
+      v.text(2, line, head, pct);
+      v.text(2 + 5, line,
+             std::to_string(r.rss_kb / 1024) + "Mo  " + r.name, chrome);
+      ++line;
+    }
+  }
+}
 
-  // --- les processus, tronques les premiers quand la place manque : ils
-  // repondent a « a cause de qui ? », les autres a « la machine
-  // souffre-t-elle ? », et c'est la seconde question qui vient d'abord.
-  if (y < h) ++y;
-  if (y < h) v.text(0, y++, "PROCESSUS", title);
-  for (const ProcRow& r : rows_) {
-    if (y >= h) break;
-    v.text(0, y++,
-           std::to_string(r.cpu_percent) + "%  " +
-               std::to_string(r.rss_kb / 1024) + "Mo  " + r.name,
-           body);
+namespace {
+
+// Une police de blocs, cinq lignes par lettre. Ecrite a la main : trois
+// colonnes suffisent a rendre S, H et O lisibles, et une police plus large
+// deborderait de la moitie gauche sur un terminal de quatre-vingts
+// colonnes.
+const char* glyph_rows(char c, int row) {
+  static const char* kS[5] = {"###", "#  ", "###", "  #", "###"};
+  static const char* kH[5] = {"# #", "# #", "###", "# #", "# #"};
+  static const char* kO[5] = {"###", "# #", "# #", "# #", "###"};
+  static const char* kSpace[5] = {"   ", "   ", "   ", "   ", "   "};
+  switch (c) {
+    case 'S': return kS[row];
+    case 'H': return kH[row];
+    case 'O': return kO[row];
+    default: return kSpace[row];
+  }
+}
+
+}  // namespace
+
+void SysInfo::draw_banner(View v, const Theme& th, Border b) {
+  const char* kWord = "SSH OS";
+  constexpr int kRows = 5;
+  constexpr int kGlyphW = 3;
+  constexpr int kGap = 1;
+  const int word_w = static_cast<int>(std::string(kWord).size()) * (kGlyphW + kGap) - kGap;
+  if (v.w() < word_w || v.h() < kRows) return;
+
+  // Centree dans ce qu'on lui donne, et posee dans une teinte PROCHE DU
+  // FOND : une signature qui se lit aussi bien que le contenu detourne
+  // l'oeil de ce qu'on est venu faire.
+  const int x0 = (v.w() - word_w) / 2;
+  const int y0 = (v.h() - kRows) / 2;
+  Style st;
+  st.fg = th.desktop_sign;
+  const std::string block = b == Border::Unicode ? "\u2588" : "#";
+
+  for (int row = 0; row < kRows; ++row) {
+    int x = x0;
+    for (const char* p = kWord; *p != 0; ++p) {
+      const char* bits = glyph_rows(*p, row);
+      for (int i = 0; i < kGlyphW; ++i) {
+        if (bits[i] == '#') v.text(x + i, y0 + row, block, st);
+      }
+      x += kGlyphW + kGap;
+    }
   }
 }
 

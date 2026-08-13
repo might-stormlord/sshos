@@ -26,7 +26,8 @@ const char* kNet2 = "  eth0: 3048 1 0 0 0 0 0 0 6096 2 0 0 0 0 0 0\n";
 
 std::string painted(const SysInfo& s, int w, int h) {
   sshos::Surface surf(w, h);
-  s.draw(sshos::View(surf, sshos::Rect{0, 0, w, h}), sshos::Theme::mono16());
+  s.draw(sshos::View(surf, sshos::Rect{0, 0, w, h}), sshos::Theme::mono16(),
+         sshos::Border::Unicode);
   std::string out;
   for (int y = 0; y < h; ++y) {
     if (y != 0) out.push_back('/');
@@ -47,8 +48,8 @@ TEST(sysinfo_shows_its_four_sections) {
   s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, {{7, "gourmand", 200, 100}});
 
   const std::string g = painted(s, 40, 24);
-  const size_t cpu = g.find("PROCESSEUR");
-  const size_t mem = g.find("MEMOIRE");
+  const size_t cpu = g.find("CPU");
+  const size_t mem = g.find("MEM");
   const size_t net = g.find("RESEAU");
   const size_t proc = g.find("PROCESSUS");
   CHECK(cpu != std::string::npos);
@@ -119,8 +120,8 @@ TEST(sysinfo_drops_the_processes_first_when_it_lacks_room) {
   s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, b);
 
   const std::string g = painted(s, 40, 12);
-  CHECK(g.find("PROCESSEUR") != std::string::npos);
-  CHECK(g.find("MEMOIRE") != std::string::npos);
+  CHECK(g.find("CPU") != std::string::npos);
+  CHECK(g.find("MEM") != std::string::npos);
   CHECK(g.find("RESEAU") != std::string::npos);
   CHECK(g.find("proc29") == std::string::npos);
 }
@@ -142,4 +143,88 @@ TEST(sysinfo_writes_the_rate_in_readable_units) {
   s.sample_for_tests(1000, kStat1, kMem, kLoad, kNet1, {});
   s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, {});
   CHECK(painted(s, 40, 24).find("2Ko/s") != std::string::npos);
+}
+
+// ------------------------------------------- les compteurs encadrés
+
+// Chaque compteur porte son propre cadre TITRÉ, et le titre est incrusté
+// dans le trait du haut : une ligne de titre séparée coûterait une ligne
+// sur quatre dans une boîte qui en fait quatre.
+TEST(sysinfo_frames_each_counter_with_its_title) {
+  SysInfo s;
+  s.sample_for_tests(1000, kStat1, kMem, kLoad, kNet1, {});
+  s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, {});
+
+  const std::string g = painted(s, 40, 20);
+  CHECK(g.find("┌ CPU ") != std::string::npos);
+  CHECK(g.find("┌ MEM ") != std::string::npos);
+  CHECK(g.find("┌ RESEAU ") != std::string::npos);
+  CHECK(g.find("┌ CHARGE ") != std::string::npos);
+  CHECK(g.find("┌ PROCESSUS ") != std::string::npos);
+}
+
+// Un client sans UTF-8 reçoit des cadres ASCII, comme partout ailleurs
+// dans le bureau : des points d'interrogation à la place des traits
+// seraient pires que pas de cadre du tout.
+TEST(sysinfo_falls_back_to_ascii_frames) {
+  SysInfo s;
+  s.sample_for_tests(1000, kStat1, kMem, kLoad, kNet1, {});
+  s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, {});
+
+  sshos::Surface surf(40, 20);
+  s.draw(sshos::View(surf, sshos::Rect{0, 0, 40, 20}), sshos::Theme::mono16(),
+         sshos::Border::Ascii);
+  std::string g;
+  for (int y = 0; y < 20; ++y) g += surf.text_row(y);
+  CHECK(g.find("+ CPU ") != std::string::npos);
+  CHECK(g.find("┌") == std::string::npos);
+}
+
+// CINQ processus au plus. Au-delà, la liste cesse de répondre à « à cause
+// de qui ? » pour devenir un mur de texte -- c'est exactement ce qui
+// rendait le fond illisible.
+TEST(sysinfo_never_lists_more_than_five_processes) {
+  SysInfo s;
+  std::vector<ProcInfo> a;
+  std::vector<ProcInfo> b;
+  for (int i = 0; i < 20; ++i) {
+    a.push_back({i + 100, "proc" + std::to_string(i), 0, 100});
+    b.push_back({i + 100, "proc" + std::to_string(i), 50, 100});
+  }
+  s.sample_for_tests(1000, kStat1, kMem, kLoad, kNet1, a);
+  s.sample_for_tests(2000, kStat2, kMem, kLoad, kNet2, b);
+
+  const std::string g = painted(s, 40, 40);
+  int seen = 0;
+  for (int i = 0; i < 20; ++i) {
+    if (g.find("proc" + std::to_string(i) + " ") != std::string::npos ||
+        g.find("proc" + std::to_string(i) + "|") != std::string::npos) {
+      ++seen;
+    }
+  }
+  CHECK(seen <= 5);
+}
+
+// LA SIGNATURE : présente, mais dans une teinte proche du fond. Une
+// signature qui se lit aussi bien que le contenu détourne l'œil de ce
+// qu'on est venu faire.
+TEST(sysinfo_draws_its_signature_in_block_letters) {
+  sshos::Surface surf(40, 12);
+  SysInfo::draw_banner(sshos::View(surf, sshos::Rect{0, 0, 40, 12}),
+                       sshos::Theme::mono16(), sshos::Border::Unicode);
+  std::string g;
+  for (int y = 0; y < 12; ++y) g += surf.text_row(y);
+  CHECK(g.find("█") != std::string::npos);
+  CHECK(!(surf.at(0, 0).fg == sshos::Theme::mono16().desktop_bg));
+}
+
+// Trop à l'étroit, elle ne s'écrit pas : une signature tronquée est un
+// défaut d'affichage, pas une décoration.
+TEST(sysinfo_skips_its_signature_when_the_space_is_too_small) {
+  sshos::Surface surf(10, 3);
+  SysInfo::draw_banner(sshos::View(surf, sshos::Rect{0, 0, 10, 3}),
+                       sshos::Theme::mono16(), sshos::Border::Unicode);
+  for (int y = 0; y < 3; ++y) {
+    CHECK_EQ(surf.text_row(y).find("█"), std::string::npos);
+  }
 }

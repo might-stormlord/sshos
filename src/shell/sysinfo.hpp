@@ -31,7 +31,13 @@ class SysInfo {
 
   // Dessine dans `v`, qui est DÉJÀ la moitié droite : le widget ne décide
   // pas où il va, il remplit ce qu'on lui donne.
-  void draw(View v, const Theme& th) const;
+  void draw(View v, const Theme& th, Border b) const;
+
+  // LA SIGNATURE DU BUREAU, en lettres de blocs. Elle vit sur la moitie
+  // GAUCHE -- celle que le widget laisse libre -- dans une teinte proche
+  // du fond : presente, mais qui ne crie pas, et qui disparait derriere
+  // les fenetres des qu'on travaille.
+  static void draw_banner(View v, const Theme& th, Border b);
 
   // Empeche TOUTE lecture de `/proc`. Pose une seule fois par le binaire
   // de test : le widget lit la vraie machine -- charge, memoire, nombre de

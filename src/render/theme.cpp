@@ -5,6 +5,7 @@ namespace sshos {
 Theme Theme::defaults() {
   Theme t;
   t.desktop_bg = Color::rgb(0x20, 0x30, 0x50);
+  t.desktop_sign = Color::rgb(0x2c, 0x40, 0x68);
   t.panel_bg = Color::rgb(0x0c, 0x0e, 0x14);
   t.panel_fg = Color::rgb(0xc8, 0xd0, 0xdc);
   t.accent = Color::rgb(0x4a, 0x9e, 0xff);
@@ -22,6 +23,7 @@ Theme Theme::defaults() {
 Theme Theme::indexed256() {
   Theme t;
   t.desktop_bg = Color::indexed(17);
+  t.desktop_sign = Color::indexed(18);
   t.panel_bg = Color::indexed(234);
   t.panel_fg = Color::indexed(252);
   t.accent = Color::indexed(75);
@@ -42,6 +44,7 @@ Theme Theme::mono16() {
   // s'effondre silencieusement sur son homologue sombre.
   Theme t;
   t.desktop_bg = Color::indexed(4);
+  t.desktop_sign = Color::indexed(12);
   t.panel_bg = Color::indexed(0);
   t.panel_fg = Color::indexed(7);
   t.accent = Color::indexed(6);
