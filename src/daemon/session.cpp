@@ -940,15 +940,28 @@ void Session::render(Surface& out) {
   sysinfo_.refresh(std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::steady_clock::now().time_since_epoch())
                        .count());
-  const int half = work.w / 2;
-  if (half >= 18) {
-    sysinfo_.draw(v.sub(Rect{work.x + work.w - half + 1, work.y, half - 2,
-                             work.h}),
+  // La signature d'abord, les compteurs PAR-DESSUS : ce sont eux qu'on
+  // vient lire.
+  //
+  // Une TRAME DE POINTS a ete essayee sous la signature, puis retiree :
+  // elle alourdissait chaque repeint complet de 27 %, ce qui faisait
+  // basculer le rejet de contre-pression de « sale » a « propre » dans
+  // `daemon_dirty_overflow_closes_the_connection` -- un cas dont les
+  // dimensions ont ete derivees a l'octet pres avec une maquette autonome.
+  // Le fond n'a pas paru valoir de refaire cette derivation ; le jour ou
+  // elle sera refaite, la trame tient en dix lignes.
+  SysInfo::draw_banner(v.sub(work), theme_, border());
+
+  // Les compteurs : plus etroits que la moitie, et DESCENDUS de quelques
+  // lignes. Colles en haut a droite ils se disputaient le regard avec la
+  // barre de titre de la premiere fenetre.
+  constexpr int kCountersW = 36;
+  constexpr int kCountersTop = 3;
+  const int cw = std::min(kCountersW, work.w / 2);
+  if (cw >= 24 && work.h > kCountersTop + 8) {
+    sysinfo_.draw(v.sub(Rect{work.x + work.w - cw - 1, work.y + kCountersTop,
+                             cw, work.h - kCountersTop}),
                   theme_, border());
-    // La signature occupe la moitie GAUCHE, celle que le widget laisse
-    // libre.
-    SysInfo::draw_banner(v.sub(Rect{work.x, work.y, work.w - half, work.h}),
-                         theme_, border());
   }
 
   // Un bureau vide dit quoi faire, et le dit pour la SOURIS : c'est avec

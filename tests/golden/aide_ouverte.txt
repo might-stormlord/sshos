@@ -1,16 +1,16 @@
-                               + CPU -------++ MEM -------+ 
-   +----------------------------------------------------+ | 
-  || Ctrl+A puis :       + s'enchaine                   | | 
+                                                            
+   +----------------------------------------------------+   
+  || Ctrl+A puis :       + s'enchaine                   |   
   ||                                                    |-+ 
-  || Fleches / hjkl      + Deplacer la fenetre          |-+ 
+  || Fleches / hjkl      + Deplacer la fenetre          | | 
   || Maj+fleches / HJKL  + Redimensionner               | | 
-  || Tab, Maj+Tab / n, p + Fenetre suivante, precedente | | 
+  || Tab, Maj+Tab / n, p + Fenetre suivante, precedente |-+ 
   || w                     Fermer la fenetre            |-+ 
-  || -                     Reduire                      |-+ 
-  || z                     Maximiser (bascule)          |-+ 
-  || f                     Plein ecran (bascule)        |   
-  || Espace                Ouvrir le menu               |   
-  || m                     Souris : bureau ou terminal  |   
+  || -                     Reduire                      | | 
+  || z                     Maximiser (bascule)          | | 
+  || f                     Plein ecran (bascule)        |-+ 
+  || Espace                Ouvrir le menu               |-+ 
+  || m                     Souris : bureau ou terminal  |-+ 
   || r                     Tout repeindre               |   
   +| d                     Detacher (la session survit) |   
    | ?                     Cette aide                   |   

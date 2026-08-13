@@ -45,7 +45,7 @@ Color gauge_color(int percent) {
 
 std::string bar(int percent, int width, Border b) {
   const std::string full = b == Border::Unicode ? "\u2588" : "#";
-  const std::string empty = b == Border::Unicode ? "\u00b7" : ".";
+  const std::string empty = b == Border::Unicode ? "\u2591" : "-";
   std::string out;
   const int filled = width * std::clamp(percent, 0, 100) / 100;
   for (int i = 0; i < width; ++i) out += (i < filled) ? full : empty;
@@ -55,8 +55,13 @@ std::string bar(int percent, int width, Border b) {
 // Un cadre titre. Le titre s'incruste DANS le trait du haut : une ligne de
 // titre separee couterait une ligne sur quatre dans une boite de quatre.
 void frame(View v, const Rect& r, std::string_view title, const Style& st,
-           Border b) {
+           const Style& bg, Border b) {
   if (r.w < 4 || r.h < 2) return;
+  // ON EFFACE D'ABORD. La trame du fond passe sous les boites, et sans ce
+  // nettoyage ses points transparaissent dans les creux -- entre le
+  // chiffre et la jauge, entre deux lignes de processus -- ce qui rend
+  // illisible exactement ce qu'on est venu lire.
+  v.fill(r, bg);
   const bool uni = b == Border::Unicode;
   const std::string tl = uni ? "\u250c" : "+", tr = uni ? "\u2510" : "+";
   const std::string bl = uni ? "\u2514" : "+", br = uni ? "\u2518" : "+";
@@ -81,8 +86,8 @@ void frame(View v, const Rect& r, std::string_view title, const Style& st,
 // Une boite « compteur » : un grand chiffre, puis sa jauge.
 void counter_box(View v, const Rect& r, std::string_view title,
                  const std::string& value, int percent, const Style& chrome,
-                 const Style& body, Border b) {
-  frame(v, r, title, chrome, b);
+                 const Style& body, const Style& bg, Border b) {
+  frame(v, r, title, chrome, bg, b);
   if (r.h < 3 || r.w < 6) return;
   v.text(r.x + 2, r.y + 1, value, body);
   Style g = body;
@@ -218,6 +223,8 @@ void SysInfo::draw(View v, const Theme& th, Border b) const {
   Style body;
   body.fg = th.panel_fg;
   body.attrs = attr::Bold;
+  Style bg;
+  bg.bg = th.desktop_bg;
 
   // DEUX COLONNES de compteurs quand la place le permet, une sinon. Les
   // boites font quatre lignes : le trait du haut porte le titre, puis le
@@ -234,15 +241,15 @@ void SysInfo::draw(View v, const Theme& th, Border b) const {
 
   int y = 0;
   counter_box(v, Rect{0, y, bw, bh}, "CPU", std::to_string(cpu_pct) + "%",
-              cpu_pct, chrome, body, b);
+              cpu_pct, chrome, body, bg, b);
   if (two) {
     counter_box(v, Rect{bw, y, w - bw, bh}, "MEM",
-                std::to_string(mem_pct) + "%", mem_pct, chrome, body, b);
+                std::to_string(mem_pct) + "%", mem_pct, chrome, body, bg, b);
     y += bh;
   } else {
     y += bh;
     counter_box(v, Rect{0, y, bw, bh}, "MEM", std::to_string(mem_pct) + "%",
-                mem_pct, chrome, body, b);
+                mem_pct, chrome, body, bg, b);
     y += bh;
   }
 
@@ -251,11 +258,11 @@ void SysInfo::draw(View v, const Theme& th, Border b) const {
   if (y + bh <= h) {
     const std::string down = b == Border::Unicode ? "\u2193" : "v";
     const std::string up = b == Border::Unicode ? "\u2191" : "^";
-    frame(v, Rect{0, y, bw, bh}, "RESEAU", chrome, b);
+    frame(v, Rect{0, y, bw, bh}, "RESEAU", chrome, bg, b);
     v.text(2, y + 1, down + " " + rate(rx_per_s_), body);
     v.text(2, y + 2, up + " " + rate(tx_per_s_), body);
     if (two) {
-      frame(v, Rect{bw, y, w - bw, bh}, "CHARGE", chrome, b);
+      frame(v, Rect{bw, y, w - bw, bh}, "CHARGE", chrome, bg, b);
       v.text(bw + 2, y + 1, two_decimals(load_.size() > 0 ? load_[0] : 0), body);
       v.text(bw + 2, y + 2,
              two_decimals(load_.size() > 1 ? load_[1] : 0) + " " +
@@ -272,7 +279,7 @@ void SysInfo::draw(View v, const Theme& th, Border b) const {
   const int want = static_cast<int>(std::min(kMaxRows, rows_.size())) + 2;
   if (y + 3 <= h) {
     const int box_h = std::min(want, h - y);
-    frame(v, Rect{0, y, w, box_h}, "PROCESSUS", chrome, b);
+    frame(v, Rect{0, y, w, box_h}, "PROCESSUS", chrome, bg, b);
     int line = y + 1;
     for (size_t i = 0; i < rows_.size() && i < kMaxRows; ++i) {
       if (line >= y + box_h - 1) break;

@@ -39,6 +39,7 @@ class SysInfo {
   // les fenetres des qu'on travaille.
   static void draw_banner(View v, const Theme& th, Border b);
 
+
   // Empeche TOUTE lecture de `/proc`. Pose une seule fois par le binaire
   // de test : le widget lit la vraie machine -- charge, memoire, nombre de
   // coeurs, processus vivants -- et aucune reference de rendu ne peut etre
