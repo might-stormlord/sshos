@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "render/cell.hpp"
+#include "vt/charset.hpp"
 
 namespace sshos {
 
@@ -32,15 +33,17 @@ struct CursorPos {
   int y = 0;
 };
 
-// Ce que DECSC met de côté : la position, le retour différé et le STYLE
-// COURANT. La tâche 10 y ajoutera le jeu de caractères, car DECRC restitue
-// les trois -- une application qui sauve le curseur au milieu d'un passage
-// en gras attend de le retrouver en gras.
+// Ce que DECSC met de côté : la position, le retour différé, le STYLE
+// courant et le JEU DE CARACTÈRES courant. DECRC restitue les quatre --
+// une application qui sauve le curseur au milieu d'un passage en gras
+// attend de le retrouver en gras, et un `mc` qui le sauve en plein cadre
+// attend de retrouver ses traits.
 struct SavedCursor {
   int x = 0;
   int y = 0;
   bool wrap_pending = false;
   Style style{};
+  Charset charset = Charset::Ascii;
 };
 
 // La grille et son curseur. Rien ici ne connaît le parseur : l'écran reçoit
@@ -72,6 +75,13 @@ class Screen {
   // dernière colonne y écrase le caractère précédent au lieu de descendre
   // -- c'est ce dont se sert une application qui dessine un cadre jusqu'au
   // bord droit sans vouloir faire défiler la page.
+  // Le JEU DE CARACTÈRES courant (G0). `print()` le consulte pour chaque
+  // caractère : c'est la seule façon qu'un `ESC ( 0` reçu au milieu d'une
+  // ligne prenne effet sur la suite de cette ligne et pas sur ce qui la
+  // précède.
+  Charset charset() const { return charset_; }
+  void set_charset(Charset c) { charset_ = c; }
+
   bool autowrap() const { return autowrap_; }
   void set_autowrap(bool on) { autowrap_ = on; }
 
@@ -231,6 +241,7 @@ class Screen {
   int top_ = 0;
   int bottom_ = 0;  // posé à rows_ - 1 par le constructeur
   bool autowrap_ = true;
+  Charset charset_ = Charset::Ascii;
   Style pen_{};
   SavedCursor saved_{};
   // La page principale mise de côté pendant que l'écran alterné est

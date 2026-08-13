@@ -214,7 +214,7 @@ void Screen::enter_alt_screen() {
   parked_.swap(grid_);
   grid_.assign(static_cast<size_t>(cols_) * static_cast<size_t>(rows_),
                erased());
-  parked_cursor_ = SavedCursor{cx_, cy_, wrap_pending_, pen_};
+  parked_cursor_ = SavedCursor{cx_, cy_, wrap_pending_, pen_, charset_};
   // L'écran alterné a son PROPRE emplacement de DECSC, vierge : celui de
   // la page principale attend dehors.
   parked_decsc_ = saved_;
@@ -233,11 +233,17 @@ void Screen::leave_alt_screen() {
   cy_ = parked_cursor_.y;
   wrap_pending_ = parked_cursor_.wrap_pending;
   pen_ = parked_cursor_.style;
+  charset_ = parked_cursor_.charset;
   saved_ = parked_decsc_;
   alt_ = false;
 }
 
 void Screen::print(char32_t cp) {
+  // La traduction a lieu ICI, avant toute mesure de largeur : les
+  // semi-graphiques DEC occupent tous une cellule, mais rien ne le
+  // garantirait d'un jeu ajouté plus tard, et mesurer la lettre d'origine
+  // donnerait une largeur qui n'est pas celle du caractère affiché.
+  cp = translate(cp, charset_);
   const int w = std::max(0, char_width(cp));
   if (w == 0) return;  // combinant ou non imprimable : tâche ultérieure
 
@@ -531,7 +537,7 @@ void Screen::reset_scroll_region() {
 }
 
 void Screen::save_cursor() {
-  saved_ = SavedCursor{cx_, cy_, wrap_pending_, pen_};
+  saved_ = SavedCursor{cx_, cy_, wrap_pending_, pen_, charset_};
 }
 
 void Screen::restore_cursor() {
@@ -539,6 +545,7 @@ void Screen::restore_cursor() {
   cx_ = std::clamp(saved_.x, 0, cols_ - 1);
   cy_ = std::clamp(saved_.y, 0, rows_ - 1);
   wrap_pending_ = saved_.wrap_pending && cx_ == cols_ - 1;
+  charset_ = saved_.charset;
   // Le style repart avec le curseur : une application qui sauve au milieu
   // d'un passage en gras attend de le retrouver en gras. Sans DECSC
   // préalable, `saved_` est vierge -- et un DECRC seul rend donc un
