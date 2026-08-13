@@ -65,6 +65,28 @@ class Screen {
   const Style& pen() const { return pen_; }
   void set_pen(const Style& s) { pen_ = s; }
 
+  // Le RETOUR AUTOMATIQUE (DECAWM, mode 7). Éteint, écrire dans la
+  // dernière colonne y écrase le caractère précédent au lieu de descendre
+  // -- c'est ce dont se sert une application qui dessine un cadre jusqu'au
+  // bord droit sans vouloir faire défiler la page.
+  bool autowrap() const { return autowrap_; }
+  void set_autowrap(bool on) { autowrap_ = on; }
+
+  // L'ÉCRAN ALTERNÉ (mode 1049). Entrer sauve le curseur ET le style, met
+  // la page principale de côté et efface la nouvelle ; sortir rend les
+  // trois. La page principale revient au caractère près : c'est ce qui
+  // fait qu'un `vim` quitté rend le shell tel qu'on l'avait laissé.
+  //
+  // Les deux appels sont idempotents. Une application qui pose 1049 deux
+  // fois -- ou un `tmux` imbriqué qui le pose alors qu'il l'est déjà --
+  // ne doit pas perdre la page principale sous la seconde sauvegarde.
+  void enter_alt_screen();
+  void leave_alt_screen();
+  // Lisible par le scrollback (tâche 7), qui ne doit RIEN recevoir de
+  // l'écran alterné : le défilement de `vim` n'appartient pas à
+  // l'historique du shell.
+  bool alt_screen() const { return alt_; }
+
   void print(char32_t cp);
 
   // Les commandes de mouvement du C0.
@@ -174,8 +196,21 @@ class Screen {
   bool wrap_pending_ = false;
   int top_ = 0;
   int bottom_ = 0;  // posé à rows_ - 1 par le constructeur
+  bool autowrap_ = true;
   Style pen_{};
   SavedCursor saved_{};
+  // La page principale mise de côté pendant que l'écran alterné est
+  // actif, et le curseur qu'elle attend. Son emplacement de sauvegarde est
+  // SÉPARÉ de celui de DECSC : une application qui sauve son curseur dans
+  // l'écran alterné ne doit pas écraser celui qui l'attend dehors.
+  bool alt_ = false;
+  std::vector<ScreenCell> parked_;
+  SavedCursor parked_cursor_{};
+  // Le DECSC de la page principale, mis à l'abri pendant que l'écran
+  // alterné a le sien. C'est ce que fait xterm, qui tient un emplacement
+  // par tampon -- sans cela le `\0337` d'un `vim` écrase la position que
+  // le shell avait sauvée, et son `\0338` d'après le ramène ailleurs.
+  SavedCursor parked_decsc_{};
   // Ce que rend une lecture HORS grille. Rien à voir avec erased() : ce
   // n'est pas un effacement, c'est l'absence de cellule, et elle ne prend
   // donc jamais le fond courant.

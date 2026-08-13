@@ -124,6 +124,36 @@ void Screen::scroll_slice_down(int top, int bottom, int n) {
             erased());
 }
 
+void Screen::enter_alt_screen() {
+  // Déjà dedans : ne RIEN faire. Un second 1049 rangerait sinon l'écran
+  // alterné par-dessus la page principale, qui serait perdue pour de bon.
+  if (alt_) return;
+  parked_.swap(grid_);
+  grid_.assign(static_cast<size_t>(cols_) * static_cast<size_t>(rows_),
+               erased());
+  parked_cursor_ = SavedCursor{cx_, cy_, wrap_pending_, pen_};
+  // L'écran alterné a son PROPRE emplacement de DECSC, vierge : celui de
+  // la page principale attend dehors.
+  parked_decsc_ = saved_;
+  saved_ = SavedCursor{};
+  alt_ = true;
+}
+
+void Screen::leave_alt_screen() {
+  if (!alt_) return;
+  // L'échange rend la page principale ET laisse l'écran alterné dans
+  // `parked_`, où la prochaine entrée l'écrasera. Rien à libérer : les
+  // deux pages coûtent ce qu'elles coûtent tant que l'invité peut
+  // rebasculer.
+  grid_.swap(parked_);
+  cx_ = parked_cursor_.x;
+  cy_ = parked_cursor_.y;
+  wrap_pending_ = parked_cursor_.wrap_pending;
+  pen_ = parked_cursor_.style;
+  saved_ = parked_decsc_;
+  alt_ = false;
+}
+
 void Screen::print(char32_t cp) {
   const int w = std::max(0, char_width(cp));
   if (w == 0) return;  // combinant ou non imprimable : tâche ultérieure
@@ -132,15 +162,22 @@ void Screen::print(char32_t cp) {
   // pas au moment où la dernière colonne a été écrite. C'est toute la
   // différence entre une ligne de largeur pleine qui s'affiche droite et
   // une qui saute une ligne sur deux.
-  if (wrap_pending_) {
+  // Le retour en attente n'est CONSULTÉ que si le mode 7 est actif. Le
+  // drapeau, lui, reste posé : rallumer le retour automatique juste après
+  // avoir rempli la ligne doit faire descendre le caractère suivant, comme
+  // si le mode n'avait jamais été éteint.
+  if (wrap_pending_ && autowrap_) {
     wrap_pending_ = false;
     cx_ = 0;
     line_feed();
   }
 
   // Un caractère pleine chasse ne se coupe jamais en deux : s'il ne tient
-  // plus, il descend ENTIER.
+  // plus, il descend ENTIER. Sans retour automatique il ne peut ni
+  // descendre ni se couper : il n'est pas écrit du tout. L'écraser sur la
+  // dernière colonne y laisserait une moitié d'idéogramme.
   if (w == 2 && cx_ + 1 >= cols_) {
+    if (!autowrap_) return;
     cx_ = 0;
     line_feed();
   }
