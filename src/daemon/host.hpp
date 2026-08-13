@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sys/types.h>
+
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -49,14 +51,28 @@ inline constexpr uint32_t kGenTimer = 2;
 inline constexpr uint32_t kGenSignal = 3;
 inline constexpr uint32_t kGenFirstDynamic = 16;
 
+// Un enfant surveillé, et la fenêtre à prévenir quand il meurt. La table
+// vit dans la Session parce que la récolte est GLOBALE au processus : le
+// démon reçoit un `SIGCHLD` qui ne dit pas de qui, récolte tout, et doit
+// pouvoir retrouver à qui appartenait chaque pid.
+struct ChildWatch {
+  pid_t pid = -1;
+  WindowId win = 0;
+};
+
 // Le seul objet qui traverse la frontière entre une application et le
 // bureau. Il tient une référence sur SA fenêtre, dont l'adresse est stable
 // parce que les fenêtres vivent derrière des unique_ptr, jamais dans un
 // vector d'objets déplaçables.
 class HostImpl : public Host {
  public:
-  HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen, bool& dirty)
-      : win_(&win), fds_(&fds), gen_(&gen), dirty_(&dirty) {}
+  HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen, bool& dirty,
+           std::vector<ChildWatch>& children)
+      : win_(&win),
+        fds_(&fds),
+        gen_(&gen),
+        dirty_(&dirty),
+        children_(&children) {}
 
   void set_title(std::string title) override;
   void request_close() override;
@@ -64,6 +80,7 @@ class HostImpl : public Host {
 
   uint64_t watch(int fd, uint32_t events) override;
   void unwatch(uint64_t token) override;
+  void watch_child(pid_t pid) override;
 
   // Cette clé désigne-t-elle encore une surveillance vivante ? Répondre non
   // est tout l'intérêt des générations : un événement livré par epoll pour
@@ -85,6 +102,7 @@ class HostImpl : public Host {
   FdRegistrar* fds_;
   uint32_t* gen_;
   bool* dirty_;
+  std::vector<ChildWatch>* children_;
   std::vector<std::pair<uint64_t, int>> watched_;
 };
 

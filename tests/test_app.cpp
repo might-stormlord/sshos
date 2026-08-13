@@ -4,6 +4,8 @@
 #include "app/app.hpp"
 #include "app/catalog.hpp"
 #include "apps/bloc.hpp"
+#include <vector>
+
 #include "harness.hpp"
 #include "render/surface.hpp"
 
@@ -36,6 +38,8 @@ struct FakeHost : Host {
   void invalidate() override { ++invalidations; }
   uint64_t watch(int, uint32_t) override { return next_token++; }
   void unwatch(uint64_t) override {}
+  void watch_child(pid_t p) override { children.push_back(p); }
+  std::vector<pid_t> children;
 };
 
 std::string row_of(const Surface& s, int y) { return s.text_row(y); }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sys/types.h>
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -39,6 +41,12 @@ class Host {
   virtual void invalidate() = 0;
   virtual uint64_t watch(int fd, uint32_t events) = 0;
   virtual void unwatch(uint64_t token) = 0;
+
+  // « Préviens-moi quand CET enfant meurt. » L'application ne récolte
+  // jamais elle-même : `waitpid` est global au processus, et deux
+  // applications qui appelleraient `waitpid(-1)` chacune de leur côté se
+  // voleraient mutuellement leurs enfants.
+  virtual void watch_child(pid_t pid) = 0;
 };
 
 // Le contrat applicatif du projet, valable jusqu'au jalon 6. Tout est
@@ -63,6 +71,10 @@ class App {
   virtual void on_mouse(const MouseEvent& m) { (void)m; }
 
   virtual void on_resize(Size s) { (void)s; }
+
+  // L'enfant confié à `Host::watch_child()` est mort. `status` est celui
+  // de `waitpid`, brut : c'est l'application qui sait comment le présenter.
+  virtual void on_child_exit(int status) { (void)status; }
 
   // Une commande nommée venue du menu. Le bureau ne connaît pas les
   // applications ; il leur transmet une chaîne, et celle qui la comprend

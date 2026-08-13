@@ -6,6 +6,7 @@
 
 #include "common/platform.hpp"
 #include "daemon/host.hpp"
+#include "daemon/reap.hpp"
 #include "input/events.hpp"
 #include "input/shortcuts.hpp"
 #include "render/profile.hpp"
@@ -23,7 +24,7 @@
 
 namespace sshos {
 
-class Session {
+class Session : public ChildSink {
  public:
   // Le registrar est la seule chose que la session sache de l'epoll du
   // démon : elle lui tend des clés, il les rend telles quelles.
@@ -52,6 +53,22 @@ class Session {
   // fenêtre ne reconnaît s'y jette sans bruit -- c'est le cas NORMAL d'un
   // réveil en retard sur une surveillance déjà retirée.
   void on_fd_event(uint64_t key, uint32_t events);
+
+  // Un enfant est mort. Le pid est cherché dans la table ; s'il n'y est
+  // pas -- enfant d'une fenêtre déjà fermée, ou pid qui ne nous appartient
+  // pas -- il n'y a rien à faire, et surtout rien à signaler : c'est un
+  // cas NORMAL.
+  void on_child_exit(pid_t pid, int status) override;
+
+  // Diagnostics réservés aux tests, comme `paste_scan_bytes_for_tests()`
+  // dans `input/parser.hpp` : l'acheminement d'une mort d'enfant n'a AUCUN
+  // effet observable de l'extérieur -- il appelle une méthode d'une
+  // application que la session ne connaît pas -- et le seul moyen de le
+  // vérifier sans monter un démon entier est de tendre la fenêtre. Aucun
+  // code de production ne doit les lire.
+  Window* window_for_tests(WindowId id);
+  size_t watched_children_for_tests() const { return children_.size(); }
+  void close_window_for_tests(WindowId id);
 
   // Relève -- et consomme -- la demande de repeint que la session a pu
   // former sans qu'aucune touche n'ait été frappée. Le démon l'interroge
@@ -161,6 +178,10 @@ class Session {
   // application qui referme et rouvre son tuyau -- et récupère le même
   // numéro de descripteur du noyau -- obtienne malgré tout une clé neuve.
   uint32_t fd_gen_ = kGenFirstDynamic;
+  // Les enfants surveillés, tous fenêtres confondues. La récolte est
+  // globale au processus : le démon apprend qu'un pid est mort sans savoir
+  // à qui il était, et c'est ici qu'on le retrouve.
+  std::vector<ChildWatch> children_;
 
   // Le panneau porte son bord et son épaisseur ; la zone de travail s'en
   // déduit. Ancré en bas par défaut : les trois autres bords marchent, mais

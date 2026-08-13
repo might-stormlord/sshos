@@ -39,6 +39,10 @@ void HostImpl::unwatch(uint64_t token) {
   watched_.erase(it);
 }
 
+void HostImpl::watch_child(pid_t pid) {
+  children_->push_back(ChildWatch{pid, win_->id});
+}
+
 bool HostImpl::owns(uint64_t key) const {
   return std::any_of(watched_.begin(), watched_.end(),
                      [key](const auto& p) { return p.first == key; });

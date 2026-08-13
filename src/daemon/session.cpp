@@ -323,7 +323,7 @@ WindowId Session::open_from_catalog(std::string_view id) {
   // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
-  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_);
+  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_);
   w->app->attach(*w->host);
   return w->id;
 }
@@ -364,7 +364,39 @@ void Session::close_window(Window& w) {
   // pour ses propres surveillances (Window déclare `host` avant `app`,
   // donc l'hôte lui survit) ; ceci couvre celles qu'elle aurait oubliées.
   if (w.host != nullptr) static_cast<HostImpl*>(w.host.get())->unwatch_all();
+  // Les enfants de cette fenêtre ne sont plus attendus par personne. Les
+  // laisser dans la table ferait livrer leur mort à une fenêtre disparue,
+  // ou pire, à celle qui reprendrait son numéro.
+  children_.erase(std::remove_if(children_.begin(), children_.end(),
+                                 [id = w.id](const ChildWatch& c) {
+                                   return c.win == id;
+                                 }),
+                  children_.end());
   wm_.close(w.id);
+}
+
+Window* Session::window_for_tests(WindowId id) { return wm_.find(id); }
+
+void Session::close_window_for_tests(WindowId id) {
+  Window* w = wm_.find(id);
+  if (w != nullptr) close_window(*w);
+}
+
+void Session::on_child_exit(pid_t pid, int status) {
+  const auto it = std::find_if(children_.begin(), children_.end(),
+                               [pid](const ChildWatch& c) { return c.pid == pid; });
+  if (it == children_.end()) return;
+  const WindowId win = it->win;
+  // L'entrée part AVANT de prévenir l'application : celle-ci a le droit de
+  // relancer un enfant depuis son `on_child_exit()`, et l'itérateur ne
+  // survivrait pas au `push_back` que ça provoquerait.
+  children_.erase(it);
+
+  Window* w = wm_.find(win);
+  if (w == nullptr || w->app == nullptr) return;
+  w->app->on_child_exit(status);
+  // Ce que l'application vient d'apprendre change ce qu'elle affiche.
+  dirty_ = true;
 }
 
 void Session::on_fd_event(uint64_t key, uint32_t events) {

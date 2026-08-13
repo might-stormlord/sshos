@@ -20,6 +20,7 @@
 #include "common/platform.hpp"
 #include "common/proto.hpp"
 #include "daemon/host.hpp"
+#include "daemon/reap.hpp"
 #include "daemon/session.hpp"
 #include "input/parser.hpp"
 #include "render/diff.hpp"
@@ -291,9 +292,19 @@ int run_daemon(std::string_view socket_name) {
 
       if (key == make_key(0, kGenSignal)) {
         signalfd_siginfo si{};
+        bool child_died = false;
+        // DEUX drainages, et les deux comptent. Celui-ci vide le
+        // `signalfd` jusqu'a EAGAIN : un enregistrement laisse derriere
+        // lui laisserait epoll nous rappeler en boucle.
         while (::read(sigfd.get(), &si, sizeof si) == sizeof si) {
           if (si.ssi_signo == SIGTERM || si.ssi_signo == SIGINT) running = false;
+          if (si.ssi_signo == SIGCHLD) child_died = true;
         }
+        // Et celui-la recolte TOUS les morts, pas seulement celui que
+        // l'enregistrement nommait : les signaux standards ne sont pas mis
+        // en file, et trois enfants morts entre deux lectures n'en
+        // produisent qu'un seul.
+        if (child_died) reap_children(session);
         continue;
       }
 

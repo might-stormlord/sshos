@@ -199,6 +199,7 @@ TEST(window_destroys_its_app_before_its_host) {
     void invalidate() override {}
     uint64_t watch(int, uint32_t) override { return 0; }
     void unwatch(uint64_t) override {}
+    void watch_child(pid_t) override {}
   };
   struct NoisyApp : App {
     ~NoisyApp() override { app_died = ++order; }
