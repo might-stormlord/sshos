@@ -4,8 +4,15 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** au commit `4aa774f`, branche `m1-noyau`, 189 tests au vert.
-> Le jalon 1 n'a plus aucune dette ouverte (le round `EPOLLHUP` du §7.1 est soldé).
+> **Dernière mise à jour :** 13 août 2026, branche `m1-noyau`, **733 tests au vert**.
+> **Les jalons 1, 2 et 3 sont livrés.** Le §3 ci-dessous donne la position exacte.
+>
+> ⚠️ Les §4 à §9 (contraintes, harnais, décisions, pièges d'environnement) ont été
+> écrits au jalon 1 et restent **entièrement valides** — ils ne parlent pas
+> d'avancement. Le §6, en revanche, ne décrit que le contenu du jalon 1 : pour les
+> jalons 2 et 3, la source de vérité est leur plan respectif dans
+> `docs/superpowers/plans/`, dont les cases cochées portent le commit, le nombre de
+> tests et le nombre de mutations de chaque tâche.
 
 ---
 
@@ -93,11 +100,22 @@ Source : `docs/superpowers/specs/2026-08-10-ssh-os-design.md` §15.
 | Jalon | Contenu | Sortie visible | État |
 |---|---|---|---|
 | **1** | Rendu, diff, protocole, client, démon | Une boîte colorée à l'écran, à travers SSH | ✅ **livré** |
-| **2** | WM, panneau, menu, application factice | Tout le geste testable sans PTY | ⬜ **à faire, plan non écrit** |
-| 3 | Terminal | *Le projet devient utilisable pour de vrai* | ⬜ |
-| 4 | Gestionnaire de fichiers | | ⬜ |
+| **2** | WM, panneau, menu, application factice | Tout le geste testable sans PTY | ✅ **livré** |
+| **3** | Terminal | *Le projet devient utilisable pour de vrai* | ✅ **livré** |
+| 4 | Gestionnaire de fichiers | | ⬜ **à faire, plan non écrit** |
 | 5 | Moniteur système | | ⬜ |
 | 6 | Éditeur | | ⬜ |
+
+Le jalon 3 tient sa promesse, et elle a été vérifiée à la main : `vim`, `htop`,
+`less` et un `tmux` imbriqué tournent dans une fenêtre, une compilation survit à
+trois `SIGWINCH` d'affilée, et **le shell survit à la mort du client**. Voir la
+liste de vérification à la fin de
+`docs/superpowers/plans/2026-08-12-ssh-os-m3-terminal.md`.
+
+**Le rythme d'une tâche**, invariant depuis le jalon 1 : code + tests écrits
+d'abord (le rouge est constaté, pas supposé), commit `wip(...) avant campagne de
+mutation`, campagne, tests ajoutés pour chaque survivante, commit
+`feat(...) (jalon N, tache M)`, puis `docs(mN): tache M cochee`.
 
 Volume total estimé : 12 000 à 15 000 lignes. Le jalon 1 en représente **10 287** (52
 fichiers `src/` + `tests/`), soit l'essentiel de la plomberie.
@@ -347,13 +365,20 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 10. Prochaine étape
 
-**Écrire le plan du jalon 2 : « WM, panneau, menu, application factice ».** Sortie visible
-attendue : *tout le geste testable sans PTY* — fenêtres déplaçables et redimensionnables,
-barre des tâches dockable en bas **et** à gauche, menu, applications épinglables.
+**Écrire le plan du jalon 4 : le gestionnaire de fichiers.** Les jalons 1 à 3 sont
+livrés ; il n'y a plus aucune dette ouverte sur eux.
 
-Le jalon 2 s'appuie intégralement sur le jalon 1 : les fenêtres seront des `View` sur la
-`Surface`, le panneau un consommateur du même diffeur, les gestes des `MouseEvent` déjà
-parsés. C'est donc surtout du dessin et de la logique de geste, pas de la plomberie.
+Ce que les trois premiers jalons ont appris, et qui vaut pour la suite :
 
-Le round `EPOLLHUP` (§7.1) est **soldé** : plus rien ne reste en travers avant d'attaquer le
-jalon 2. Le plan reste à écrire.
+1. **Une méthode née sans appelant ne se signale qu'en faisant tourner le vrai
+   logiciel.** Trois fois : `Decoder::failed()` au jalon 1, la garde `A2`, et
+   `InputParser::timeout()` — dont l'absence rendait `vim` inutilisable, trouvée
+   par une sonde bout-en-bout et non par 732 tests. Toute fin de jalon doit
+   inclure une sonde qui lance de VRAIS programmes.
+2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
+   tâches du jalon 3 ont débordé de leur périmètre annoncé, toujours pour cette
+   raison. Le prévoir en écrivant le plan du jalon 4.
+3. **Une mutation survivante est presque toujours un trou de test, pas une
+   équivalence.** Sur 246 mutations jouées au jalon 3, 2 seulement étaient
+   réellement équivalentes ; les autres ont chacune montré un cas que les tests
+   n'atteignaient pas.
