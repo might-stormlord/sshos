@@ -263,7 +263,13 @@ C'est le démon qui répond, en écrivant lui-même sur le maître du PTY. Relay
 
 **Tests :** `\033[6n` après un `CUP` rend la position posée ; `\033[c` rend une identité stable ; la réponse part sur le **maître**, jamais vers le client.
 
-- [ ] Tâche 9 livrée : tests, mutations, commit
+- [x] Tâche 9 livrée : tests, mutations, commit — `5933f43`, 14 tests, 26 mutations
+
+Deux requêtes hors énoncé ont été traitées, parce qu'une question sans
+réponse bloque son auteur : `CSI > c` (seconde identité) et `CSI ? 6 n`
+(position étendue). `Modes` gagne au passage **une** table unique, en
+pointeurs sur membre, partagée par `set`, `knows` et `get` — `DECRQM` en
+aurait sinon imposé une troisième lecture.
 
 ## Tâche 10 — Le jeu de caractères DEC
 
