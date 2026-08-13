@@ -330,6 +330,10 @@ bool Files::wants_cursor(Pos& out) const {
 void Files::render(View v) {
   const int w = v.w();
   const int h = v.h();
+  // Garde DÉFENSIVE, non discriminable : la `View` clippe déjà tout ce
+  // qu'on lui écrit, donc peindre une fenêtre de largeur nulle ne fait
+  // rien de mal. Elle reste parce qu'elle évite de parcourir la liste pour
+  // rien, et parce qu'un futur calcul de géométrie pourrait, lui, diviser.
   if (w <= 0 || h <= 0) return;
 
   // La barre de chemin. En gras plutôt qu'en couleur : elle doit se
@@ -341,6 +345,9 @@ void Files::render(View v) {
   const int rows = rows_for_list();
   for (int i = 0; i < rows; ++i) {
     const size_t idx = top_ + static_cast<size_t>(i);
+    // `break` plutôt que `continue` : les index ne font que croître, donc
+    // les deux donnent le même résultat -- la mutation est équivalente. On
+    // s'arrête parce que c'est ce que le code veut dire.
     if (idx >= visible_.size()) break;
     const DirEntry& e = visible_[idx];
 

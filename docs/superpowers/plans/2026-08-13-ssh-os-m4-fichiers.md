@@ -97,7 +97,12 @@ Barre de chemin en haut, liste au milieu, ligne d'état en bas (message d'erreur
 
 **Tests :** un chemin trop long garde sa fin ; un nom pleine chasse élidé ne laisse pas de demi-caractère ; la sélection est bien celle qui porte l'inverse vidéo ; goldens d'un écran de gestionnaire.
 
-- [ ] Tâche 4 livrée : tests, mutations, commit
+- [x] Tâche 4 livrée : tests, mutations, commit — `5ba2671`, 13 tests, 23 mutations
+  (2 équivalentes)
+
+**Faite AVANT la tâche 3**, délibérément : sans rendu, l'application était au
+catalogue et ne peignait rien. Un point d'arrêt doit toujours laisser quelque
+chose d'utilisable.
 
 ## Tâche 5 — Vérification manuelle
 
