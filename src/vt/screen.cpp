@@ -145,6 +145,68 @@ void Screen::scroll_slice_down(int top, int bottom, int n) {
             erased());
 }
 
+void Screen::reshape(std::vector<ScreenCell>& g, int cols, int rows) const {
+  std::vector<ScreenCell> out(
+      static_cast<size_t>(cols) * static_cast<size_t>(rows), erased());
+  const int keep_rows = std::min(rows, rows_);
+  const int keep_cols = std::min(cols, cols_);
+  for (int y = 0; y < keep_rows; ++y) {
+    for (int x = 0; x < keep_cols; ++x) {
+      out[static_cast<size_t>(y) * static_cast<size_t>(cols) +
+          static_cast<size_t>(x)] =
+          g[static_cast<size_t>(y) * static_cast<size_t>(cols_) +
+            static_cast<size_t>(x)];
+    }
+    // La coupe peut tomber ENTRE les deux moitiés d'une pleine chasse. Sa
+    // moitié gauche resterait seule contre le bord droit, et le rendu
+    // peindrait un demi idéogramme.
+    ScreenCell& edge = out[static_cast<size_t>(y) * static_cast<size_t>(cols) +
+                           static_cast<size_t>(keep_cols - 1)];
+    if (edge.width == 2) edge = erased();
+  }
+  g.swap(out);
+}
+
+void Screen::resize(int cols, int rows) {
+  cols = std::max(1, cols);
+  rows = std::max(1, rows);
+  // Redemander la taille qu'on a déjà n'est pas un CHANGEMENT de taille :
+  // la région de défilement que l'invité vient de poser reste en place.
+  if (cols == cols_ && rows == rows_) return;
+  const bool width_changed = cols != cols_;
+
+  if (alt_) {
+    // L'écran alterné est JETÉ, et la page principale qui attend dehors
+    // est recoupée comme si elle était à l'écran.
+    reshape(parked_, cols, rows);
+    grid_.assign(static_cast<size_t>(cols) * static_cast<size_t>(rows),
+                 erased());
+  } else {
+    reshape(grid_, cols, rows);
+    // `parked_` ne porte alors que le résidu d'un écran alterné déjà
+    // quitté : la prochaine entrée l'écrase de toute façon.
+  }
+
+  cols_ = cols;
+  rows_ = rows;
+
+  cx_ = std::clamp(cx_, 0, cols_ - 1);
+  cy_ = std::clamp(cy_, 0, rows_ - 1);
+  // Le retour en attente parlait d'une géométrie qui n'existe plus.
+  wrap_pending_ = false;
+  // Le curseur que 1049 garde de côté a été sauvé dans cette même
+  // géométrie disparue. `saved_`, lui, n'a pas besoin d'être borné ici :
+  // `restore_cursor()` le borne au moment de s'en servir.
+  parked_cursor_.x = std::clamp(parked_cursor_.x, 0, cols_ - 1);
+  parked_cursor_.y = std::clamp(parked_cursor_.y, 0, rows_ - 1);
+
+  top_ = 0;
+  bottom_ = rows_ - 1;
+  // Les taquets sont indexés PAR COLONNE : changer la largeur les refait,
+  // changer la seule hauteur ne les concerne pas.
+  if (width_changed) reset_tabs();
+}
+
 void Screen::enter_alt_screen() {
   // Déjà dedans : ne RIEN faire. Un second 1049 rangerait sinon l'écran
   // alterné par-dessus la page principale, qui serait perdue pour de bon.

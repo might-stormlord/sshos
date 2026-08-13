@@ -100,6 +100,22 @@ class Screen {
   // alterné -- voir `scroll_up()`.
   void set_scrollback(Scrollback* sb) { scrollback_ = sb; }
 
+  // LE REDIMENSIONNEMENT. La politique est écrite noir sur blanc dans la
+  // spec (§13.6), parce que ne pas la décider est la recette exacte du
+  // bogue « mon terminal est mélangé après un redimensionnement » :
+  //
+  //   rétrécir      -> TRONCATURE, jamais de reflow
+  //   élargir       -> complété de blancs, peints du fond courant
+  //   écran alterné -> JETÉ, l'invité le régénère en recevant SIGWINCH
+  //   curseur       -> contraint dans les nouvelles bornes
+  //   région        -> remise à pleine hauteur à TOUT changement de taille
+  //
+  // Le reflow invaliderait la position du curseur et tous les décalages du
+  // scrollback, et interagit en plus avec les pleines chasses : c'est un
+  // projet en soi, pas une option de v1. L'historique déjà rangé n'est donc
+  // pas retouché -- chaque ligne y garde la largeur qu'elle avait.
+  void resize(int cols, int rows);
+
   void print(char32_t cp);
 
   // Les commandes de mouvement du C0.
@@ -172,6 +188,11 @@ class Screen {
   // Le fond SEUL : une cellule sans glyphe ne montre rien d'autre. Y
   // recopier le premier plan ou les attributs ferait souligner le vide.
   ScreenCell erased() const;
+
+  // Recoupe une grille aux dimensions demandées, en lisant `cols_`/`rows_`
+  // comme les ANCIENNES : ce qui dépasse est coupé, ce qui manque est
+  // complété. À appeler avant de poser les nouvelles dimensions.
+  void reshape(std::vector<ScreenCell>& g, int cols, int rows) const;
 
   ScreenCell& cell(int x, int y);
   void scroll_up();    // le haut s'en va, une ligne vierge en bas
