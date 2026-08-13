@@ -1,11 +1,94 @@
 #include "apps/files/files.hpp"
 
 #include <algorithm>
+#include <vector>
 
 #include "common/utf8.hpp"
 #include "render/surface.hpp"
+#include "render/width.hpp"
 
 namespace sshos {
+namespace {
+
+// Le caractère d'élision. Un seul, et de largeur un : trois points en
+// coûteraient trois, sur une ligne où chaque colonne compte.
+constexpr char kEllipsis[] = "\u2026";
+
+// La largeur d'AFFICHAGE d'une chaîne UTF-8 : une pleine chasse en vaut
+// deux. Compter les octets donnerait des colonnes fausses dès le premier
+// accent, et compter les points de code dès le premier idéogramme.
+int display_width(std::string_view s) {
+  int w = 0;
+  size_t i = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    const size_t used = utf8_decode(s, i, cp);
+    if (used == 0) break;
+    i += used;
+    w += std::max(0, char_width(cp));
+  }
+  return w;
+}
+
+// Élide en gardant la FIN. C'est la fin d'un chemin qui porte
+// l'information -- « …/paquet/exemples » se lit, « /usr/share/d… » ne dit
+// rien.
+std::string elide_left(const std::string& s, int width) {
+  if (width <= 0) return {};
+  if (display_width(s) <= width) return s;
+  if (width == 1) return kEllipsis;
+
+  // On remonte depuis la fin tant que ça tient, en s'arrêtant sur une
+  // frontière de caractère : couper au milieu d'une pleine chasse
+  // laisserait une moitié orpheline.
+  const int room = width - 1;  // la place du caractère d'élision
+  std::vector<size_t> starts;
+  size_t i = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    const size_t used = utf8_decode(s, i, cp);
+    if (used == 0) break;
+    starts.push_back(i);
+    i += used;
+  }
+  int w = 0;
+  size_t cut = s.size();
+  for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
+    char32_t cp = 0;
+    utf8_decode(s, *it, cp);
+    const int cw = std::max(0, char_width(cp));
+    if (w + cw > room) break;
+    w += cw;
+    cut = *it;
+  }
+  return std::string(kEllipsis) + s.substr(cut);
+}
+
+// Élide en gardant le DÉBUT : pour un nom de fichier, c'est le début qui
+// distingue.
+std::string elide_right(const std::string& s, int width) {
+  if (width <= 0) return {};
+  if (display_width(s) <= width) return s;
+  if (width == 1) return kEllipsis;
+
+  const int room = width - 1;
+  int w = 0;
+  size_t i = 0;
+  size_t cut = 0;
+  while (i < s.size()) {
+    char32_t cp = 0;
+    const size_t used = utf8_decode(s, i, cp);
+    if (used == 0) break;
+    const int cw = std::max(0, char_width(cp));
+    if (w + cw > room) break;
+    w += cw;
+    i += used;
+    cut = i;
+  }
+  return s.substr(0, cut) + kEllipsis;
+}
+
+}  // namespace
 
 Files::Files() : Files("/") {}
 
@@ -244,6 +327,58 @@ bool Files::wants_cursor(Pos& out) const {
   return true;
 }
 
-void Files::render(View v) { (void)v; }
+void Files::render(View v) {
+  const int w = v.w();
+  const int h = v.h();
+  if (w <= 0 || h <= 0) return;
+
+  // La barre de chemin. En gras plutôt qu'en couleur : elle doit se
+  // distinguer sur les seize couleurs comme sur les 16 millions.
+  Style path_style;
+  path_style.attrs = attr::Bold;
+  v.text(0, 0, elide_left(listing_.path, w), path_style);
+
+  const int rows = rows_for_list();
+  for (int i = 0; i < rows; ++i) {
+    const size_t idx = top_ + static_cast<size_t>(i);
+    if (idx >= visible_.size()) break;
+    const DirEntry& e = visible_[idx];
+
+    Style st;
+    switch (e.kind) {
+      case EntryKind::Dir:
+        st.fg = Color::indexed(4);
+        break;
+      case EntryKind::Link:
+        st.fg = Color::indexed(6);
+        break;
+      default:
+        break;
+    }
+    const int y = 1 + i;
+    if (idx == sel_) {
+      // La ligne ENTIÈRE porte l'inverse vidéo, pas seulement le nom : une
+      // barre de sélection qui s'arrête au dernier caractère se lit comme
+      // un mot surligné, pas comme une ligne choisie.
+      st.attrs |= attr::Reverse;
+      v.fill(Rect{0, y, w, 1}, st);
+    }
+    v.text(0, y, elide_right(e.name, w), st);
+  }
+
+  // La ligne d'état : l'erreur si elle existe, sinon le filtre en cours.
+  // Sans elle, une liste réduite par un filtre passe pour un dossier
+  // presque vide.
+  Style status_style;
+  std::string bottom;
+  if (!status_.empty()) {
+    status_style.fg = Color::indexed(1);
+    bottom = status_;
+  } else if (!filter_.empty()) {
+    status_style.attrs = attr::Bold;
+    bottom = "filtre: " + filter_;
+  }
+  if (!bottom.empty()) v.text(0, h - 1, elide_right(bottom, w), status_style);
+}
 
 }  // namespace sshos

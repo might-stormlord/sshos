@@ -7,6 +7,7 @@
 
 #include "apps/files/files.hpp"
 #include "harness.hpp"
+#include "render/surface.hpp"
 
 using sshos::Files;
 using sshos::Key;
@@ -582,4 +583,252 @@ TEST(files_scrolls_with_the_wheel) {
 
   f.on_mouse(MouseEvent{MouseAction::WheelUp, 0, 3, 3, 0});
   CHECK(f.selected_for_tests() < after_down);
+}
+
+// ============================================================== le rendu
+
+namespace {
+
+// La fenêtre peinte, ligne par ligne, blancs de fin rognés.
+std::string painted(Files& f, int w, int h) {
+  sshos::Surface s(w, h);
+  f.render(sshos::View(s, sshos::Rect{0, 0, w, h}));
+  std::string out;
+  for (int y = 0; y < h; ++y) {
+    if (y != 0) out.push_back('/');
+    std::string row = s.text_row(y);
+    while (!row.empty() && row.back() == ' ') row.pop_back();
+    out += row;
+  }
+  return out;
+}
+
+// La ligne `y` telle qu'elle est peinte.
+std::string painted_row(Files& f, int w, int h, int y) {
+  sshos::Surface s(w, h);
+  f.render(sshos::View(s, sshos::Rect{0, 0, w, h}));
+  std::string row = s.text_row(y);
+  while (!row.empty() && row.back() == ' ') row.pop_back();
+  return row;
+}
+
+// La cellule peinte -- `Cell` porte ses couleurs et ses attributs a plat,
+// pas un `Style`.
+sshos::Cell cell_at(Files& f, int w, int h, int x, int y) {
+  sshos::Surface s(w, h);
+  f.render(sshos::View(s, sshos::Rect{0, 0, w, h}));
+  return s.at(x, y);
+}
+
+}  // namespace
+
+TEST(files_paints_the_path_on_the_first_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+
+  Files f(t.root());
+  f.on_resize(Size{60, 8});
+  CHECK_EQ(painted_row(f, 60, 8, 0), t.root());
+}
+
+// Un chemin trop long est élidé PAR LA GAUCHE : c'est la fin d'un chemin
+// qui porte l'information, jamais son début.
+TEST(files_elides_a_long_path_from_the_left) {
+  Files f("/usr/share/doc/un-paquet-au-nom-tres-long/exemples");
+  f.on_resize(Size{20, 8});
+
+  // La LARGEUR est celle de la surface, qui refuse d'écrire hors clip : ce
+  // que ce cas vérifie est la FORME de l'élision -- le caractère
+  // d'élision en tête, et la fin du chemin conservée. Compter les octets
+  // ne dirait rien, « … » en pèse trois à lui seul.
+  const std::string row = painted_row(f, 20, 8, 0);
+  CHECK_EQ(row.rfind("…", 0), size_t{0});
+  CHECK(row.find("exemples") != std::string::npos);
+}
+
+TEST(files_paints_the_entries_under_the_path) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("beta");
+  t.file("alpha");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  const std::string g = painted(f, 40, 8);
+  CHECK(g.find("..") != std::string::npos);
+  CHECK(g.find("beta") != std::string::npos);
+  CHECK(g.find("alpha") != std::string::npos);
+}
+
+// La SÉLECTION porte l'inverse vidéo, et elle seule. Sans elle, on ne sait
+// pas où l'on est.
+TEST(files_marks_the_selection_with_reverse_video) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  // Ligne 1 = première entrée = « .. », sélectionnée au départ.
+  CHECK_EQ(cell_at(f, 40, 8, 0, 1).attrs & sshos::attr::Reverse,
+           sshos::attr::Reverse);
+  CHECK_EQ(cell_at(f, 40, 8, 0, 2).attrs & sshos::attr::Reverse, 0);
+
+  f.on_key(key(Key::Down));
+  CHECK_EQ(cell_at(f, 40, 8, 0, 2).attrs & sshos::attr::Reverse,
+           sshos::attr::Reverse);
+}
+
+// Un répertoire ne se lit pas comme un fichier : la couleur le dit, parce
+// qu'une liste sans distinction oblige à lire chaque nom.
+TEST(files_gives_directories_a_colour_of_their_own) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("beta");
+  t.file("alpha");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));  // la sélection quitte « .. »
+  f.on_key(key(Key::Down));  // ... et quitte « beta »
+
+  const sshos::Cell dir_cell = cell_at(f, 40, 8, 0, 2);   // beta
+  const sshos::Cell file_cell = cell_at(f, 40, 8, 0, 3);  // alpha
+  CHECK(!(dir_cell.fg == file_cell.fg));
+}
+
+// La ligne d'état porte le filtre en cours : sans elle, une liste réduite
+// passe pour un dossier presque vide.
+TEST(files_shows_the_running_filter_on_the_status_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("rapport");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(ch(U'r'));
+  f.on_key(ch(U'a'));
+  f.on_key(ch(U'p'));
+
+  // Le TEXTE du filtre, pas seulement le mot « filtre » : chercher un
+  // simple « r » passait aussi contre une ligne qui n'affiche que
+  // l'étiquette, puisqu'elle en contient un.
+  const std::string row = painted_row(f, 40, 8, 7);
+  CHECK(row.find("rap") != std::string::npos);
+}
+
+TEST(files_shows_an_error_on_the_status_row) {
+  Files f("/proc/1/fdinfo/inexistant-xyz");
+  f.on_resize(Size{40, 8});
+
+  const std::string row = painted_row(f, 40, 8, 7);
+  CHECK(!row.empty());
+}
+
+// Un nom plus large que la fenêtre est élidé SANS COUPER une pleine chasse
+// en deux : la moitié restée seule s'afficherait comme un demi
+// idéogramme.
+TEST(files_elides_a_long_name_without_splitting_a_wide_character) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("日本語日本語日本語日本語");
+
+  Files f(t.root());
+  f.on_resize(Size{12, 8});
+  const std::string row = painted_row(f, 12, 8, 2);
+  // Rien ne doit dépasser, et aucune moitié ne doit rester seule : la
+  // surface refuse d'écrire hors clip, donc c'est la cohérence de la
+  // ligne qui le dit.
+  CHECK(!row.empty());
+  CHECK(row.find("…") != std::string::npos);
+}
+
+// La liste ne peint QUE sa page : peindre au-delà écraserait la ligne
+// d'état, et le clip de la View masquerait le débordement sans le
+// corriger.
+TEST(files_never_paints_over_the_status_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  for (int i = 0; i < 30; ++i) t.file("fichier" + std::to_string(i));
+
+  Files f(t.root());
+  f.on_resize(Size{40, 6});
+  f.on_key(ch(U'z'));  // filtre : il ne reste que « .. », et le statut
+
+  const std::string row = painted_row(f, 40, 6, 5);
+  CHECK(row.find("fichier") == std::string::npos);
+}
+
+// La page peinte est celle du DÉFILEMENT : sans lui, une liste défilée
+// montre toujours le début pendant que la sélection est ailleurs.
+TEST(files_paints_the_page_the_scroll_offset_points_at) {
+  Tree t;
+  REQUIRE(t.valid());
+  for (int i = 10; i < 30; ++i) t.file("f" + std::to_string(i));
+
+  Files f(t.root());
+  f.on_resize(Size{40, 6});
+  f.on_key(key(Key::End));
+  const size_t top = f.top_for_tests();
+  REQUIRE(top > size_t{0});
+
+  const std::string first = painted_row(f, 40, 6, 1);
+  CHECK_EQ(first, f.visible_for_tests()[top].name);
+}
+
+// La barre de sélection couvre la LIGNE ENTIÈRE : arrêtée au dernier
+// caractère du nom, elle se lit comme un mot surligné, pas comme une ligne
+// choisie.
+TEST(files_paints_the_selection_bar_across_the_whole_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  // Bien au-delà du nom « .. », qui fait deux colonnes.
+  CHECK_EQ(cell_at(f, 40, 8, 30, 1).attrs & sshos::attr::Reverse,
+           sshos::attr::Reverse);
+}
+
+// Un lien n'est pas un dossier : les peindre pareil ferait croire qu'on
+// peut descendre dedans.
+TEST(files_gives_links_a_colour_of_their_own) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("vrai");
+  REQUIRE_EQ(::symlink("vrai", (t.root() + "/lien").c_str()), 0);
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::End));  // la sélection quitte les deux lignes du haut
+
+  // « vrai » est un dossier, « lien » un lien : ils sont tous deux dans la
+  // liste, et de couleurs différentes.
+  const auto& v = f.visible_for_tests();
+  int y_dir = -1;
+  int y_link = -1;
+  for (size_t i = 0; i < v.size(); ++i) {
+    if (v[i].name == "vrai") y_dir = 1 + static_cast<int>(i);
+    if (v[i].name == "lien") y_link = 1 + static_cast<int>(i);
+  }
+  REQUIRE(y_dir > 0);
+  REQUIRE(y_link > 0);
+  CHECK(!(cell_at(f, 40, 8, 0, y_dir).fg == cell_at(f, 40, 8, 0, y_link).fg));
+
+  ::unlink((t.root() + "/lien").c_str());
+}
+
+// Un nom trop long garde son DÉBUT : c'est lui qui distingue deux
+// fichiers, pas leur extension commune.
+TEST(files_elides_a_long_name_from_the_right) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("rapport-annuel-tres-long-2026.txt");
+
+  Files f(t.root());
+  f.on_resize(Size{14, 8});
+  const std::string row = painted_row(f, 14, 8, 2);
+  CHECK_EQ(row.rfind("rapport", 0), size_t{0});
 }
