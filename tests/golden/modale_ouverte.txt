@@ -17,4 +17,4 @@
                                                             
                                                             
                                                             
- ssh_os  Terminal *Bloc *  Batteme~         ^A = aide 10:05 
+ ssh_os  Terminal  Fichiers *Bloc *  Batteme~         10:05 

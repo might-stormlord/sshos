@@ -1,8 +1,8 @@
 ssh_os                                                      
  Terminal         Bloc                            [_][o][x] 
-*Bloc           |taille: 42x12                             |
- Battement      |clics: 1                                  |
-                |resize: 1                                 |
+ Fichiers       |taille: 42x12                             |
+*Bloc           |clics: 1                                  |
+ Battement      |resize: 1                                 |
                 |                                          |
                 |                                          |
                 |                                          |
