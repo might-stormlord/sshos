@@ -1177,3 +1177,22 @@ TEST(files_never_lets_a_control_character_into_a_name) {
 
   CHECK_EQ(f.edit_for_tests(), std::string("aaa"));
 }
+
+// Un dossier VIDE se supprime -- et il faut `rmdir` pour ça : `unlink`
+// refuse un répertoire, et le refus passerait pour la règle « pas de
+// suppression récursive » alors que ce dossier-ci n'a rien dedans.
+TEST(files_deletes_an_empty_directory) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string d = t.dir("vide");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("vide"));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  CHECK(!exists(d));
+  CHECK_EQ(f.status_for_tests(), std::string(""));
+}

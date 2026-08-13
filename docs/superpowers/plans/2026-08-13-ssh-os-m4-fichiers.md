@@ -85,7 +85,8 @@ refaire aux tâches 3 et 4.
 
 **Tests :** un fichier renommé porte son nouveau nom sur le disque ; le nom déjà pris est refusé et l'ancien survit ; la confirmation refusée laisse le fichier ; acceptée, le fichier n'est plus là ; `..` refuse les deux gestes.
 
-- [ ] Tâche 3 livrée : tests, mutations, commit
+- [x] Tâche 3 livrée : tests, mutations, commit — `151dda7`, 19 tests, 26 mutations
+  (1 équivalente)
 
 ## Tâche 4 — Le rendu
 
