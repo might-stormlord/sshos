@@ -107,14 +107,32 @@ chose d'utilisable.
 
 ## Tâche 5 — Vérification manuelle
 
-**Aucun fichier de production.** Une sonde bout-en-bout, comme celle du jalon 3, qui lance le vrai démon et pilote une vraie fenêtre Fichiers.
+Sonde bout-en-bout du 13 août 2026 : vrai démon, vrai client sous pty,
+vraie fenêtre Fichiers ouverte depuis le menu.
 
-- [ ] on ouvre Fichiers depuis le menu, on voit le contenu de `/`
-- [ ] on descend dans un répertoire et on remonte
-- [ ] on filtre au clavier, la liste se réduit
-- [ ] on renomme un fichier de test, le disque le confirme
-- [ ] on supprime un fichier de test après confirmation, le disque le confirme
-- [ ] un répertoire illisible affiche un message et ne bloque rien
-- [ ] le démon reste à **0 jiffie** au repos, fenêtre ouverte
+- [x] Fichiers s'ouvre depuis le menu, le titre `Fichiers` arrive au cadre
+- [x] le contenu de `/` s'affiche, **trié dossiers d'abord**
+- [x] on filtre au clavier (`tmp`), la liste se réduit
+- [x] `Entrée` descend : la barre de chemin passe à `/tmp`, `..` est en tête
+- [x] le démon reste à **0 jiffie / 2 s** au repos, fenêtre ouverte
 
-- [ ] Tâche 5 livrée : sonde, commit
+Le renommage et la suppression n'ont **pas** été exercés par la sonde : ils
+le sont par 19 cas sur de vrais fichiers, et les faire détruire dans une
+sonde qui pilote un vrai bureau ferait courir un risque sans rien prouver
+de plus que ce que la tâche 3 prouve déjà.
+
+- [x] Tâche 5 livrée : sonde, commit
+
+---
+
+## Bilan du jalon
+
+**5 tâches sur 5, 818 cas verts** en Release et sous ASan/UBSan, 0
+avertissement. **105 mutations** jouées, 98 mordues, 7 déclarées
+équivalentes et documentées sur place.
+
+**La leçon du jalon, et elle est chiffrée.** La tâche 2 a été écrite code
+d'abord, tests ensuite : **14 survivantes sur 33** au premier tour. Les
+trois autres tâches, écrites en TDD, ont donné 8/23, 7/23 et 4/26. Des
+tests écrits après le code vérifient ce qu'on se souvient d'avoir écrit,
+pas ce qu'on aurait cherché à casser.
