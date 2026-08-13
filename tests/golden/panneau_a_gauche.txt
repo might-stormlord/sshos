@@ -1,7 +1,7 @@
 ssh_os                                                      
-*Bloc             Bloc                            [_][o][x] 
- Battement      |taille: 42x12                             |
-                |clics: 1                                  |
+ Terminal         Bloc                            [_][o][x] 
+*Bloc           |taille: 42x12                             |
+ Battement      |clics: 1                                  |
                 |resize: 1                                 |
                 |                                          |
                 |                                          |

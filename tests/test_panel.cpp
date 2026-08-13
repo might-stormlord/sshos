@@ -4,6 +4,7 @@
 #include <string>
 
 #include "apps/bloc.hpp"
+#include "app/catalog.hpp"
 #include "harness.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"
@@ -27,6 +28,17 @@ using sshos::WindowId;
 using sshos::WindowManager;
 
 namespace {
+
+// L'index d'une application dans le catalogue. Les tests du panneau
+// parlent d'entrées épinglées, qui sont les entrées du catalogue : les
+// désigner par leur identifiant les rend indifférents à son ordre.
+int catalog_index(std::string_view id) {
+  const auto& entries = sshos::catalog();
+  for (size_t i = 0; i < entries.size(); ++i) {
+    if (entries[i].id == id) return static_cast<int>(i);
+  }
+  return -1;
+}
 
 // Double local : FakePlatformAt est enfermé dans le namespace anonyme de
 // test_session.cpp.
@@ -181,15 +193,19 @@ TEST(panel_hit_test_matches_its_layout) {
   // doit être coupée à huit, marque comprise, plus la cellule de marque
   // d'état -- neuf en tout. Sans cette assertion, un panneau qui n'élide
   // rien reste vert.
-  int pinned_cells[2] = {0, 0};
+  // Les index sont ceux du CATALOGUE : les chercher par identifiant plutôt
+  // que les écrire en dur, sinon toute application ajoutée au catalogue
+  // casse un test qui ne parle pas d'elle.
+  std::vector<int> pinned_cells(sshos::catalog().size(), 0);
   for (int x = 0; x < 80; ++x) {
     const PanelHitResult h = p.hit(x, 23);
-    if (h.what == PanelHit::Pinned && h.index >= 0 && h.index < 2) {
-      ++pinned_cells[h.index];
+    if (h.what == PanelHit::Pinned && h.index >= 0 &&
+        static_cast<size_t>(h.index) < pinned_cells.size()) {
+      ++pinned_cells[static_cast<size_t>(h.index)];
     }
   }
-  CHECK_EQ(pinned_cells[0], 5);  // marque + « Bloc »
-  CHECK_EQ(pinned_cells[1], 9);  // marque + « Batteme… »
+  CHECK_EQ(pinned_cells[catalog_index("bloc")], 5);       // marque + « Bloc »
+  CHECK_EQ(pinned_cells[catalog_index("battement")], 9);  // + « Batteme… »
 }
 
 // Le point de la fusion : une application épinglée QU'ON LANCE ne se
@@ -213,8 +229,12 @@ TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
   WindowId hit_win = 0;
   for (int x = 0; x < 80; ++x) {
     const PanelHitResult h = p.hit(x, 23);
-    if (h.what == PanelHit::Pinned && h.index == 0) ++bloc_pinned;
-    if (h.what == PanelHit::Pinned && h.index == 1) ++battement_pinned;
+    if (h.what == PanelHit::Pinned && h.index == catalog_index("bloc")) {
+      ++bloc_pinned;
+    }
+    if (h.what == PanelHit::Pinned && h.index == catalog_index("battement")) {
+      ++battement_pinned;
+    }
     if (h.what == PanelHit::Task) {
       ++tasks;
       hit_win = h.win;
@@ -274,14 +294,32 @@ TEST(panel_tells_a_running_entry_from_an_idle_one_on_a_vertical_edge) {
   p.layout(wm, 80, 24, true);
 
   // Ligne 0 : le bouton de menu. Puis une ligne par entrée, catalogue en
-  // tête -- Bloc lancé, Battement non.
-  const PanelHitResult live = p.hit(2, 1);
+  // tête -- Bloc lancé, Battement non. On CHERCHE les deux lignes au lieu
+  // de les écrire en dur : leur numéro dépend du catalogue, pas de ce que
+  // ce cas vérifie.
+  bool found_live = false;
+  bool found_idle = false;
+  PanelHitResult live{};
+  PanelHitResult idle{};
+  for (int y = 1; y < 24; ++y) {
+    const PanelHitResult h = p.hit(2, y);
+    if (!found_live && h.what == PanelHit::Task) {
+      live = h;
+      found_live = true;
+    }
+    if (!found_idle && h.what == PanelHit::Pinned &&
+        h.index == catalog_index("battement")) {
+      idle = h;
+      found_idle = true;
+    }
+  }
+
+  REQUIRE(found_live);
   CHECK(live.what == PanelHit::Task);
   CHECK_EQ(live.win, w->id);
 
-  const PanelHitResult idle = p.hit(2, 2);
+  REQUIRE(found_idle);
   CHECK(idle.what == PanelHit::Pinned);
-  CHECK_EQ(idle.index, 1);
   CHECK_EQ(idle.win, 0u);
 }
 
