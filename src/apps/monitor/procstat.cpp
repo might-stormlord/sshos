@@ -50,8 +50,13 @@ std::vector<CpuTimes> parse_cpu_times(std::string_view text) {
   for (std::string_view line : lines_of(text)) {
     if (line.substr(0, 3) != "cpu") continue;
     const std::vector<uint64_t> n = numbers_of(line);
-    // Les quatre premiers champs suffisent, mais il en faut au moins cinq
-    // pour distinguer l'attente d'E/S du repos.
+    // Il en faut au moins cinq pour distinguer l'attente d'E/S du repos.
+    //
+    // Garde contre un COMPORTEMENT INDÉFINI, et non discriminable par un
+    // test : sans elle, `n[3]` et `n[4]` lisent hors du vecteur sur une
+    // ligne tronquée. Le build sanitize ne l'attrape pas non plus ici --
+    // vérifié, la mutation qui la retire passe sous ASan -- donc elle est
+    // déclarée telle plutôt que couverte par un test complaisant.
     if (n.size() < 5) continue;
     CpuTimes t;
     for (uint64_t v : n) t.total += v;
