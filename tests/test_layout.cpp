@@ -1,7 +1,7 @@
 #include <memory>
 #include <vector>
 
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include "harness.hpp"
 #include "wm/layout.hpp"
 #include "wm/manager.hpp"

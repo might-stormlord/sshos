@@ -1,7 +1,7 @@
 #include <memory>
 #include <string>
 
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include "harness.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"

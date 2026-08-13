@@ -1,7 +1,5 @@
 #include "app/catalog.hpp"
 
-#include "apps/battement.hpp"
-#include "apps/bloc.hpp"
 #include "apps/editor/editor.hpp"
 #include "apps/files/files.hpp"
 #include "apps/monitor/monitor.hpp"
@@ -10,8 +8,6 @@
 namespace sshos {
 namespace {
 
-std::unique_ptr<App> make_bloc() { return std::make_unique<Bloc>(); }
-std::unique_ptr<App> make_battement() { return std::make_unique<Battement>(); }
 std::unique_ptr<App> make_terminal() { return std::make_unique<Terminal>(); }
 std::unique_ptr<App> make_files() { return std::make_unique<Files>(); }
 std::unique_ptr<App> make_monitor() { return std::make_unique<Monitor>(); }
@@ -31,8 +27,6 @@ const std::vector<CatalogEntry>& catalog() {
       {"fichiers", "Fichiers", &make_files},
       {"moniteur", "Moniteur", &make_monitor},
       {"editeur", "Editeur", &make_editor},
-      {"bloc", "Bloc", &make_bloc},
-      {"battement", "Battement", &make_battement},
   };
   return entries;
 }

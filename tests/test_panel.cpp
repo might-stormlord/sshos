@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include "app/catalog.hpp"
 #include "harness.hpp"
 #include "render/surface.hpp"
@@ -208,8 +208,8 @@ TEST(panel_hit_test_matches_its_layout) {
       ++pinned_cells[static_cast<size_t>(h.index)];
     }
   }
-  CHECK_EQ(pinned_cells[catalog_index("bloc")], 5);       // marque + « Bloc »
-  CHECK_EQ(pinned_cells[catalog_index("battement")], 9);  // + « Batteme… »
+  CHECK_EQ(pinned_cells[catalog_index("editeur")], 8);  // marque + « Editeur »
+  CHECK_EQ(pinned_cells[catalog_index("moniteur")], 9);  // marque + « Moniteur »
 }
 
 // Le point de la fusion : une application épinglée QU'ON LANCE ne se
@@ -222,7 +222,7 @@ TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
   WindowManager wm;
   Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
   REQUIRE(w != nullptr);
-  w->app_id = "bloc";  // ce que pose open_from_catalog
+  w->app_id = "editeur";  // ce que pose open_from_catalog
   p.layout(wm, 80, 24, true);
 
   // Plus aucune cellule ne répond « épinglée numéro 0 » : l'entrée de Bloc
@@ -233,10 +233,10 @@ TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
   WindowId hit_win = 0;
   for (int x = 0; x < 80; ++x) {
     const PanelHitResult h = p.hit(x, 23);
-    if (h.what == PanelHit::Pinned && h.index == catalog_index("bloc")) {
+    if (h.what == PanelHit::Pinned && h.index == catalog_index("editeur")) {
       ++bloc_pinned;
     }
-    if (h.what == PanelHit::Pinned && h.index == catalog_index("battement")) {
+    if (h.what == PanelHit::Pinned && h.index == catalog_index("moniteur")) {
       ++battement_pinned;
     }
     if (h.what == PanelHit::Task) {
@@ -246,7 +246,7 @@ TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
   }
   CHECK_EQ(bloc_pinned, 0);
   CHECK(battement_pinned > 0);
-  CHECK_EQ(tasks, 5);  // « ●Bloc »
+  CHECK_EQ(tasks, 8);  // « ●Editeur »
   CHECK_EQ(hit_win, w->id);
 }
 
@@ -260,8 +260,8 @@ TEST(panel_folds_several_windows_of_one_application_into_one_entry) {
   Window* b = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
   REQUIRE(a != nullptr);
   REQUIRE(b != nullptr);
-  a->app_id = "bloc";
-  b->app_id = "bloc";
+  a->app_id = "editeur";
+  b->app_id = "editeur";
   wm.focus(b->id);
   p.layout(wm, 80, 24, false);
 
@@ -269,9 +269,9 @@ TEST(panel_folds_several_windows_of_one_application_into_one_entry) {
   View v = s.root();
   p.draw(v, Theme::mono16(), "10:05");
   const std::string row = s.text_row(23);
-  CHECK(row.find("*Bloc(2)") != std::string::npos);
-  // Une seule entrée, donc un seul « Bloc » dans toute la barre.
-  CHECK_EQ(row.find("Bloc"), row.rfind("Bloc"));
+  CHECK(row.find("*Editeur(2)") != std::string::npos);
+  // Une seule entrée, donc un seul « Editeur » dans toute la barre.
+  CHECK_EQ(row.find("Editeur"), row.rfind("Editeur"));
 
   // Le clic vise la SUIVANTE du groupe, pas celle qui a déjà la main :
   // sans quoi cliquer une entrée à deux fenêtres réduirait la fenêtre au
@@ -294,7 +294,7 @@ TEST(panel_tells_a_running_entry_from_an_idle_one_on_a_vertical_edge) {
   WindowManager wm;
   Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 64, 24});
   REQUIRE(w != nullptr);
-  w->app_id = "bloc";
+  w->app_id = "editeur";
   p.layout(wm, 80, 24, true);
 
   // Ligne 0 : le bouton de menu. Puis une ligne par entrée, catalogue en
@@ -312,7 +312,7 @@ TEST(panel_tells_a_running_entry_from_an_idle_one_on_a_vertical_edge) {
       found_live = true;
     }
     if (!found_idle && h.what == PanelHit::Pinned &&
-        h.index == catalog_index("battement")) {
+        h.index == catalog_index("moniteur")) {
       idle = h;
       found_idle = true;
     }

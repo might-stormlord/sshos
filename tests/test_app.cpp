@@ -3,7 +3,7 @@
 
 #include "app/app.hpp"
 #include "app/catalog.hpp"
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include <vector>
 
 #include "harness.hpp"
@@ -203,15 +203,15 @@ TEST(bloc_declares_a_minimum_size) {
   CHECK_EQ(app.min_size().h, 3);
 }
 
-TEST(catalog_lists_bloc_and_can_build_it) {
+TEST(catalog_lists_a_real_application_and_can_build_it) {
   const auto& entries = sshos::catalog();
   CHECK(!entries.empty());
-  const auto* e = sshos::catalog_find("bloc");
+  const auto* e = sshos::catalog_find("editeur");
   REQUIRE(e != nullptr);
-  CHECK_EQ(e->label, std::string("Bloc"));
+  CHECK_EQ(e->label, std::string("Editeur"));
   std::unique_ptr<App> made = e->make();
   CHECK(made != nullptr);
-  CHECK_EQ(made->min_size().w, 14);
+  CHECK(made->min_size().w > 0);
 }
 
 TEST(catalog_returns_null_for_an_unknown_identifier) {

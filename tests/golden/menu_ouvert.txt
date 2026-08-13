@@ -17,4 +17,4 @@
 |Panneau : gauche                |                          
 |Panneau : droite                |                          
 +--------------------------------+                          
- ssh_os  Terminal  Fichiers  Moniteur  Editeur     >2 10:05 
+ ssh_os  Terminal  Fichiers  Moniteur  Editeur *Bloc  10:05 

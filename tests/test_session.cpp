@@ -616,9 +616,17 @@ size_t count_windows(Session& s, int cols, int rows) {
   return ids.size();
 }
 
+// La barre de titre d'une fenetre, quelle que soit l'application dedans :
+// la fenetre amorcee porte le double factice, celles qu'on ouvre portent
+// une vraie application.
 int title_row_of(const Surface& s, int rows) {
   for (int y = 0; y < rows; ++y) {
-    if (s.text_row(y).find("Bloc") != std::string::npos) return y;
+    const std::string row = s.text_row(y);
+    if (row.find("Bloc") != std::string::npos ||
+        row.find("Editeur") != std::string::npos ||
+        row.find("Moniteur") != std::string::npos) {
+      return y;
+    }
   }
   return -1;
 }
@@ -773,13 +781,17 @@ TEST(session_draws_the_focused_window_on_top) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  sess.open_from_catalog("bloc");
+  sess.open_from_catalog("editeur");
   Surface two(80, 24);
   sess.render(two);
 
   int titles = 0;
   for (int y = 0; y < 23; ++y) {
-    if (two.text_row(y).find("Bloc") != std::string::npos) ++titles;
+    const std::string row = two.text_row(y);
+    if (row.find("Bloc") != std::string::npos ||
+        row.find("Editeur") != std::string::npos) {
+      ++titles;
+    }
   }
   CHECK_EQ(titles, 2);  // deux fenêtres, deux barres de titre visibles
 }
@@ -793,7 +805,7 @@ TEST(session_dims_every_window_that_does_not_have_the_focus) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  REQUIRE(sess.open_from_catalog("editeur") != 0u);
   Surface two(80, 24);
   sess.render(two);
 
@@ -819,7 +831,7 @@ TEST(session_hit_test_answers_for_the_window_on_top) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  const sshos::WindowId top = sess.open_from_catalog("bloc");
+  const sshos::WindowId top = sess.open_from_catalog("editeur");
   REQUIRE(top != 0u);
   Surface two(80, 24);
   sess.render(two);
@@ -850,15 +862,17 @@ TEST(session_preserves_the_desktop_across_a_terminal_too_small_to_draw_it) {
   Session sess(plat, g_fds, 80, 24);
   Surface big(80, 24);
   sess.render(big);
-  REQUIRE(sess.open_from_catalog("bloc") != 0u);
-  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  REQUIRE(sess.open_from_catalog("editeur") != 0u);
+  REQUIRE(sess.open_from_catalog("editeur") != 0u);
   sess.render(big);
 
   std::vector<std::string> before;
   for (int y = 0; y < 24; ++y) before.push_back(big.text_row(y));
   int titles = 0;
   for (int y = 0; y < 23; ++y) {
-    if (before[static_cast<size_t>(y)].find("Bloc") != std::string::npos) {
+    const std::string& row = before[static_cast<size_t>(y)];
+    if (row.find("Bloc") != std::string::npos ||
+        row.find("Editeur") != std::string::npos) {
       ++titles;
     }
   }
@@ -1057,8 +1071,8 @@ TEST(session_opens_an_application_through_the_menu) {
   // Le menu est là : il porte ses entrées, dont celle qui ne lance rien.
   CHECK(surface_contains(open, "Fermer la session"));
 
-  // Filtrer sur « battement » puis valider.
-  for (const char32_t c : {U'b', U'a', U't', U't'}) {
+  // Filtrer sur « moniteur » puis valider.
+  for (const char32_t c : {U'm', U'o', U'n', U'i'}) {
     sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, c, 0}});
   }
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
@@ -1067,7 +1081,7 @@ TEST(session_opens_an_application_through_the_menu) {
   sess.render(after);
   bool found = false;
   for (int y = 0; y < 23; ++y) {
-    if (after.text_row(y).find("battements: 0") != std::string::npos) found = true;
+    if (after.text_row(y).find("charge") != std::string::npos) found = true;
   }
   CHECK(found);
 
@@ -1108,7 +1122,11 @@ TEST(session_closes_the_menu_on_escape_without_running_anything) {
   // Une seule fenêtre, et plus de ligne de saisie.
   int titles = 0;
   for (int y = 0; y < 23; ++y) {
-    if (after.text_row(y).find("Bloc") != std::string::npos) ++titles;
+    const std::string row = after.text_row(y);
+    if (row.find("Bloc") != std::string::npos ||
+        row.find("Editeur") != std::string::npos) {
+      ++titles;
+    }
   }
   CHECK_EQ(titles, 1);
 
@@ -1315,12 +1333,12 @@ TEST(session_focuses_and_closes_the_window_under_the_pointer) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  REQUIRE(sess.open_from_catalog("editeur") != 0u);
   Surface two(80, 24);
   sess.render(two);
   // Deuxième fenêtre en cascade : cadre {4, 2, 44, 14}, titre en ligne 2.
   REQUIRE_EQ(two.text_row(1).find("Bloc"), std::string::size_type(4));
-  REQUIRE_EQ(two.text_row(2).find("Bloc"), std::string::size_type(6));
+  REQUIRE_EQ(two.text_row(2).find("Editeur"), std::string::size_type(6));
 
   // Bord gauche de la fenêtre d'ARRIÈRE-plan, à gauche du cadre de celle du
   // dessus : elle prend le focus, donc le dessus. Le bord et non la barre de
@@ -1340,7 +1358,7 @@ TEST(session_focuses_and_closes_the_window_under_the_pointer) {
   Surface closed(80, 24);
   sess.render(closed);
   CHECK_EQ(closed.text_row(1).find("Bloc"), std::string::npos);
-  CHECK_EQ(closed.text_row(2).find("Bloc"), std::string::size_type(6));
+  CHECK_EQ(closed.text_row(2).find("Editeur"), std::string::size_type(6));
 }
 
 // [_] réduit : la fenêtre sort de la composition sans rien perdre. [□]
@@ -1373,7 +1391,11 @@ TEST(session_minimizes_and_maximizes_from_the_title_bar_buttons) {
   sess.render(gone);
   int titles = 0;
   for (int y = 0; y < 23; ++y) {
-    if (gone.text_row(y).find("Bloc") != std::string::npos) ++titles;
+    const std::string row = gone.text_row(y);
+    if (row.find("Bloc") != std::string::npos ||
+        row.find("Editeur") != std::string::npos) {
+      ++titles;
+    }
   }
   CHECK_EQ(titles, 0);
 }
@@ -2743,16 +2765,15 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   // Ouvre Battement par le menu, et attend de le VOIR : sans ce point de
   // synchronisation, le Ctrl+Q pourrait doubler l'ouverture.
   REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{
-                                "\x01 batt\r"}})));
+                                "\x01 moni\r"}})));
   // Puis un repeint complet forcé (<leader>r) AVANT de relever quoi que ce
   // soit. Sans lui la trame est un delta, et un delta ne réémet que les
-  // cellules changées : la première tentative de ce test cherchait « source: »
-  // et le différentiel envoyait « ource: » -- le « s » se trouvait déjà là,
-  // hérité de la fenêtre Bloc dessous. Un motif ne survit à un delta que par
-  // chance ; le repeint retire la chance de l'équation.
+  // cellules changées : la première tentative de ce test cherchait un motif
+  // dont une lettre se trouvait déjà là, héritée de la fenêtre dessous, et
+  // le différentiel n'envoyait que le reste. Un motif ne survit à un delta
+  // que par chance ; le repeint retire la chance de l'équation.
   REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
-  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "battements: 0",
-                                    "source: vivante", 3000));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "charge", "Mem[", 3000));
 
   REQUIRE(send_all(a.get(),
                    sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));  // Ctrl+Q
@@ -2784,8 +2805,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   REQUIRE(welcome_b.has_value());
   REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome_b));
 
-  CHECK(wait_for_frame_containing(b.get(), dec_b, "battements:", "ssh_os",
-                                  3000));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "charge", "ssh_os", 3000));
 }
 
 // Même round, second emplacement du même motif : la branche `pending`
@@ -3233,7 +3253,7 @@ TEST(session_says_what_to_do_when_the_desktop_is_empty) {
   // cadre {2,1,44,14} s'arrête pile sur la colonne où « pour ouvrir »
   // commence. Le test ne passait que par accident de géométrie -- il
   // laissait vivre une invite dessinée en permanence.
-  REQUIRE(sess.open_from_catalog("bloc") != 0u);
+  REQUIRE(sess.open_from_catalog("editeur") != 0u);
   Surface busy(80, 24);
   sess.render(busy);
   CHECK(!surface_contains(busy, "le menu"));

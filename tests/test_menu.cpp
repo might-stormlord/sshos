@@ -36,8 +36,8 @@ TEST(menu_starts_closed_and_lists_everything_when_opened) {
   CHECK(m.is_open());
   // Le catalogue, les quatre bords de panneau, les deux commandes de
   // Battement, et de quoi partir.
-  CHECK(index_of(m, "app:bloc") >= 0);
-  CHECK(index_of(m, "app:battement") >= 0);
+  CHECK(index_of(m, "app:editeur") >= 0);
+  CHECK(index_of(m, "app:moniteur") >= 0);
   CHECK(index_of(m, "panel:top") >= 0);
   CHECK(index_of(m, "panel:bottom") >= 0);
   CHECK(index_of(m, "panel:left") >= 0);
@@ -67,7 +67,7 @@ TEST(menu_filters_on_a_case_insensitive_substring) {
   // « Panneau : ... » quatre fois, et rien d'autre.
   CHECK_EQ(m.visible().size(), static_cast<size_t>(4));
   CHECK(index_of(m, "panel:top") >= 0);
-  CHECK(index_of(m, "app:bloc") < 0);
+  CHECK(index_of(m, "app:editeur") < 0);
 
   m.backspace();
   m.backspace();
@@ -76,9 +76,9 @@ TEST(menu_filters_on_a_case_insensitive_substring) {
 
   // Une sous-chaîne qui n'est le préfixe de rien filtre quand même : c'est
   // une recherche, pas une complétion.
-  m.type(U'o');
-  m.type(U'c');
-  CHECK(index_of(m, "app:bloc") >= 0);
+  m.type(U't');
+  m.type(U'e');
+  CHECK(index_of(m, "app:editeur") >= 0);
 
   // Et un filtre qui ne rend rien ne rend rien -- sans désigner d'entrée.
   m.backspace();

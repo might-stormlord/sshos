@@ -1,9 +1,8 @@
                                                             
     Bloc                            [_][o][x]               
-  |t  Bloc                            [_][o][x]             
-  |c|taille: 42x12                             |            
-  |r|clics: 0                                  |            
-  | |resize: 1                                 |            
+  |t  Editeur                         [_][o][x]             
+  |c|                                          |            
+  |r|                                          |            
   | |                                          |            
   | |                                          |            
   | |                                          |            
@@ -12,9 +11,10 @@
   | |                                          |            
   | |                                          |            
   | |                                          |            
-  +-|                                          |            
+  | |                                          |            
+  +-| (sans nom)  L1 C1                        |            
     +------------------------------------------#            
                                                             
                                                             
                                                             
- ssh_os  Terminal  Fichiers  Moniteur  Editeur     >2 10:05 
+ ssh_os  Terminal  Fichiers  Moniteur *Editeur oBloc  10:05 

@@ -5,8 +5,8 @@
 #include <memory>
 #include <vector>
 
-#include "apps/battement.hpp"
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
+#include "fake_apps.hpp"
 #include "common/fd.hpp"
 #include "daemon/host.hpp"
 #include "harness.hpp"

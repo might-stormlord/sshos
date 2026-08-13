@@ -1,7 +1,7 @@
 #include <memory>
 #include <set>
 
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include "harness.hpp"
 #include "wm/manager.hpp"
 

@@ -479,6 +479,25 @@ void run_case_and_track(const th::Case& c, int& ran, int& failed_cases) {
 
 }  // namespace
 
+#include <memory>
+
+#include "daemon/session.hpp"
+#include "fake_apps.hpp"
+
+// UNE SEULE FOIS, pour toute la suite : la fenetre amorcee est le double
+// factice, pas un Terminal. Un Terminal lancerait un vrai shell dans
+// chaque cas de session -- lent, salissant -- et surtout, la moitie de ces
+// cas lisent a l'ecran l'etat de ce double (son compteur de clics, la
+// taille qu'on lui annonce), ce qu'aucune vraie application n'imite.
+namespace {
+std::unique_ptr<sshos::App> make_seed_double() {
+  return std::make_unique<sshos::Bloc>();
+}
+struct SeedOnce {
+  SeedOnce() { sshos::Session::set_seed_factory_for_tests(&make_seed_double); }
+} g_seed_once;
+}  // namespace
+
 int main(int argc, char** argv) {
   const char* filter = argc > 1 ? argv[1] : nullptr;
   const std::vector<const th::Case*> cases = build_cases(filter);

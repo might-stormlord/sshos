@@ -66,6 +66,15 @@ class Session : public ChildSink {
   // application que la session ne connaît pas -- et le seul moyen de le
   // vérifier sans monter un démon entier est de tendre la fenêtre. Aucun
   // code de production ne doit les lire.
+  // CE QUI S'OUVRE AU PREMIER CONTACT. Un Terminal en production -- c'est
+  // la raison d'etre du bureau. Le binaire de test y substitue UNE FOIS sa
+  // propre fabrique : sans quoi chaque cas de session lancerait un vrai
+  // shell, ce qui est lent, salissant, et rend illisible toute reference
+  // de rendu -- et surtout, la moitie de ces cas lisent a l'ecran l'etat
+  // d'une application factice qu'aucune vraie n'imite.
+  using AppFactory = std::unique_ptr<App> (*)();
+  static void set_seed_factory_for_tests(AppFactory make);
+
   Window* window_for_tests(WindowId id);
   const std::vector<std::unique_ptr<Window>>& windows_for_tests() const {
     return wm_.stack();

@@ -32,7 +32,14 @@ constexpr int kFullWarningLen = sizeof(kFullWarning) - 1;
 // fenêtre tombe donc sur la première marche de la cascade, {2, 1, 44, 14} :
 // plusieurs tests bout-en-bout cliquent à une coordonnée fixe en comptant
 // sur le fait qu'elle atterrit dans sa zone cliente.
-constexpr char kDefaultApp[] = "bloc";
+constexpr char kDefaultApp[] = "terminal";
+
+// Posee une seule fois par le binaire de test. Nulle veut dire « celle du
+// catalogue ».
+Session::AppFactory& seed_factory() {
+  static Session::AppFactory f = nullptr;
+  return f;
+}
 
 // Le relâchement peut se perdre : terminal qui filtre, multiplexeur qui
 // avale un octet, client tué en plein geste. Deux secondes sans nouvelle
@@ -434,6 +441,8 @@ int Session::refresh_delay_ms() const {
   return best;
 }
 
+void Session::set_seed_factory_for_tests(AppFactory make) { seed_factory() = make; }
+
 Window* Session::window_for_tests(WindowId id) { return wm_.find(id); }
 
 void Session::close_window_for_tests(WindowId id) {
@@ -477,6 +486,16 @@ void Session::ensure_window(const Rect& work) {
   // l'utilisateur, bureau vide compris.
   if (seeded_) return;
   seeded_ = true;
+  if (seed_factory() != nullptr) {
+    // Même montage que `open_from_catalog` : l'hôte APRÈS que le
+    // gestionnaire a donné son adresse définitive à la fenêtre, et AVANT
+    // `attach()`, qui fait poser son titre à l'application.
+    if (Window* w = wm_.open(seed_factory()(), last_work_)) {
+      w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_);
+      w->app->attach(*w->host);
+    }
+    return;
+  }
   open_from_catalog(kDefaultApp);
 }
 

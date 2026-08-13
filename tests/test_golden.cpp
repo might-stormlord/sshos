@@ -179,12 +179,12 @@ TEST(golden_desktop_at_startup) {
 }
 
 TEST(golden_two_overlapping_windows) {
-  GOLDEN("deux_fenetres", [](Session& s) { s.open_from_catalog("bloc"); });
+  GOLDEN("deux_fenetres", [](Session& s) { s.open_from_catalog("editeur"); });
 }
 
 TEST(golden_a_minimized_window_keeps_its_panel_entry) {
   GOLDEN("fenetre_reduite", [](Session& s) {
-    s.open_from_catalog("battement");
+    s.open_from_catalog("moniteur");
     chord(s, U'-');
   });
 }

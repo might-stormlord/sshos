@@ -2,7 +2,7 @@
 #include <string>
 
 #include "app/app.hpp"
-#include "apps/bloc.hpp"
+#include "fake_apps.hpp"
 #include "harness.hpp"
 #include "render/surface.hpp"
 #include "render/theme.hpp"

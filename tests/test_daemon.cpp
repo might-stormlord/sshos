@@ -178,7 +178,7 @@ TEST(session_delivers_a_child_death_to_the_window_that_asked) {
   sshos::Surface s(40, 12);
   sess.render(s);  // amorce la première fenêtre
 
-  const sshos::WindowId id = sess.open_from_catalog("bloc");
+  const sshos::WindowId id = sess.open_from_catalog("editeur");
   REQUIRE(id != 0);
   sshos::Window* w = sess.window_for_tests(id);
   REQUIRE(w != nullptr);
@@ -211,7 +211,7 @@ TEST(session_ignores_a_child_it_never_watched) {
   sshos::Surface s(40, 12);
   sess.render(s);
 
-  const sshos::WindowId id = sess.open_from_catalog("bloc");
+  const sshos::WindowId id = sess.open_from_catalog("editeur");
   sshos::Window* w = sess.window_for_tests(id);
   REQUIRE(w != nullptr);
   auto app = std::make_unique<CountingApp>();
@@ -232,7 +232,7 @@ TEST(session_forgets_the_children_of_a_window_it_closes) {
   sshos::Surface s(40, 12);
   sess.render(s);
 
-  const sshos::WindowId id = sess.open_from_catalog("bloc");
+  const sshos::WindowId id = sess.open_from_catalog("editeur");
   sshos::Window* w = sess.window_for_tests(id);
   REQUIRE(w != nullptr);
   w->host->watch_child(4242);
