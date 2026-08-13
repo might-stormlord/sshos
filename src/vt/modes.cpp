@@ -1,6 +1,36 @@
 #include "vt/modes.hpp"
 
 namespace sshos {
+namespace {
+
+// LA table des modes. Une seule, partagée par `set`, `knows` et `get`.
+// Trois aiguillages séparés se contrediraient le jour où un mode s'ajoute,
+// et `DECRQM` répondrait « je ne connais pas » sur un mode qui marche.
+struct ModeEntry {
+  int code;
+  bool Modes::*flag;
+};
+
+constexpr ModeEntry kModes[] = {
+    {1, &Modes::cursor_keys_application},  // DECCKM
+    {7, &Modes::autowrap},                 // DECAWM
+    {25, &Modes::cursor_visible},          // DECTCEM
+    {1000, &Modes::mouse_click},
+    {1002, &Modes::mouse_drag},
+    {1003, &Modes::mouse_any},
+    {1006, &Modes::mouse_sgr},
+    {1049, &Modes::alt_screen},
+    {2004, &Modes::bracketed_paste},
+};
+
+const ModeEntry* find(int mode) {
+  for (const ModeEntry& e : kModes) {
+    if (e.code == mode) return &e;
+  }
+  return nullptr;
+}
+
+}  // namespace
 
 MouseTracking Modes::tracking() const {
   // Du plus permissif au moins : les trois drapeaux sont indépendants, et
@@ -12,40 +42,17 @@ MouseTracking Modes::tracking() const {
 }
 
 void Modes::set(int mode, bool on) {
-  switch (mode) {
-    case 1:
-      cursor_keys_application = on;
-      break;
-    case 7:
-      autowrap = on;
-      break;
-    case 25:
-      cursor_visible = on;
-      break;
-    case 1000:
-      mouse_click = on;
-      break;
-    case 1002:
-      mouse_drag = on;
-      break;
-    case 1003:
-      mouse_any = on;
-      break;
-    case 1006:
-      mouse_sgr = on;
-      break;
-    case 1049:
-      alt_screen = on;
-      break;
-    case 2004:
-      bracketed_paste = on;
-      break;
-    default:
-      // Ignoré en silence. Un invité qui demande un mode que nous n'avons
-      // pas doit pouvoir continuer : refuser la séquence entière lui
-      // ferait perdre les modes voisins, qui, eux, existent.
-      break;
-  }
+  // Un mode inconnu est ignoré en silence, comme le fait tout terminal :
+  // une application qui demande un mode que nous n'avons pas doit pouvoir
+  // continuer, pas se voir refuser sa séquence.
+  if (const ModeEntry* e = find(mode)) this->*(e->flag) = on;
+}
+
+bool Modes::knows(int mode) const { return find(mode) != nullptr; }
+
+bool Modes::get(int mode) const {
+  const ModeEntry* e = find(mode);
+  return e != nullptr && this->*(e->flag);
 }
 
 void apply_dec_private(const Params& params, bool on, Modes& modes) {

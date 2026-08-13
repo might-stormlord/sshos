@@ -46,6 +46,13 @@ struct Modes {
   // continuer, pas se voir refuser sa séquence.
   void set(int mode, bool on);
 
+  // Ce que `DECRQM` (tâche 9) a besoin de savoir : est-ce un mode dont
+  // nous avons entendu parler, et dans quel état est-il ? La norme
+  // distingue « non reconnu » de « éteint », et un invité qui verrait
+  // « éteint » pour un mode inconnu croirait pouvoir l'allumer.
+  bool knows(int mode) const;
+  bool get(int mode) const;
+
   bool operator==(const Modes&) const = default;
 };
 
