@@ -247,7 +247,11 @@ Le reflow invaliderait la position du curseur et **tous les décalages du scroll
 
 **Tests :** rétrécir puis réélargir ne restitue pas ce qui a été tronqué (c'est la politique, pas un défaut — le test la fige) ; le curseur reste dans les bornes ; la région redevient pleine hauteur ; l'écran alterné est vide après coup.
 
-- [ ] Tâche 8 livrée : tests, mutations, commit
+- [x] Tâche 8 livrée : tests, mutations, commit — `f88cd28`, 18 tests, 21 mutations
+
+Le curseur gardé de côté par `1049` est borné ici : `restore_cursor()` borne
+déjà le sien au moment de s'en servir, mais `leave_alt_screen()` ne bornait
+rien — la dette laissée à la tâche 6 est soldée.
 
 ## Tâche 9 — Les réponses aux requêtes
 
