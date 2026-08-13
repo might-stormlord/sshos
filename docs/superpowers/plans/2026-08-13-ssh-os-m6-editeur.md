@@ -20,7 +20,7 @@ Vecteur de lignes. Insertion et suppression de caractère, retour à la ligne, f
 
 **Les pièges :** un fichier sans saut de ligne final ne doit pas en gagner un à l'enregistrement ; un fichier vide vaut UNE ligne vide, pas zéro ; les positions doivent rester valides après chaque édition.
 
-- [ ] Tâche 1 livrée : tests, mutations, commit
+- [x] Tâche 1 livrée : tests, mutations, commit — `101a540`, 23 tests, 24 mutations (1 équivalente)
 
 ## Tâche 2 — L'application
 
