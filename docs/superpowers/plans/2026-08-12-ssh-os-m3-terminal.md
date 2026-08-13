@@ -211,7 +211,23 @@ Les lignes y entrent **rognées** : garder 300 colonnes de blancs par ligne pour
 
 **Tests :** au-delà de la capacité, la plus ancienne part ; le décalage ne dépasse ni le haut ni le bas ; une ligne rognée se relit identique à sa partie non vide ; l'écran alterné n'y écrit rien.
 
-- [ ] Tâche 7 livrée : tests, mutations, commit
+- [x] Tâche 7 livrée : tests, mutations, commit — `9e5f168`, 29 tests, 29 mutations
+  (1 équivalente)
+
+Comme aux tâches 5 et 6, le périmètre a débordé des fichiers annoncés :
+`screen.cpp/.hpp` gagnent `set_scrollback()` et le branchement dans
+`scroll_up()`, sans quoi le test « l'écran alterné n'y écrit rien » n'aurait
+eu aucun objet. `Screen` ne connaît toujours ni parseur ni couche
+d'affichage — `Scrollback` est une structure de données, pas une couche.
+
+Pour la tâche 8 : le redimensionnement devra traiter `parked_` comme
+`grid_`, et **ne pas** toucher aux lignes déjà rangées — le reflow est hors
+v1 (spec §681), donc une ligne d'historique garde la largeur qu'elle avait.
+
+Pour la tâche 13 : la molette ne défile l'historique que si
+`screen.alt_screen()` est faux ; sinon elle part à l'invité. `Shift+PgUp` /
+`PgDn` appellent `scroll_back()` / `scroll_forward()`, et toute frappe qui
+écrit sur le PTY appelle `scroll_to_bottom()`.
 
 ## Tâche 8 — Le redimensionnement
 
