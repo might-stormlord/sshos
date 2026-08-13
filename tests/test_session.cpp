@@ -3415,3 +3415,70 @@ TEST(session_falls_back_to_ascii_in_the_empty_desktop_hint) {
   sess.render(uni);
   CHECK(surface_contains(uni, "ou \xe2\x98\xb0 en bas"));
 }
+
+// UN ÉCHAPPEMENT SEUL DOIT FINIR PAR ARRIVER.
+//
+// `ESC` est indécidable tant qu'aucun octet ne suit : c'est peut-être la
+// touche, c'est peut-être le début d'une séquence. `InputParser` le retient
+// et attend qu'on lui dise que le délai a expiré -- et personne ne le lui
+// disait. La méthode `timeout()` existait depuis le jalon 1 SANS AUCUN
+// APPELANT, exactement comme `Decoder::failed()` avant elle.
+//
+// La conséquence ne se voyait qu'avec un vrai invité : dans `vim`,
+// l'échappement ne quittait JAMAIS le mode insertion -- il restait en
+// attente jusqu'à la frappe suivante et se relisait alors comme un accord
+// `Alt` avec elle. Trouvé en faisant tourner un vrai `vim`, pas par un test.
+//
+// Le menu donne l'observable qu'il fallait : `ESC` le referme, et rien
+// d'autre n'est envoyé après lui. Sans le repli du délai dans la boucle du
+// démon, le menu reste ouvert pour toujours.
+TEST(daemon_delivers_a_lone_escape_after_the_ambiguity_delay) {
+  const std::string name = unique_name() + "-esc";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{make_hello(80, 24)})));
+
+  sshos::Decoder dec;
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 5000));
+
+  // Ctrl+A, Espace, puis un filtre : le menu s'ouvre sur les commandes de
+  // panneau, dont AUCUNE n'existe ailleurs à l'écran.
+  REQUIRE(send_all(client.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\001 pa"}})));
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "Panneau", "Panneau", 3000));
+
+  // UN SEUL octet, et plus rien après. C'est tout le piège : le parseur
+  // n'aura aucune frappe suivante pour lever son ambiguïté, et seul le
+  // repli du délai dans la boucle du démon peut la lever à sa place.
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{"\033"}})));
+  ::usleep(400 * 1000);
+
+  // Un Resize force un repeint COMPLET sans passer par une frappe -- une
+  // frappe de plus lèverait elle-même l'ambiguïté et le test ne mesurerait
+  // plus rien. Le protocole étant différentiel, c'est le seul moyen de
+  // relire l'écran entier.
+  REQUIRE(send_all(client.get(),
+                   sshos::encode(sshos::Msg{sshos::Resize{80, 25}})));
+
+  bool saw_full_frame = false;
+  bool menu_gone = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(4000);
+  while (std::chrono::steady_clock::now() < deadline) {
+    auto m = recv_one(client.get(), dec, 250);
+    if (!m) continue;
+    const auto* f = std::get_if<sshos::FrameMsg>(&*m);
+    if (f == nullptr) continue;
+    // Le repeint complet se reconnaît à la barre des tâches, qu'il porte
+    // toujours en entier.
+    if (f->ansi.find("ssh_os") == std::string::npos) continue;
+    saw_full_frame = true;
+    menu_gone = f->ansi.find("Panneau") == std::string::npos;
+    break;
+  }
+  REQUIRE(saw_full_frame);
+  CHECK(menu_gone);
+}

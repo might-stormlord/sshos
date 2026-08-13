@@ -127,6 +127,11 @@ int run_daemon(std::string_view socket_name) {
   registrar.ep = ep.get();
   Session session(plat, registrar, 80, 24);
 
+  // Valeur figee du projet : 50 ms d'ambiguite pour l'echappement.
+  constexpr auto kEscAmbiguity = std::chrono::milliseconds(50);
+  bool esc_armed = false;
+  FrameClock::Clock::time_point esc_deadline{};
+
   // Les trois descripteurs du démon vivent aussi longtemps que le
   // processus : leur génération est fixe. Les connexions, elles, en tirent
   // une neuve à chaque accept().
@@ -254,6 +259,32 @@ int run_daemon(std::string_view socket_name) {
     // temps restant avant l'échéance de `pending`, sans jamais l'allonger :
     // ce n'est pas du scrutin actif, juste un réveil borné en plus (voire à
     // la place) de celui du rendu.
+    // L'AMBIGUITE DE L'ECHAPPEMENT. Un `ESC` seul est indecidable tant
+    // qu'aucun octet ne suit : c'est peut-etre la touche, c'est peut-etre
+    // le debut d'une sequence. `InputParser` le retient et attend qu'on lui
+    // dise que le delai a expire -- et personne ne le lui disait.
+    //
+    // La consequence se voit des qu'un invite a besoin de la touche : dans
+    // `vim`, l'echappement ne quittait JAMAIS le mode insertion. Il restait
+    // en attente jusqu'a la frappe suivante, et se relisait alors comme un
+    // accord `Alt` avec elle. Trouve en faisant tourner un vrai `vim`, pas
+    // par un test unitaire : le parseur, lui, honore parfaitement le
+    // `timeout()` qu'on ne lui appelait pas.
+    if (client && client->input.esc_pending()) {
+      const auto now = FrameClock::Clock::now();
+      if (!esc_armed) {
+        esc_armed = true;
+        esc_deadline = now + kEscAmbiguity;
+      } else if (now >= esc_deadline) {
+        client->input.timeout();
+        while (auto e = client->input.next()) session.on_input(*e);
+        clock.mark_dirty();
+        esc_armed = false;
+      }
+    } else {
+      esc_armed = false;
+    }
+
     const bool renderable = client && client->differ;
     int timeout = renderable ? clock.delay_ms(FrameClock::Clock::now()) : -1;
     // Avec un client attaché, on ne dort jamais plus d'une seconde. Sans ce
@@ -279,6 +310,16 @@ int run_daemon(std::string_view socket_name) {
     const int help_delay = session.help_delay_ms();
     if (help_delay >= 0) {
       timeout = (timeout < 0) ? help_delay : std::min(timeout, help_delay);
+    }
+    // Meme repli pour l'echappement en attente : sans lui, la touche
+    // n'arriverait qu'au reveil suivant -- c'est-a-dire a la frappe
+    // suivante, la seule chose que l'utilisateur ne fera justement pas
+    // apres avoir appuye sur Echap.
+    if (esc_armed) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+          esc_deadline - FrameClock::Clock::now());
+      const int esc_timeout = static_cast<int>(std::max<long long>(0, left.count()));
+      timeout = (timeout < 0) ? esc_timeout : std::min(timeout, esc_timeout);
     }
     const int n = ::epoll_wait(ep.get(), evs, 16, timeout);
     if (n < 0) {
