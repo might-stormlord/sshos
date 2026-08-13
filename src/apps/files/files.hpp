@@ -32,6 +32,12 @@ class Files : public App {
   bool wants_cursor(Pos& out) const override;
   Size min_size() const override { return {24, 6}; }
 
+  // Ce que l'application est en train de faire. Le renommage et la
+  // suppression sont des ÉTATS, pas des raccourcis : la suppression est le
+  // seul geste irréversible du projet, et un raccourci qui détruit sans
+  // repasser par une question détruit tôt ou tard par erreur.
+  enum class Mode { Normal, Renaming, Confirming };
+
   // --- pour les tests ---
   // La navigation n'a aucun effet observable hors de son dessin : ces
   // accès permettent de la vérifier sans lire une grille de caractères.
@@ -42,6 +48,8 @@ class Files : public App {
   size_t top_for_tests() const { return top_; }
   const std::string& status_for_tests() const { return status_; }
   const std::string& filter_for_tests() const { return filter_; }
+  Mode mode_for_tests() const { return mode_; }
+  const std::string& edit_for_tests() const { return edit_; }
 
  private:
   // Relit le répertoire courant et refait la liste visible. LE SEUL
@@ -59,6 +67,11 @@ class Files : public App {
   int rows_for_list() const;
   void activate();
   void go_up();
+  // Le nom sélectionné, ou une chaîne vide si la sélection ne désigne rien
+  // qu'on ait le droit de toucher -- `..` en particulier.
+  std::string touchable_selection() const;
+  void commit_rename();
+  void commit_delete();
 
   DirListing listing_;
   std::vector<DirEntry> visible_;
@@ -67,6 +80,9 @@ class Files : public App {
   size_t sel_ = 0;
   size_t top_ = 0;
   bool show_hidden_ = false;
+  Mode mode_ = Mode::Normal;
+  // Le nom en cours de saisie pendant un renommage.
+  std::string edit_;
   Size size_{40, 12};
   Host* host_ = nullptr;
 };

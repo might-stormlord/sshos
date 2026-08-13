@@ -1,6 +1,11 @@
 #include "apps/files/files.hpp"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <vector>
 
 #include "common/utf8.hpp"
@@ -214,7 +219,111 @@ void Files::activate() {
   refilter();
 }
 
+std::string Files::touchable_selection() const {
+  if (visible_.empty()) return {};
+  const std::string& name = visible_[sel_].name;
+  // `..` n'est pas un fichier de CE répertoire : le renommer renommerait
+  // le parent, et le supprimer effacerait le dossier qui nous contient.
+  // Personne ne demande ça en visant la première ligne.
+  if (name == "..") return {};
+  return name;
+}
+
+void Files::commit_rename() {
+  const std::string from = touchable_selection();
+  mode_ = Mode::Normal;
+  if (from.empty() || edit_.empty() || edit_ == from) return;
+  // Un nom qui contient une barre n'est pas un renommage, c'est un
+  // déplacement -- et un déplacement à l'aveugle vers un chemin qu'on ne
+  // voit pas est exactement ce qu'on ne veut pas offrir sur une touche.
+  if (edit_.find('/') != std::string::npos) {
+    status_ = "un nom ne peut pas contenir de barre";
+    return;
+  }
+
+  const std::string src = join_path(listing_.path, from);
+  const std::string dst = join_path(listing_.path, edit_);
+
+  // `rename()` ECRASE silencieusement une cible existante. C'est la façon
+  // la plus rapide de perdre un fichier, et le noyau n'offre pas de garde
+  // portable : on regarde d'abord.
+  struct stat st {};
+  if (::lstat(dst.c_str(), &st) == 0) {
+    status_ = "ce nom est deja pris";
+    return;
+  }
+  if (::rename(src.c_str(), dst.c_str()) != 0) {
+    status_ = std::string("renommage impossible : ") + std::strerror(errno);
+    return;
+  }
+
+  status_.clear();
+  reload();
+  // La sélection SUIT le nom renommé : le perdre de vue après l'avoir
+  // renommé oblige à le rechercher pour vérifier.
+  for (size_t i = 0; i < visible_.size(); ++i) {
+    if (visible_[i].name == edit_) {
+      sel_ = i;
+      break;
+    }
+  }
+  settle();
+}
+
+void Files::commit_delete() {
+  const std::string name = touchable_selection();
+  mode_ = Mode::Normal;
+  if (name.empty()) return;
+
+  const std::string victim = join_path(listing_.path, name);
+  const bool is_dir = visible_[sel_].kind == EntryKind::Dir;
+  // Pas de suppression RÉCURSIVE : `rmdir` refuse un dossier non vide, et
+  // c'est exactement ce qu'on veut. Effacer une arborescence entière sur
+  // une touche est le genre de fonction qu'on regrette une seule fois.
+  const int rc = is_dir ? ::rmdir(victim.c_str()) : ::unlink(victim.c_str());
+  if (rc != 0) {
+    status_ = std::string("suppression impossible : ") + std::strerror(errno);
+    return;
+  }
+  status_.clear();
+  reload();
+}
+
 void Files::on_key(const KeyEvent& k) {
+  // Le renommage et la confirmation CAPTENT le clavier. Les laisser
+  // partager les touches de la navigation ferait filtrer la liste sous les
+  // doigts de celui qui tape un nom.
+  if (mode_ == Mode::Renaming) {
+    switch (k.key) {
+      case Key::Enter:
+        commit_rename();
+        return;
+      case Key::Escape:
+        mode_ = Mode::Normal;
+        edit_.clear();
+        return;
+      case Key::Backspace:
+        if (!edit_.empty()) edit_.pop_back();
+        return;
+      case Key::Char:
+        if (k.ch >= U' ') edit_ += encode_utf8(k.ch);
+        return;
+      default:
+        return;
+    }
+  }
+  if (mode_ == Mode::Confirming) {
+    // SEUL un « o » ou un « y » explicite détruit. Toute autre réponse
+    // annule : une confirmation qui accepte l'à-peu-près n'en est pas une.
+    if (k.key == Key::Char && (k.ch == U'o' || k.ch == U'O' || k.ch == U'y' ||
+                               k.ch == U'Y')) {
+      commit_delete();
+      return;
+    }
+    mode_ = Mode::Normal;
+    return;
+  }
+
   const size_t rows = static_cast<size_t>(rows_for_list());
 
   switch (k.key) {
@@ -250,6 +359,19 @@ void Files::on_key(const KeyEvent& k) {
       return;
     case Key::Enter:
       activate();
+      return;
+    case Key::F2: {
+      const std::string name = touchable_selection();
+      if (name.empty()) return;
+      // PRÉ-REMPLI : renommer « rapport-2025.txt » en « rapport-2026.txt »
+      // ne doit pas demander de tout retaper.
+      edit_ = name;
+      mode_ = Mode::Renaming;
+      return;
+    }
+    case Key::Delete:
+      if (touchable_selection().empty()) return;
+      mode_ = Mode::Confirming;
       return;
     case Key::Escape:
       // L'échappement efface le filtre. C'est le seul geste d'annulation
@@ -378,7 +500,17 @@ void Files::render(View v) {
   // presque vide.
   Style status_style;
   std::string bottom;
-  if (!status_.empty()) {
+  if (mode_ == Mode::Renaming) {
+    // La saisie EST la ligne d'état : une invite qu'on ne voit pas est une
+    // application qui a l'air bloquée.
+    status_style.attrs = attr::Reverse;
+    bottom = "nouveau nom: " + edit_;
+  } else if (mode_ == Mode::Confirming) {
+    status_style.attrs = attr::Reverse;
+    status_style.fg = Color::indexed(1);
+    bottom = "supprimer " + (visible_.empty() ? std::string() : visible_[sel_].name) +
+             " ? (o/n)";
+  } else if (!status_.empty()) {
     status_style.fg = Color::indexed(1);
     bottom = status_;
   } else if (!filter_.empty()) {

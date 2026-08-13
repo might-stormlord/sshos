@@ -832,3 +832,348 @@ TEST(files_elides_a_long_name_from_the_right) {
   const std::string row = painted_row(f, 14, 8, 2);
   CHECK_EQ(row.rfind("rapport", 0), size_t{0});
 }
+
+// ================================================ renommer et supprimer
+
+namespace {
+
+bool exists(const std::string& p) {
+  struct stat st {};
+  return ::lstat(p.c_str(), &st) == 0;
+}
+
+}  // namespace
+
+TEST(files_opens_a_rename_prefilled_with_the_current_name) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("avant.txt");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("avant.txt"));
+
+  f.on_key(key(Key::F2));
+  CHECK(f.mode_for_tests() == Files::Mode::Renaming);
+  // PRÉ-REMPLI : renommer « rapport-2025.txt » en « rapport-2026.txt » ne
+  // doit pas demander de tout retaper.
+  CHECK_EQ(f.edit_for_tests(), std::string("avant.txt"));
+}
+
+TEST(files_renames_the_file_on_disk) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string before = t.file("avant.txt");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  for (int i = 0; i < 9; ++i) f.on_key(key(Key::Backspace));
+  f.on_key(ch(U'a'));
+  f.on_key(ch(U'p'));
+  f.on_key(key(Key::Enter));
+
+  CHECK(!exists(before));
+  CHECK(exists(t.root() + "/ap"));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+  ::unlink((t.root() + "/ap").c_str());
+}
+
+// Un nom DÉJÀ PRIS est refusé : écraser silencieusement est la façon la
+// plus rapide de perdre un fichier.
+TEST(files_refuses_a_rename_onto_an_existing_name) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+  const std::string b = t.file("bbb");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("aaa"));
+  f.on_key(key(Key::F2));
+  for (int i = 0; i < 3; ++i) f.on_key(key(Key::Backspace));
+  f.on_key(ch(U'b'));
+  f.on_key(ch(U'b'));
+  f.on_key(ch(U'b'));
+  f.on_key(key(Key::Enter));
+
+  CHECK(exists(a));
+  CHECK(exists(b));
+  CHECK(!f.status_for_tests().empty());
+}
+
+TEST(files_does_nothing_when_the_new_name_is_empty) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  for (int i = 0; i < 5; ++i) f.on_key(key(Key::Backspace));
+  f.on_key(key(Key::Enter));
+
+  CHECK(exists(a));
+  // Et RIEN d'autre : un message d'erreur voudrait dire qu'on a essayé
+  // quelque chose, alors qu'un nom vide n'est pas une demande.
+  CHECK_EQ(f.status_for_tests(), std::string(""));
+}
+
+TEST(files_cancels_a_rename_on_escape) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  f.on_key(ch(U'z'));
+  f.on_key(key(Key::Escape));
+
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+  CHECK(exists(a));
+}
+
+// `..` n'est pas un fichier de ce répertoire : le renommer renommerait le
+// PARENT, ce que personne ne demande en visant la première ligne.
+TEST(files_refuses_to_rename_the_parent_entry) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  REQUIRE_EQ(selected_name(f), std::string(".."));
+
+  f.on_key(key(Key::F2));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// ----------------------------------------------------------- supprimer
+
+// La suppression DEMANDE. C'est le seul geste irréversible du projet.
+TEST(files_asks_before_it_deletes) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+
+  CHECK(f.mode_for_tests() == Files::Mode::Confirming);
+  CHECK(exists(a));  // rien n'est encore fait
+}
+
+TEST(files_deletes_only_after_an_explicit_yes) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  CHECK(!exists(a));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// TOUTE autre réponse annule. Une confirmation qui accepte l'à-peu-près
+// n'en est pas une.
+TEST(files_keeps_the_file_when_the_answer_is_not_yes) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'x'));
+
+  CHECK(exists(a));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+TEST(files_cancels_a_delete_on_escape) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(key(Key::Escape));
+
+  CHECK(exists(a));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// Pas de suppression RÉCURSIVE en v1 : un dossier non vide se refuse, avec
+// un message. Effacer une arborescence entière sur une touche est le genre
+// de fonction qu'on regrette une seule fois.
+TEST(files_refuses_to_delete_a_directory_that_is_not_empty) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string d = t.dir("plein");
+  const std::string inside = t.file("plein/dedans");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("plein"));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  CHECK(exists(d));
+  CHECK(exists(inside));
+  CHECK(!f.status_for_tests().empty());
+}
+
+TEST(files_refuses_to_delete_the_parent_entry) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  REQUIRE_EQ(selected_name(f), std::string(".."));
+
+  f.on_key(key(Key::Delete));
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// La liste se relit après une suppression : garder l'entrée disparue à
+// l'écran donnerait un gestionnaire qui ment.
+TEST(files_reloads_the_listing_after_a_delete) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+  t.file("bbb");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  CHECK_EQ(names(f), std::string("..|bbb"));
+}
+
+// Pendant un renommage, la saisie ne FILTRE pas : les deux partagent le
+// clavier, et confondre les deux ferait disparaître la liste sous les
+// doigts de celui qui tape un nom.
+TEST(files_does_not_filter_while_it_renames) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+  t.file("bbb");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  f.on_key(ch(U'z'));
+
+  CHECK_EQ(f.filter_for_tests(), std::string(""));
+  CHECK_EQ(names(f), std::string("..|aaa|bbb"));
+}
+
+// Les deux modes se VOIENT : une invite qu'on ne voit pas est une
+// application qui a l'air bloquée.
+TEST(files_shows_the_rename_prompt_on_the_status_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("avant.txt");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+
+  const std::string row = painted_row(f, 40, 8, 7);
+  CHECK(row.find("avant.txt") != std::string::npos);
+}
+
+TEST(files_shows_the_delete_question_on_the_status_row) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+
+  const std::string row = painted_row(f, 40, 8, 7);
+  CHECK(row.find("aaa") != std::string::npos);
+  CHECK(row.find("o/n") != std::string::npos);
+}
+
+// La sélection SUIT le nom renommé : le perdre de vue oblige à le
+// rechercher pour vérifier que ça a marché.
+TEST(files_follows_the_name_it_renamed) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+  t.file("mmm");
+  t.file("zzz");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("aaa"));
+  f.on_key(key(Key::F2));
+  for (int i = 0; i < 3; ++i) f.on_key(key(Key::Backspace));
+  f.on_key(ch(U'q'));
+  f.on_key(key(Key::Enter));
+
+  CHECK_EQ(selected_name(f), std::string("q"));
+  ::unlink((t.root() + "/q").c_str());
+}
+
+// Un nom avec une barre n'est pas un renommage, c'est un déplacement -- et
+// un déplacement à l'aveugle vers un chemin qu'on ne voit pas est
+// exactement ce qu'on ne veut pas offrir sur une touche.
+TEST(files_refuses_a_name_that_contains_a_slash) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  for (int i = 0; i < 3; ++i) f.on_key(key(Key::Backspace));
+  f.on_key(ch(U'/'));
+  f.on_key(ch(U'x'));
+  f.on_key(key(Key::Enter));
+
+  CHECK(exists(a));
+  CHECK(!f.status_for_tests().empty());
+}
+
+// Un caractère de contrôle n'a rien à faire dans un nom de fichier : le
+// laisser entrer donnerait un nom qu'on ne peut plus ni lire ni retaper.
+TEST(files_never_lets_a_control_character_into_a_name) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+
+  Files f(t.root());
+  f.on_resize(Size{40, 8});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::F2));
+  f.on_key(KeyEvent{Key::Char, static_cast<char32_t>(7), 0});
+
+  CHECK_EQ(f.edit_for_tests(), std::string("aaa"));
+}
