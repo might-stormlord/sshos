@@ -34,6 +34,9 @@ class Monitor : public App {
   void render(View v) override;
   void on_key(const KeyEvent& k) override;
   Size min_size() const override { return {30, 8}; }
+  // Une seconde, comme la spec le demande -- et seulement tant que la
+  // fenetre est visible, ce dont la session se charge.
+  int refresh_ms() const override { return 1000; }
 
   // L'ordre de tri. Par CPU au départ : c'est la question qu'on se pose en
   // ouvrant un moniteur.

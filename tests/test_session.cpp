@@ -3482,3 +3482,64 @@ TEST(daemon_delivers_a_lone_escape_after_the_ambiguity_delay) {
   REQUIRE(saw_full_frame);
   CHECK(menu_gone);
 }
+
+// UNE APPLICATION VISIBLE PEUT DEMANDER À ÊTRE REDESSINÉE, ET UNE
+// MINIMISÉE NE LE PEUT PAS.
+//
+// Le moniteur système lit `/proc` depuis son dessin. Le démon, lui, ne
+// dessine que sur une trame SALE -- et rien ne salit la trame quand seul
+// le temps passe. Ses chiffres ne bougeaient donc qu'à la frappe suivante.
+// Trouvé par une sonde bout-en-bout, invisible pour 857 tests unitaires :
+// la quatrième fois sur ce projet.
+//
+// La règle « un moniteur minimisé ne consomme rien » se joue dans
+// `Session::refresh_delay_ms()`, qui ignore les fenêtres minimisées : leur
+// délai ne réveille personne, donc leur dessin n'a jamais lieu, donc
+// `/proc` n'est jamais lu.
+TEST(daemon_redraws_a_visible_app_that_asks_and_leaves_a_minimized_one_alone) {
+  const std::string name = unique_name() + "-refresh";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{make_hello(80, 24)})));
+
+  sshos::Decoder dec;
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 5000));
+
+  // Ctrl+A, Espace, « moni », Entrée : le moniteur s'ouvre.
+  REQUIRE(send_all(client.get(),
+                   sshos::encode(sshos::Msg{sshos::Input{"\001 moni\r"}})));
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "charge", "Mem", 5000));
+
+  // SANS RIEN ENVOYER : une trame doit arriver toute seule.
+  bool woke_by_itself = false;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
+  while (std::chrono::steady_clock::now() < deadline) {
+    auto m = recv_one(client.get(), dec, 300);
+    if (m && std::get_if<sshos::FrameMsg>(&*m) != nullptr) {
+      woke_by_itself = true;
+      break;
+    }
+  }
+  CHECK(woke_by_itself);
+
+  // Minimisée, elle se tait. Ctrl+A puis « - ».
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{"\001-"}})));
+  // On laisse passer la trame du geste lui-même.
+  recv_one(client.get(), dec, 800);
+  while (recv_one(client.get(), dec, 300)) {
+  }
+
+  bool stayed_quiet = true;
+  deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+  while (std::chrono::steady_clock::now() < deadline) {
+    auto m = recv_one(client.get(), dec, 300);
+    if (m && std::get_if<sshos::FrameMsg>(&*m) != nullptr) {
+      stayed_quiet = false;
+      break;
+    }
+  }
+  CHECK(stayed_quiet);
+}

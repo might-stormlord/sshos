@@ -99,6 +99,17 @@ class App {
   // fenêtres y ajoute les décorations (voir frame_min, tâche 3).
   virtual Size min_size() const { return {10, 3}; }
 
+  // « Reveille-moi tous les N millisecondes tant que je suis VISIBLE. »
+  // -1, le defaut, veut dire « seulement quand quelque chose se passe » --
+  // ce qu'attend toute application qui ne fait que reagir aux touches.
+  //
+  // La visibilite n'est pas a l'application de la juger : c'est la session
+  // qui ignore les fenetres minimisees en collectant ces delais. Une
+  // application qui devrait le deviner elle-meme finirait par se tromper,
+  // et le seul defaut possible ici est de consommer du temps de calcul
+  // pour une fenetre que personne ne regarde.
+  virtual int refresh_ms() const { return -1; }
+
   virtual CloseCheck can_close() const { return CloseCheck::allow(); }
 };
 

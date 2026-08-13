@@ -129,6 +129,7 @@ int run_daemon(std::string_view socket_name) {
 
   // Valeur figee du projet : 50 ms d'ambiguite pour l'echappement.
   constexpr auto kEscAmbiguity = std::chrono::milliseconds(50);
+  FrameClock::Clock::time_point last_refresh = FrameClock::Clock::now();
   bool esc_armed = false;
   FrameClock::Clock::time_point esc_deadline{};
 
@@ -310,6 +311,23 @@ int run_daemon(std::string_view socket_name) {
     const int help_delay = session.help_delay_ms();
     if (help_delay >= 0) {
       timeout = (timeout < 0) ? help_delay : std::min(timeout, help_delay);
+    }
+    // Le rafraichissement periodique d'une application VISIBLE -- le
+    // moniteur systeme. Sans ce repli, ses chiffres ne bougeraient qu'a la
+    // frappe suivante : le demon ne dessine que sur une trame sale, et
+    // rien ne salit la trame quand seul le temps passe.
+    const int refresh_delay = client ? session.refresh_delay_ms() : -1;
+    if (refresh_delay >= 0) {
+      const auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+          FrameClock::Clock::now() - last_refresh);
+      const int left = std::max(0, refresh_delay - static_cast<int>(since.count()));
+      if (left == 0) {
+        clock.mark_dirty();
+        last_refresh = FrameClock::Clock::now();
+        timeout = 0;
+      } else {
+        timeout = (timeout < 0) ? left : std::min(timeout, left);
+      }
     }
     // Meme repli pour l'echappement en attente : sans lui, la touche
     // n'arriverait qu'au reveil suivant -- c'est-a-dire a la frappe

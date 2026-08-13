@@ -98,6 +98,16 @@ class Session : public ChildSink {
   // pour celui qui ne sait pas quoi taper.
   int help_delay_ms() const;
 
+  // Millisecondes avant qu'une application VISIBLE ne demande a etre
+  // redessinee, ou -1 si aucune n'en demande. Meme mecanique que
+  // help_delay_ms() : le demon la replie dans le delai de son epoll_wait,
+  // et marque la trame sale a l'echeance.
+  //
+  // C'EST ICI que se joue « un moniteur minimise ne consomme rien » : une
+  // fenetre Minimized n'entre pas dans le calcul, donc son delai ne
+  // reveille personne et son dessin n'a jamais lieu.
+  int refresh_delay_ms() const;
+
   WinHitResult hit_window_at(int x, int y) const;
 
   // Appelée par le démon au détachement d'un client et à l'attache du

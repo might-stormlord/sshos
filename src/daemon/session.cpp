@@ -375,6 +375,19 @@ void Session::close_window(Window& w) {
   wm_.close(w.id);
 }
 
+int Session::refresh_delay_ms() const {
+  int best = -1;
+  for (const auto& w : wm_.stack()) {
+    if (w == nullptr || w->app == nullptr) continue;
+    // La fenetre MINIMISEE ne compte pas : c'est toute la regle.
+    if (w->mode == WinMode::Minimized) continue;
+    const int want = w->app->refresh_ms();
+    if (want < 0) continue;
+    if (best < 0 || want < best) best = want;
+  }
+  return best;
+}
+
 Window* Session::window_for_tests(WindowId id) { return wm_.find(id); }
 
 void Session::close_window_for_tests(WindowId id) {
