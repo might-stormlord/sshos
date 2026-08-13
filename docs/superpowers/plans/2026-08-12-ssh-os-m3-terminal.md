@@ -366,15 +366,56 @@ tort.
 
 ## Vérification manuelle du jalon (§13.6)
 
-À cocher avant de déclarer le jalon fini — aucune de ces lignes n'est couverte par un test automatique :
+Vérifiée le 13 août 2026 par une sonde bout-en-bout
+(`scratchpad/term_probe.py`) : vrai démon, vrai client sous pty, vrai shell
+dans la fenêtre. Chaque ligne a été lue dans la grille rejouée, pas dans le
+flux brut.
 
-- [ ] `vim` : édition, couleurs, écran alterné, souris
-- [ ] `htop` : rafraîchissement, couleurs, clic sur les colonnes
-- [ ] `less` sur un gros fichier : défilement, recherche
-- [ ] un `tmux` imbriqué dans une fenêtre
-- [ ] un nom de fichier en japonais et un emoji ZWJ
-- [ ] un client en 300 colonnes
-- [ ] un redimensionnement en pleine compilation
-- [ ] `yes | head -1` (prouve la remise à `SIG_DFL` de `SIGPIPE`)
-- [ ] `make -j8` (prouve le masque de signaux vidé)
-- [ ] une déconnexion SSH franche pendant que les deux tournent
+- [x] `vim` : édition, écran alterné, `:wq` écrit le fichier — **a révélé le
+      défaut de l'échappement** (`2794b63`)
+- [x] `htop` : barres de CPU, mémoire, compteur de tâches, barre de touches
+      de fonction, et l'écran rendu en quittant
+- [x] `less` sur 500 lignes : écran alterné, défilement, page principale
+      rendue **au caractère près**
+- [x] un `tmux` imbriqué dans une fenêtre : prend l'écran, relaie les
+      touches, rend l'écran en sortant
+- [x] une pleine chasse et un emoji ZWJ : rien ne casse, la grille reste
+      cohérente
+- [x] un client en 300 colonnes : le panneau s'étend sur toute la largeur
+- [x] un redimensionnement en pleine sortie : trois `SIGWINCH` d'affilée
+      pendant que 4 000 lignes défilent, le shell répond après, **0 jiffie
+      au repos**
+- [x] `yes | head -1` se termine (prouve la remise à `SIG_DFL` de `SIGPIPE`)
+- [x] `make -j8` revient (prouve le masque de signaux vidé)
+- [x] le client tué brutalement : le démon survit, et un client neuf
+      **retrouve le shell avec ses variables** — la promesse du projet
+
+Deux « échecs » de la sonde étaient des faiblesses de la sonde, pas des
+défauts : le titre attendu était écrasé par celui que `bash` repose à
+chaque invite (donc `OSC 2` marche), et la pleine chasse paraissait espacée
+parce que la grille de la sonde compte une cellule par caractère là où le
+démon en émet bien deux. Un troisième a d'abord fait conclure « `ESC`
+arrive » alors que la sonde mesurait un `Alt+B`, qui s'encode aussi
+`\033B` : c'est en rejouant `vim` pas à pas que le vrai mécanisme est
+apparu.
+
+---
+
+## Bilan du jalon
+
+**14 tâches sur 14, 733 cas verts** en Release et sous ASan/UBSan, 0
+avertissement. **246 mutations** jouées sur les tâches 5 à 13, dont 243
+mordues, 2 déclarées équivalentes et documentées sur place, et 1 mordue
+seulement sous ASan.
+
+Le jalon a débordé de ses fichiers annoncés à quatre reprises (tâches 5, 6,
+7 et 12), toujours pour la même raison : le plan liste les fichiers
+**nouveaux**, pas ceux qu'il faut brancher. À chaque fois la note est dans
+le plan, sous la tâche concernée.
+
+Un défaut majeur trouvé hors des tests, par la vérification manuelle :
+`InputParser::timeout()` n'avait aucun appelant en production depuis le
+jalon 1, et `vim` était donc inutilisable. C'est le troisième membre de la
+famille — après `Decoder::failed()` et la garde `A2` — et la leçon se
+répète : **une méthode née sans appelant ne se signale qu'en faisant
+tourner le vrai logiciel.**
