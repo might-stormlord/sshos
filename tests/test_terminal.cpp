@@ -533,3 +533,22 @@ TEST(terminal_paints_the_history_in_order) {
   REQUIRE_EQ(t.scrollback_for_tests().offset(), size_t{2});
   CHECK_EQ(painted(t, 10, 2), std::string("une/deux"));
 }
+
+// SEULS `OSC 0` et `OSC 2` posent le titre. Un `OSC 4` (palette) ou un
+// `OSC 8` (lien) renommerait sinon la fenêtre avec sa charge utile -- et
+// un shell en émet sans arrêt.
+TEST(terminal_only_takes_its_title_from_osc_zero_and_two) {
+  FakeHost host;
+  Terminal t({"/bin/sh", "-c", "read ignore"});
+  t.on_resize(Size{40, 4});
+  t.attach(host);
+
+  t.feed_for_tests("\033]2;le bon\033\\");
+  REQUIRE_EQ(host.title, std::string("le bon"));
+
+  t.feed_for_tests("\033]4;1;rgb:00/00/00\033\\");
+  CHECK_EQ(host.title, std::string("le bon"));
+
+  t.feed_for_tests("\033]0;aussi bon\033\\");
+  CHECK_EQ(host.title, std::string("aussi bon"));
+}

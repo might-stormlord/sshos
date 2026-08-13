@@ -334,7 +334,16 @@ La fenêtre affiche `[processus terminé (code 1) — Entrée ou clic pour ferme
 
 **Tests :** la grille arrive dans la `View` ; un titre `OSC 2` remonte au cadre ; le curseur suit ; un redimensionnement pose la bonne taille ; la souris n'est transmise que si le mode est actif ; goldens d'un écran de terminal.
 
-- [ ] Tâche 13 livrée : tests, mutations, commit
+- [x] Tâche 13 livrée : tests, mutations, commit — `ad818c0`, 37 tests, 41 mutations
+
+Les références de rendu ont été régénérées : le Terminal entre au
+catalogue, donc le panneau et le menu le listent. Trois cas de
+`test_panel.cpp` écrivaient l'index du catalogue en dur et cherchent
+maintenant leur entrée par identifiant.
+
+Reste hors périmètre, faute d'énoncé : le `SIGHUP` puis `SIGKILL` après
+délai de grâce est celui du destructeur de `Pty` (jalon 3, tâche 1), pas
+un délai géré par le liant.
 
 ## Tâche 14 — Fuzzing du parseur sous ASan
 
