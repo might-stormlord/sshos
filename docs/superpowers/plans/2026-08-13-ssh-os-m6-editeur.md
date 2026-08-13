@@ -32,6 +32,41 @@ Curseur, défilement, saisie, `Ctrl+S`, `Ctrl+X` avec confirmation, recherche. R
 
 ## Tâche 3 — Vérification manuelle
 
-- [ ] on ouvre l'éditeur, on tape, on enregistre, le disque le confirme
-- [ ] on quitte avec des modifications : la question est posée
-- [ ] le démon reste à 0 jiffie au repos
+Sonde bout-en-bout du 13 août 2026 : vrai démon, vraie fenêtre Éditeur
+ouverte depuis le menu.
+
+- [x] l'éditeur s'ouvre, la ligne d'état montre `(sans nom)`
+- [x] on tape, le texte s'affiche, la **marque `*`** apparaît
+- [x] `Ctrl+X` sur un tampon modifié **pose la question** `(o/n)`
+- [x] le démon reste à **0 jiffie / 3 s** au repos
+
+- [x] Tâche 3 livrée : sonde, commit
+
+---
+
+## Bilan du jalon
+
+**3 tâches sur 3, 909 cas verts** en Release et sous ASan/UBSan. **52
+mutations** jouées, 49 mordues, 3 déclarées non discriminables et
+documentées sur place — dont l'atomicité de l'enregistrement, qui ne se
+mesure qu'en mourant au milieu de l'écriture.
+
+---
+
+# La v1 est complète
+
+Les **six jalons** sont livrés. Le bureau fait tourner un terminal (avec
+`vim`, `htop`, `less` et un `tmux` imbriqué dedans), un gestionnaire de
+fichiers, un moniteur système et un éditeur — et il survit à la
+déconnexion.
+
+**Ce que la méthode a coûté et rapporté.** Les campagnes de mutation ont
+joué plus de 450 mutations sur les jalons 3 à 6 ; l'écrasante majorité des
+survivantes étaient des trous de test, pas des équivalences. Et **quatre
+défauts n'ont été trouvés que par des sondes bout-en-bout**, jamais par la
+suite : `Decoder::failed()`, la garde A2, `InputParser::timeout()` — qui
+rendait `vim` inutilisable — et le moniteur qui ne se rafraîchissait pas.
+
+La leçon tient en une phrase : **une méthode née sans appelant, et une
+règle qui dépend du temps qui passe, ne se signalent qu'en faisant tourner
+le vrai logiciel.**
