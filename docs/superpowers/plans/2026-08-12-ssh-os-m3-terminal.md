@@ -294,7 +294,7 @@ tâche 3 (« la tâche 10 y ajoutera le jeu de caractères ») est soldée.
 
 **Tests :** aller-retour `parse(encode(k)) == k` sur toute la table des touches, dans les deux modes de `DECCKM` ; `Ctrl+A` rend `\001` ; `Alt+a` rend `\033a`.
 
-- [ ] Tâche 11 livrée : tests, mutations, commit
+- [x] Tâche 11 livrée : tests, mutations, commit — `f1a8c56`, 18 tests, 26 mutations
 
 ## Tâche 12 — `SIGCHLD` et la fin de processus
 
