@@ -67,7 +67,13 @@ L'état de vue : sélection, décalage de défilement, filtre en cours. `Entrée
 
 **Tests :** descendre puis remonter revient au même endroit avec la même sélection ; le filtre qui vide la liste ne laisse pas une sélection hors bornes ; le défilement suit la sélection aux deux bouts ; la racine n'a pas de parent.
 
-- [ ] Tâche 2 livrée : tests, mutations, commit
+- [x] Tâche 2 livrée : tests, mutations, commit — `0bf14a3`, 32 tests, 33 mutations
+  (2 équivalentes)
+
+**Le code a précédé les tests pour cette tâche, et la campagne l'a dit :**
+14 survivantes sur 33 au premier tour, contre 8 sur 23 à la tâche 1 et
+10 sur 41 à la tâche 13 du jalon 3, toutes deux écrites en TDD. À ne pas
+refaire aux tâches 3 et 4.
 
 ## Tâche 3 — Renommer et supprimer
 

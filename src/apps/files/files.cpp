@@ -48,6 +48,11 @@ void Files::settle() {
   // bornes le poserait n'importe où, et la fenêtre montrerait une page qui
   // ne contient pas la ligne choisie.
   if (visible_.empty()) {
+    // Remise à zéro DÉFENSIVE, et non discriminable aujourd'hui : la seule
+    // façon d'avoir une liste vide est de partir d'un répertoire
+    // illisible, et la sélection y vaut déjà zéro. Elle reste parce
+    // qu'elle deviendra porteuse le jour où une liste non vide pourra le
+    // devenir -- une suppression qui vide le dossier, par exemple.
     sel_ = 0;
     top_ = 0;
     return;
@@ -135,6 +140,12 @@ void Files::on_key(const KeyEvent& k) {
       settle();
       return;
     case Key::Down:
+      // Cette garde-ci n'est PAS porteuse -- `settle()` borne juste après,
+      // et la mutation qui la retire est équivalente. Celle de la flèche
+      // haut l'est, elle : `--sel_` sur zéro déborde par le bas et
+      // enverrait la sélection À LA FIN de la liste. On les garde
+      // symétriques pour que le lecteur n'ait pas à refaire cette
+      // vérification.
       if (sel_ + 1 < visible_.size()) ++sel_;
       settle();
       return;
