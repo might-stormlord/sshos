@@ -93,9 +93,13 @@ TEST(panel_marks_the_active_and_the_minimized_windows) {
   b->title = "Bloc";
   wm.set_mode(a->id, WinMode::Minimized, work);
   wm.focus(b->id);
-  p.layout(wm, 80, 24, true);
+  // LARGE À DESSEIN : ce cas parle des MARQUES, pas de la capacité du
+  // panneau. À 80 colonnes, le catalogue à cinq entrées ne laisse plus la
+  // place aux deux fenêtres, et le panneau les replie -- ce qui est son
+  // travail, mais qui ferait échouer un test qui ne parle pas de ça.
+  p.layout(wm, 140, 24, true);
 
-  Surface s(80, 24);
+  Surface s(140, 24);
   View v = s.root();
   p.draw(v, Theme::mono16(), "10:05");
   const std::string row = s.text_row(23);
@@ -106,7 +110,7 @@ TEST(panel_marks_the_active_and_the_minimized_windows) {
   // row.find('_') resterait vert même sans aucune marque de réduction.
   int ax = -1;
   int bx = -1;
-  for (int x = 0; x < 80; ++x) {
+  for (int x = 0; x < 140; ++x) {
     const PanelHitResult h = p.hit(x, 23);
     if (h.what != PanelHit::Task) continue;
     if (h.win == a->id && ax < 0) ax = x;
@@ -417,9 +421,12 @@ TEST(panel_shows_the_leader_reminder_when_there_is_room) {
   p.set_edge(PanelEdge::Bottom);
   p.set_hint("^A = aide");
   WindowManager wm;
-  p.layout(wm, 80, 24, true);
+  // « quand il y a de la place » : à 80 colonnes le catalogue à cinq
+  // entrées n'en laisse plus, et le panneau retire l'aide EN PREMIER --
+  // c'est exactement ce que vérifie le cas suivant.
+  p.layout(wm, 140, 24, true);
 
-  Surface s(80, 24);
+  Surface s(140, 24);
   View v = s.root();
   p.draw(v, Theme::mono16(), "10:05");
   CHECK(s.text_row(23).find("^A = aide") != std::string::npos);

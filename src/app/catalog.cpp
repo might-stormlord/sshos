@@ -2,6 +2,7 @@
 
 #include "apps/battement.hpp"
 #include "apps/bloc.hpp"
+#include "apps/editor/editor.hpp"
 #include "apps/files/files.hpp"
 #include "apps/monitor/monitor.hpp"
 #include "apps/terminal.hpp"
@@ -14,6 +15,7 @@ std::unique_ptr<App> make_battement() { return std::make_unique<Battement>(); }
 std::unique_ptr<App> make_terminal() { return std::make_unique<Terminal>(); }
 std::unique_ptr<App> make_files() { return std::make_unique<Files>(); }
 std::unique_ptr<App> make_monitor() { return std::make_unique<Monitor>(); }
+std::unique_ptr<App> make_editor() { return std::make_unique<Editor>(); }
 
 }  // namespace
 
@@ -28,6 +30,7 @@ const std::vector<CatalogEntry>& catalog() {
       {"terminal", "Terminal", &make_terminal},
       {"fichiers", "Fichiers", &make_files},
       {"moniteur", "Moniteur", &make_monitor},
+      {"editeur", "Editeur", &make_editor},
       {"bloc", "Bloc", &make_bloc},
       {"battement", "Battement", &make_battement},
   };
