@@ -3527,16 +3527,32 @@ TEST(daemon_redraws_a_visible_app_that_asks_and_leaves_a_minimized_one_alone) {
 
   // Minimisée, elle se tait. Ctrl+A puis « - ».
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{"\001-"}})));
-  // On laisse passer la trame du geste lui-même.
-  recv_one(client.get(), dec, 800);
-  while (recv_one(client.get(), dec, 300)) {
+  // ON ATTEND LE SILENCE avant de le mesurer. Le geste lui-même produit
+  // une trame -- la géométrie change -- et le démon peut l'émettre avec
+  // un retard qui déborde sur la fenêtre de mesure. Vider « un coup »
+  // suffisait sept fois sur huit ; la huitième prenait la trame du geste
+  // pour un rafraîchissement, et le cas tombait sans qu'aucun code ne
+  // soit en cause. On draine donc jusqu'à 600 ms consécutives sans rien.
+  {
+    const auto quiet_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(4000);
+    while (std::chrono::steady_clock::now() < quiet_deadline) {
+      if (!recv_one(client.get(), dec, 600)) break;
+    }
   }
 
+  // On cherche le CONTENU du moniteur, pas « une trame quelconque » :
+  // l'horloge du panneau repeint à chaque changement de minute, et une
+  // fenêtre d'observation de deux secondes la croise une fois sur dix.
+  // Mesurer « aucune trame » faisait donc tomber le cas sans qu'aucun code
+  // ne soit en cause. Une fenêtre minimisée n'étant pas dessinée, ses mots
+  // à elle ne peuvent plus apparaître -- c'est ça, la propriété.
   bool stayed_quiet = true;
   deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
   while (std::chrono::steady_clock::now() < deadline) {
     auto m = recv_one(client.get(), dec, 300);
-    if (m && std::get_if<sshos::FrameMsg>(&*m) != nullptr) {
+    const auto* f = m ? std::get_if<sshos::FrameMsg>(&*m) : nullptr;
+    if (f != nullptr && f->ansi.find("charge") != std::string::npos) {
       stayed_quiet = false;
       break;
     }
