@@ -28,7 +28,7 @@ Vecteur de lignes. Insertion et suppression de caractère, retour à la ligne, f
 
 Curseur, défilement, saisie, `Ctrl+S`, `Ctrl+X` avec confirmation, recherche. Rendu avec numéro de ligne et indicateur de modification.
 
-- [ ] Tâche 2 livrée : tests, mutations, commit
+- [x] Tâche 2 livrée : tests, mutations, commit — `324cfd3`, 29 tests, 28 mutations (2 non discriminables)
 
 ## Tâche 3 — Vérification manuelle
 
