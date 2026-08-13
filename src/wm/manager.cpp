@@ -118,6 +118,13 @@ void WindowManager::focus(WindowId id) {
   focused_ = id;
 }
 
+void WindowManager::set_rect(WindowId id, const Rect& user, const Rect& work) {
+  Window* w = find(id);
+  if (w == nullptr || w->app == nullptr) return;
+  w->user_rect = user;
+  w->display_rect = clamp_to(w->user_rect, work, frame_min(*w->app));
+}
+
 void WindowManager::step(int delta) {
   const int n = static_cast<int>(stack_.size());
   if (n == 0) return;

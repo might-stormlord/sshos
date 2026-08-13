@@ -38,6 +38,11 @@ class WindowManager {
   Window* hit(int x, int y);
   void set_mode(WindowId id, WinMode m, const Rect& work);
 
+  // Pose la géométrie VOULUE d'une fenêtre et recalcule sa projection.
+  // C'est par ici que passe le rangement automatique : il décide des
+  // rectangles, le gestionnaire reste seul à savoir les contraindre.
+  void set_rect(WindowId id, const Rect& user, const Rect& work);
+
  private:
   void step(int delta);
 

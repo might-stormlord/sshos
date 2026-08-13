@@ -43,9 +43,13 @@ void Menu::open() {
   all_.push_back({"panel:bottom", "Panneau : bas"});
   all_.push_back({"panel:left", "Panneau : gauche"});
   all_.push_back({"panel:right", "Panneau : droite"});
-  all_.push_back({"cmd:beat", "Battement : battre"});
-  all_.push_back({"cmd:cut", "Battement : couper la source"});
-  all_.push_back({"session:quit", "Quitter la session"});
+  all_.push_back({"wm:tile", "Ranger les fenetres"});
+  // DEUX SORTIES, ET ELLES NE FONT PAS LA MEME CHOSE. La premiere rend la
+  // main en gardant tout ; la seconde detruit. Les nommer « Quitter » et
+  // « Quitter la session » les rendait indistinguables -- et c'est la
+  // destructive qu'on choisissait par defaut.
+  all_.push_back({"session:detach", "Quitter (la session est conservee)"});
+  all_.push_back({"session:quit", "Fermer la session (tout est perdu)"});
   refilter();
 }
 

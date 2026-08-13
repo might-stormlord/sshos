@@ -67,6 +67,9 @@ class Session : public ChildSink {
   // vérifier sans monter un démon entier est de tendre la fenêtre. Aucun
   // code de production ne doit les lire.
   Window* window_for_tests(WindowId id);
+  const std::vector<std::unique_ptr<Window>>& windows_for_tests() const {
+    return wm_.stack();
+  }
   size_t watched_children_for_tests() const { return children_.size(); }
   void close_window_for_tests(WindowId id);
 
@@ -119,6 +122,9 @@ class Session : public ChildSink {
   // tout gestionnaire de fenêtres. Le seul chemin qui garde la nouvelle
   // position est le relâchement, qui passe par finish_drag().
   void cancel_drag();
+  // Range les fenêtres visibles pour qu'elles remplissent la zone de
+  // travail sans se chevaucher.
+  void tile_windows();
 
  private:
   struct Idle {};
@@ -231,6 +237,10 @@ class Session : public ChildSink {
   std::string out_of_band_;
   bool repaint_ = false;
   bool detach_ = false;
+  // La modale sert à deux choses : fermer une fenêtre, ou fermer la
+  // SESSION. Sans ce drapeau, la réponse « oui » ne saurait pas à quoi
+  // elle répond.
+  bool modal_quits_session_ = false;
 
   // Repeint demandé hors de toute entrée utilisateur : l'horloge qui change
   // de minute, une application qui appelle Host::invalidate(). HostImpl en

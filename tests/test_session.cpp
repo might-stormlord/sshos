@@ -310,13 +310,52 @@ TEST(session_quits_only_when_the_menu_says_so) {
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
-  for (char c : std::string("quitter")) {
+  for (char c : std::string("fermer")) {
     sess.on_input(sshos::InputEvent{sshos::KeyEvent{
         sshos::Key::Char, static_cast<char32_t>(c), 0}});
   }
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  // ON DEMANDE D'ABORD. Fermer la session détruit le travail de toutes les
+  // fenêtres à la fois, et c'était jusqu'ici à un clic de distance -- au
+  // milieu du menu, juste sous une entrée qui ne détruit rien.
+  CHECK(!sess.wants_quit());
+
+  // La modale s'ouvre sur « annuler » : Entrée seule ne détruit rien. Il
+  // faut ALLER CHERCHER la confirmation, ce qui est le point.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  CHECK(!sess.wants_quit());
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  for (char c : std::string("fermer")) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{
+        sshos::Key::Char, static_cast<char32_t>(c), 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Tab, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
   CHECK(sess.wants_quit());
   CHECK(!sess.take_detach());
+}
+
+// L'AUTRE SORTIE : elle rend la main SANS rien détruire. Les deux étaient
+// nommées « Quitter » et « Quitter la session », donc indistinguables --
+// et c'est la destructive qu'on choisissait par défaut.
+TEST(session_detaches_without_destroying_anything_from_the_menu) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  for (char c : std::string("conservee")) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{
+        sshos::Key::Char, static_cast<char32_t>(c), 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  CHECK(!sess.wants_quit());
+  CHECK(sess.take_detach());
 }
 
 // A1, second embranchement : quand la largeur suffit à accueillir le message
@@ -1016,7 +1055,7 @@ TEST(session_opens_an_application_through_the_menu) {
   Surface open(80, 24);
   sess.render(open);
   // Le menu est là : il porte ses entrées, dont celle qui ne lance rien.
-  CHECK(surface_contains(open, "Quitter la session"));
+  CHECK(surface_contains(open, "Fermer la session"));
 
   // Filtrer sur « battement » puis valider.
   for (const char32_t c : {U'b', U'a', U't', U't'}) {
@@ -1091,7 +1130,7 @@ TEST(session_answers_clicks_on_the_panel) {
   press_at(sess, 2, 23);  // « ☰ ssh_os » / « ssh_os »
   Surface menu(80, 24);
   sess.render(menu);
-  CHECK(surface_contains(menu, "Quitter la session"));
+  CHECK(surface_contains(menu, "Fermer la session"));
 
   press_at(sess, 2, 23);  // le même clic referme (hors du menu)
   Surface closed(80, 24);
@@ -1211,7 +1250,7 @@ TEST(session_lets_nothing_through_while_the_modal_is_up) {
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
   Surface still(80, 24);
   sess.render(still);
-  CHECK(!surface_contains(still, "Quitter la session"));
+  CHECK(!surface_contains(still, "Fermer la session"));
   CHECK(surface_contains(still, "modifications"));
 
   // Un clic sur la barre de titre de la fenêtre en dessous n'engage aucun
@@ -2147,10 +2186,12 @@ TEST(daemon_quits_when_the_menu_asks_for_it_over_the_wire) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  // L'entrée « Quitter la session » du menu, tapée sur le fil : c'est
-  // désormais le seul chemin qui arrête le démon (Ctrl+Q détache).
+  // « Fermer la session » du menu, tapée sur le fil : c'est le seul chemin
+  // qui arrête le démon (Ctrl+Q détache). Elle DEMANDE désormais, d'où la
+  // tabulation qui va chercher la confirmation puis l'Entrée qui la donne
+  // -- une Entrée seule tombe sur « annuler », et c'est le point.
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{
-                                     "\x01 quitter\r"}})));
+                                     "\x01 fermer\r\t\r"}})));
 
   int status = 0;
   bool exited = false;
@@ -2567,7 +2608,7 @@ TEST(daemon_processes_input_sent_just_before_the_client_closes) {
   const bool stopped = wait_until_stopped(daemon.pid(), 2000);
   const bool sent = send_all(  // « Quitter la session » au menu
       client.get(),
-      sshos::encode(sshos::Msg{sshos::Input{"\x01 quitter\r"}}));
+      sshos::encode(sshos::Msg{sshos::Input{"\x01 fermer\r\t\r"}}));
   // Fermeture immédiate : le FIN suit les octets sur le même socket, sans
   // laisser au démon la moindre occasion de se réveiller entre les deux.
   client.reset();
@@ -3558,4 +3599,40 @@ TEST(daemon_redraws_a_visible_app_that_asks_and_leaves_a_minimized_one_alone) {
     }
   }
   CHECK(stayed_quiet);
+}
+
+// LE RANGEMENT DES FENÊTRES. Deux fenêtres ouvertes doivent se retrouver
+// côte à côte, chacune sur une moitié pleine hauteur -- c'est le cas que
+// tout le monde attend, et le seul qui se vérifie d'un coup d'œil.
+TEST(session_tiles_its_windows_side_by_side_from_the_menu) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);  // amorce la première fenêtre
+
+  const sshos::WindowId second = sess.open_from_catalog("editeur");
+  REQUIRE(second != 0);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  for (char c : std::string("ranger")) {
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{
+        sshos::Key::Char, static_cast<char32_t>(c), 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  sess.render(s);
+
+  std::vector<sshos::Rect> seen;
+  for (const auto& w : sess.windows_for_tests()) {
+    if (w->mode != sshos::WinMode::Minimized) seen.push_back(w->display_rect);
+  }
+  REQUIRE_EQ(seen.size(), size_t{2});
+  // Deux colonnes, pleine hauteur, qui se touchent sans se chevaucher.
+  CHECK_EQ(seen[0].h, seen[1].h);
+  CHECK_EQ(seen[0].w, seen[1].w);
+  CHECK(seen[0].x != seen[1].x);
+  CHECK_EQ(std::min(seen[0].x, seen[1].x) + seen[0].w,
+           std::max(seen[0].x, seen[1].x));
 }

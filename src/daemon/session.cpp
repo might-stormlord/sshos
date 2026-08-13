@@ -1,5 +1,7 @@
 #include "daemon/session.hpp"
 
+#include "wm/tile.hpp"
+
 #include <memory>
 #include <string>
 #include <variant>
@@ -158,7 +160,25 @@ void Session::run_menu(const std::string& id) {
     if (Window* w = wm_.find(wm_.focused())) w->app->on_command(id.substr(4));
     return;
   }
-  if (id == "session:quit") quit_ = true;
+  if (id == "wm:tile") {
+    tile_windows();
+    return;
+  }
+  if (id == "session:detach") {
+    // Exactement ce que fait Ctrl+Q : le client s'en va, la session
+    // continue de vivre dans le démon avec toutes ses fenêtres.
+    detach_ = true;
+    return;
+  }
+  if (id == "session:quit") {
+    // ON DEMANDE. C'est le seul geste du bureau qui détruise le travail de
+    // toutes les fenêtres à la fois, et il était jusqu'ici à un clic de
+    // distance -- au milieu du menu, juste sous « Quitter », qui lui ne
+    // détruit rien.
+    modal_quits_session_ = true;
+    modal_.ask("Fermer la session ? Toutes les fenetres seront perdues.", 0);
+    dirty_ = true;
+  }
 }
 
 void Session::menu_key(const KeyEvent& k) {
@@ -352,9 +372,35 @@ void Session::request_close(Window& w) {
 
 void Session::answer_modal(bool confirmed) {
   if (confirmed) {
-    if (Window* t = wm_.find(modal_.target())) close_window(*t);
+    if (modal_quits_session_) {
+      quit_ = true;
+    } else if (Window* t = wm_.find(modal_.target())) {
+      close_window(*t);
+    }
   }
+  modal_quits_session_ = false;
   modal_.dismiss();
+  dirty_ = true;
+}
+
+// Le rangement ne touche QUE les fenêtres visibles : une fenêtre réduite
+// n'occupe aucune place, et lui en donner une la ferait réapparaître sans
+// qu'on l'ait demandé.
+void Session::tile_windows() {
+  std::vector<WindowId> visible;
+  for (const auto& w : wm_.stack()) {
+    if (w != nullptr && w->mode != WinMode::Minimized) visible.push_back(w->id);
+  }
+  if (visible.empty()) return;
+
+  const std::vector<Rect> cells =
+      tile_rects(last_work_, static_cast<int>(visible.size()));
+  for (size_t i = 0; i < visible.size() && i < cells.size(); ++i) {
+    // Une fenêtre maximisée ou plein écran redevient normale : la ranger
+    // sans cela lui donnerait une géométrie que son mode ignore.
+    wm_.set_mode(visible[i], WinMode::Normal, last_work_);
+    wm_.set_rect(visible[i], cells[i], last_work_);
+  }
   dirty_ = true;
 }
 

@@ -42,8 +42,11 @@ TEST(menu_starts_closed_and_lists_everything_when_opened) {
   CHECK(index_of(m, "panel:bottom") >= 0);
   CHECK(index_of(m, "panel:left") >= 0);
   CHECK(index_of(m, "panel:right") >= 0);
-  CHECK(index_of(m, "cmd:beat") >= 0);
-  CHECK(index_of(m, "cmd:cut") >= 0);
+  CHECK(index_of(m, "wm:tile") >= 0);
+  // LES DEUX SORTIES, et elles doivent être distinctes : l'une rend la
+  // main en gardant tout, l'autre détruit.
+  CHECK(index_of(m, "session:detach") >= 0);
+  CHECK(index_of(m, "session:quit") >= 0);
   CHECK(index_of(m, "session:quit") >= 0);
   REQUIRE(m.selected() != nullptr);
   CHECK_EQ(m.selection(), 0);
