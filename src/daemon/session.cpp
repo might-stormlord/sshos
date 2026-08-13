@@ -148,7 +148,12 @@ void Session::run_menu(const std::string& id) {
   };
 
   if (starts("app:")) {
-    focus_or_open(id.substr(4));
+    // LE MENU OUVRE, IL NE RAPPELLE PAS. Il rappelait la fenetre existante
+    // quand il y en avait une, ce qui rendait impossible d'ouvrir deux
+    // terminaux -- le geste le plus courant du bureau. Rappeler est le
+    // travail de la BARRE DES TACHES, qui existe pour ca ; le menu, lui,
+    // est un lanceur.
+    open_from_catalog(id.substr(4));
     return;
   }
   if (starts("panel:")) {
@@ -658,13 +663,31 @@ void Session::on_mouse(const MouseEvent& m) {
       case PanelHit::Pinned: {
         const auto& cat = catalog();
         if (ph.index >= 0 && ph.index < static_cast<int>(cat.size())) {
-          focus_or_open(cat[static_cast<size_t>(ph.index)].id);
+          const std::string& app = cat[static_cast<size_t>(ph.index)].id;
+          // CLIC DROIT : une NOUVELLE instance, sans regarder ce qui est
+          // deja ouvert. Clic gauche : on rappelle si ca existe. Les deux
+          // gestes repondent a deux questions differentes -- « retourne a
+          // celle-la » et « donne m'en une autre » -- et les confondre
+          // enfermait l'utilisateur dans une seule fenetre par
+          // application.
+          if (m.button == 2) {
+            open_from_catalog(app);
+          } else {
+            focus_or_open(app);
+          }
         }
         break;
       }
       case PanelHit::Task: {
         Window* t = wm_.find(ph.win);
         if (t == nullptr) break;
+        // Meme regle sur une fenetre deja ouverte : le clic droit en
+        // ouvre une DE PLUS de la meme application, plutot que de jouer
+        // avec celle-ci.
+        if (m.button == 2) {
+          if (!t->app_id.empty()) open_from_catalog(t->app_id);
+          break;
+        }
         // Cliquer l'entrée de la fenêtre active la réduit ; cliquer celle
         // d'une autre la rappelle. C'est la convention de toutes les barres
         // des tâches, et elle rend le clic idempotent par paire.

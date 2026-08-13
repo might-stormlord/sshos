@@ -3595,3 +3595,84 @@ TEST(session_tiles_its_windows_side_by_side_from_the_menu) {
   CHECK_EQ(std::min(seen[0].x, seen[1].x) + seen[0].w,
            std::max(seen[0].x, seen[1].x));
 }
+
+// ------------------------------------------- ouvrir DEUX fois la meme app
+
+// LE MENU EST UN LANCEUR, PAS UN RAPPEL. Il rappelait la fenêtre existante
+// quand il y en avait une, ce qui rendait impossible d'ouvrir deux
+// terminaux -- le geste le plus courant du bureau. Rappeler est le travail
+// de la barre des tâches, qui existe pour ça.
+TEST(session_opens_a_second_instance_from_the_menu) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+
+  const size_t before = sess.windows_for_tests().size();
+  for (int i = 0; i < 2; ++i) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+    for (char c : std::string("edit")) {
+      sess.on_input(sshos::InputEvent{sshos::KeyEvent{
+          sshos::Key::Char, static_cast<char32_t>(c), 0}});
+    }
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+    sess.render(s);
+  }
+
+  CHECK_EQ(sess.windows_for_tests().size(), before + 2);
+}
+
+// LA BARRE DES TÂCHES, ELLE, RAPPELLE au clic gauche : c'est sa raison
+// d'être, et empiler une fenêtre de plus à chaque clic serait le contraire
+// de ce qu'on demande en visant une entrée qui existe déjà.
+TEST(panel_recalls_instead_of_opening_on_a_left_click) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  const sshos::WindowId opened = sess.open_from_catalog("editeur");
+  REQUIRE(opened != 0);
+  sess.render(s);
+  const size_t before = sess.windows_for_tests().size();
+
+  // On cherche la cellule que le hit-test donne à cette fenêtre.
+  int x = -1;
+  for (int i = 0; i < 60 && x < 0; ++i) {
+    const sshos::PanelHitResult h = sess.panel_hit_for_tests(i, 19);
+    if (h.what == sshos::PanelHit::Task && h.win == opened) x = i;
+  }
+  REQUIRE(x >= 0);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 0, x, 19, 0}});
+  CHECK_EQ(sess.windows_for_tests().size(), before);
+}
+
+// ET LE CLIC DROIT EN OUVRE UNE DE PLUS. Les deux gestes répondent à deux
+// questions différentes -- « retourne à celle-là » et « donne m'en une
+// autre » -- et les confondre enfermait l'utilisateur dans une seule
+// fenêtre par application.
+TEST(panel_opens_a_new_instance_on_a_right_click) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  const sshos::WindowId opened = sess.open_from_catalog("editeur");
+  REQUIRE(opened != 0);
+  sess.render(s);
+  const size_t before = sess.windows_for_tests().size();
+
+  int x = -1;
+  for (int i = 0; i < 60 && x < 0; ++i) {
+    const sshos::PanelHitResult h = sess.panel_hit_for_tests(i, 19);
+    if (h.what == sshos::PanelHit::Task && h.win == opened) x = i;
+  }
+  REQUIRE(x >= 0);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 2, x, 19, 0}});
+  sess.render(s);
+  CHECK_EQ(sess.windows_for_tests().size(), before + 1);
+}

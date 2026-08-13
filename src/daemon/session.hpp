@@ -76,6 +76,12 @@ class Session : public ChildSink {
   using AppFactory = std::unique_ptr<App> (*)();
   static void set_seed_factory_for_tests(AppFactory make);
 
+  // Le hit-test du panneau, pour les cas qui doivent viser une entree
+  // sans rejouer sa mise en page.
+  PanelHitResult panel_hit_for_tests(int x, int y) const {
+    return panel_.hit(x, y);
+  }
+
   Window* window_for_tests(WindowId id);
   const std::vector<std::unique_ptr<Window>>& windows_for_tests() const {
     return wm_.stack();
