@@ -1,9 +1,9 @@
-ssh_os                                                      
+ssh_os                                 PROCESSEUR           
  Terminal         Bloc                            [_][o][x] 
  Fichiers       |taille: 42x12                             |
- Moniteur       |clics: 1                                  |
- Editeur        |resize: 1                                 |
-*Bloc           |                                          |
+ Editeur        |clics: 1                                  |
+*Bloc           |resize: 1                                 |
+                |                                          |
                 |                                          |
                 |                                          |
                 |                                          |

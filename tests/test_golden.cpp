@@ -184,7 +184,7 @@ TEST(golden_two_overlapping_windows) {
 
 TEST(golden_a_minimized_window_keeps_its_panel_entry) {
   GOLDEN("fenetre_reduite", [](Session& s) {
-    s.open_from_catalog("moniteur");
+    s.open_from_catalog("fichiers");
     chord(s, U'-');
   });
 }

@@ -483,6 +483,7 @@ void run_case_and_track(const th::Case& c, int& ran, int& failed_cases) {
 
 #include "daemon/session.hpp"
 #include "fake_apps.hpp"
+#include "shell/sysinfo.hpp"
 
 // UNE SEULE FOIS, pour toute la suite : la fenetre amorcee est le double
 // factice, pas un Terminal. Un Terminal lancerait un vrai shell dans
@@ -494,7 +495,13 @@ std::unique_ptr<sshos::App> make_seed_double() {
   return std::make_unique<sshos::Bloc>();
 }
 struct SeedOnce {
-  SeedOnce() { sshos::Session::set_seed_factory_for_tests(&make_seed_double); }
+  SeedOnce() {
+    sshos::Session::set_seed_factory_for_tests(&make_seed_double);
+    // Le moniteur de fond lit la vraie machine : gele, il ne rend aucune
+    // reference de rendu instable. Son dessin est couvert par
+    // test_sysinfo.cpp, qui lui donne des chiffres choisis.
+    sshos::SysInfo::freeze_for_tests();
+  }
 } g_seed_once;
 }  // namespace
 

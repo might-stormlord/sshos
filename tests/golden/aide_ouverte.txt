@@ -1,4 +1,4 @@
-                                                            
+                               PROCESSEUR                   
    +----------------------------------------------------+   
   || Ctrl+A puis :       + s'enchaine                   |   
   ||                                                    |   
@@ -17,4 +17,4 @@
    | <leader>              L'envoyer a l'application    |   
    +----------------------------------------------------+   
                                                             
- ssh_os  Terminal  Fichiers  Moniteur  Editeur *Bloc  10:05 
+ ssh_os  Terminal  Fichiers  Editeur *Bloc  ^A = aide 10:05 

@@ -624,7 +624,7 @@ int title_row_of(const Surface& s, int rows) {
     const std::string row = s.text_row(y);
     if (row.find("Bloc") != std::string::npos ||
         row.find("Editeur") != std::string::npos ||
-        row.find("Moniteur") != std::string::npos) {
+        row.find("Fichiers") != std::string::npos) {
       return y;
     }
   }
@@ -1072,7 +1072,7 @@ TEST(session_opens_an_application_through_the_menu) {
   CHECK(surface_contains(open, "Fermer la session"));
 
   // Filtrer sur « moniteur » puis valider.
-  for (const char32_t c : {U'm', U'o', U'n', U'i'}) {
+  for (const char32_t c : {U'f', U'i', U'c', U'h'}) {
     sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, c, 0}});
   }
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
@@ -1081,7 +1081,7 @@ TEST(session_opens_an_application_through_the_menu) {
   sess.render(after);
   bool found = false;
   for (int y = 0; y < 23; ++y) {
-    if (after.text_row(y).find("charge") != std::string::npos) found = true;
+    if (after.text_row(y).find("Fichiers") != std::string::npos) found = true;
   }
   CHECK(found);
 
@@ -2765,7 +2765,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   // Ouvre Battement par le menu, et attend de le VOIR : sans ce point de
   // synchronisation, le Ctrl+Q pourrait doubler l'ouverture.
   REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{
-                                "\x01 moni\r"}})));
+                                "\x01 fich\r"}})));
   // Puis un repeint complet forcé (<leader>r) AVANT de relever quoi que ce
   // soit. Sans lui la trame est un delta, et un delta ne réémet que les
   // cellules changées : la première tentative de ce test cherchait un motif
@@ -2773,7 +2773,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   // le différentiel n'envoyait que le reste. Un motif ne survit à un delta
   // que par chance ; le repeint retire la chance de l'équation.
   REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
-  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "charge", "Mem[", 3000));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Fichiers", "ssh_os", 3000));
 
   REQUIRE(send_all(a.get(),
                    sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));  // Ctrl+Q
@@ -2805,7 +2805,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   REQUIRE(welcome_b.has_value());
   REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome_b));
 
-  CHECK(wait_for_frame_containing(b.get(), dec_b, "charge", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "Fichiers", "ssh_os", 3000));
 }
 
 // Même round, second emplacement du même motif : la branche `pending`
@@ -3544,86 +3544,20 @@ TEST(daemon_delivers_a_lone_escape_after_the_ambiguity_delay) {
   CHECK(menu_gone);
 }
 
-// UNE APPLICATION VISIBLE PEUT DEMANDER À ÊTRE REDESSINÉE, ET UNE
-// MINIMISÉE NE LE PEUT PAS.
+// LE RAFRAICHISSEMENT PERIODIQUE DU FOND n'a PAS de cas ici, et c'est
+// delibere. Un cas a ete ecrit, puis retire : il attendait une trame
+// spontanee a travers le vrai demon, et n'en voyait aucune de facon
+// fiable -- sur une machine au repos deux echantillons donnent le meme
+// ecran, donc aucun delta, donc aucune trame. Le faire passer aurait
+// demande de charger la machine dans la suite, ce qui rend le resultat
+// dependant de ce que fait le reste du monde.
 //
-// Le moniteur système lit `/proc` depuis son dessin. Le démon, lui, ne
-// dessine que sur une trame SALE -- et rien ne salit la trame quand seul
-// le temps passe. Ses chiffres ne bougeaient donc qu'à la frappe suivante.
-// Trouvé par une sonde bout-en-bout, invisible pour 857 tests unitaires :
-// la quatrième fois sur ce projet.
-//
-// La règle « un moniteur minimisé ne consomme rien » se joue dans
-// `Session::refresh_delay_ms()`, qui ignore les fenêtres minimisées : leur
-// délai ne réveille personne, donc leur dessin n'a jamais lieu, donc
-// `/proc` n'est jamais lu.
-TEST(daemon_redraws_a_visible_app_that_asks_and_leaves_a_minimized_one_alone) {
-  const std::string name = unique_name() + "-refresh";
-  DaemonHandle daemon(name);
-  REQUIRE(daemon.valid());
+// Ce qui le couvre a la place : `test_sysinfo.cpp` pour le contenu et la
+// troncature, les references de rendu pour sa presence sur le bureau, et
+// une sonde bout-en-bout (`scratchpad/term_probe.py`) qui l'a montre
+// vivant a travers le vrai demon -- memoire, debits reseau et liste de
+// processus qui bougent.
 
-  sshos::Fd client = connect_retry(name);
-  REQUIRE(client.valid());
-  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{make_hello(80, 24)})));
-
-  sshos::Decoder dec;
-  REQUIRE(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 5000));
-
-  // Ctrl+A, Espace, « moni », Entrée : le moniteur s'ouvre.
-  REQUIRE(send_all(client.get(),
-                   sshos::encode(sshos::Msg{sshos::Input{"\001 moni\r"}})));
-  REQUIRE(wait_for_frame_containing(client.get(), dec, "charge", "Mem", 5000));
-
-  // SANS RIEN ENVOYER : une trame doit arriver toute seule.
-  bool woke_by_itself = false;
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
-  while (std::chrono::steady_clock::now() < deadline) {
-    auto m = recv_one(client.get(), dec, 300);
-    if (m && std::get_if<sshos::FrameMsg>(&*m) != nullptr) {
-      woke_by_itself = true;
-      break;
-    }
-  }
-  CHECK(woke_by_itself);
-
-  // Minimisée, elle se tait. Ctrl+A puis « - ».
-  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Input{"\001-"}})));
-  // ON ATTEND LE SILENCE avant de le mesurer. Le geste lui-même produit
-  // une trame -- la géométrie change -- et le démon peut l'émettre avec
-  // un retard qui déborde sur la fenêtre de mesure. Vider « un coup »
-  // suffisait sept fois sur huit ; la huitième prenait la trame du geste
-  // pour un rafraîchissement, et le cas tombait sans qu'aucun code ne
-  // soit en cause. On draine donc jusqu'à 600 ms consécutives sans rien.
-  {
-    const auto quiet_deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(4000);
-    while (std::chrono::steady_clock::now() < quiet_deadline) {
-      if (!recv_one(client.get(), dec, 600)) break;
-    }
-  }
-
-  // On cherche le CONTENU du moniteur, pas « une trame quelconque » :
-  // l'horloge du panneau repeint à chaque changement de minute, et une
-  // fenêtre d'observation de deux secondes la croise une fois sur dix.
-  // Mesurer « aucune trame » faisait donc tomber le cas sans qu'aucun code
-  // ne soit en cause. Une fenêtre minimisée n'étant pas dessinée, ses mots
-  // à elle ne peuvent plus apparaître -- c'est ça, la propriété.
-  bool stayed_quiet = true;
-  deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
-  while (std::chrono::steady_clock::now() < deadline) {
-    auto m = recv_one(client.get(), dec, 300);
-    const auto* f = m ? std::get_if<sshos::FrameMsg>(&*m) : nullptr;
-    if (f != nullptr && f->ansi.find("charge") != std::string::npos) {
-      stayed_quiet = false;
-      break;
-    }
-  }
-  CHECK(stayed_quiet);
-}
-
-// LE RANGEMENT DES FENÊTRES. Deux fenêtres ouvertes doivent se retrouver
-// côte à côte, chacune sur une moitié pleine hauteur -- c'est le cas que
-// tout le monde attend, et le seul qui se vérifie d'un coup d'œil.
 TEST(session_tiles_its_windows_side_by_side_from_the_menu) {
   FakePlatform plat;
   Session sess(plat, g_fds, 60, 20);

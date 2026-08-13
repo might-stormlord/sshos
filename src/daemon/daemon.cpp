@@ -322,6 +322,7 @@ int run_daemon(std::string_view socket_name) {
           FrameClock::Clock::now() - last_refresh);
       const int left = std::max(0, refresh_delay - static_cast<int>(since.count()));
       if (left == 0) {
+        session.mark_refresh_due();
         clock.mark_dirty();
         last_refresh = FrameClock::Clock::now();
         timeout = 0;

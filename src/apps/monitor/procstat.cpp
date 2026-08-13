@@ -172,4 +172,25 @@ bool parse_process_stat(std::string_view text, ProcInfo& out) {
   return true;
 }
 
+NetTotals parse_netdev(std::string_view text) {
+  NetTotals t;
+  for (std::string_view line : lines_of(text)) {
+    const size_t colon = line.find(':');
+    if (colon == std::string_view::npos) continue;
+    std::string_view name = line.substr(0, colon);
+    while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+    // `lo` compte DOUBLE : tout ce qui y sort y rentre. La garder
+    // gonflerait le debit d'un facteur deux sur une machine qui ne parle a
+    // personne.
+    if (name == "lo") continue;
+    const std::vector<uint64_t> n = numbers_of(line.substr(colon + 1));
+    // Le format a seize colonnes : les octets recus sont la premiere, les
+    // octets emis la neuvieme.
+    if (n.size() < 9) continue;
+    t.rx += n[0];
+    t.tx += n[8];
+  }
+  return t;
+}
+
 }  // namespace sshos

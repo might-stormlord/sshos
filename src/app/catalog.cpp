@@ -2,7 +2,6 @@
 
 #include "apps/editor/editor.hpp"
 #include "apps/files/files.hpp"
-#include "apps/monitor/monitor.hpp"
 #include "apps/terminal.hpp"
 
 namespace sshos {
@@ -10,7 +9,6 @@ namespace {
 
 std::unique_ptr<App> make_terminal() { return std::make_unique<Terminal>(); }
 std::unique_ptr<App> make_files() { return std::make_unique<Files>(); }
-std::unique_ptr<App> make_monitor() { return std::make_unique<Monitor>(); }
 std::unique_ptr<App> make_editor() { return std::make_unique<Editor>(); }
 
 }  // namespace
@@ -25,7 +23,6 @@ const std::vector<CatalogEntry>& catalog() {
       // Le Terminal EN TETE : c'est desormais la raison d'etre du bureau.
       {"terminal", "Terminal", &make_terminal},
       {"fichiers", "Fichiers", &make_files},
-      {"moniteur", "Moniteur", &make_monitor},
       {"editeur", "Editeur", &make_editor},
   };
   return entries;

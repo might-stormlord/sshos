@@ -22,6 +22,15 @@ struct MemInfo {
   bool operator==(const MemInfo&) const = default;
 };
 
+// Ce que la machine a fait passer sur ses interfaces, CUMULE depuis le
+// demarrage comme le reste de `/proc`. Un debit ne se lit donc pas dans un
+// echantillon, il se calcule entre deux.
+struct NetTotals {
+  uint64_t rx = 0;
+  uint64_t tx = 0;
+  bool operator==(const NetTotals&) const = default;
+};
+
 struct ProcInfo {
   int pid = 0;
   std::string name;
@@ -59,5 +68,18 @@ std::vector<int> parse_loadavg(std::string_view text);
 // donne un morceau de nom au lieu de l'état. On cherche donc la DERNIÈRE
 // parenthèse fermante.
 bool parse_process_stat(std::string_view text, ProcInfo& out);
+
+// `/proc/net/dev`, TOUTES INTERFACES CONFONDUES sauf `lo`. La boucle
+// locale compte double -- tout ce qui y sort y rentre -- et gonflerait le
+// debit d'un facteur deux sur une machine qui ne parle a personne.
+NetTotals parse_netdev(std::string_view text);
+
+// Une ligne de la liste de processus, telle qu'elle s'affiche.
+struct ProcRow {
+  int pid = 0;
+  std::string name;
+  int cpu_percent = 0;
+  uint64_t rss_kb = 0;
+};
 
 }  // namespace sshos

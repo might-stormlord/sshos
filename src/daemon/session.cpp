@@ -1,5 +1,7 @@
 #include "daemon/session.hpp"
 
+#include <chrono>
+
 #include "wm/tile.hpp"
 
 #include <memory>
@@ -429,7 +431,9 @@ void Session::close_window(Window& w) {
 }
 
 int Session::refresh_delay_ms() const {
-  int best = -1;
+  // Le fond d'écran porte le moniteur : il se rafraîchit une fois par
+  // seconde, comme lui, et tant qu'un client regarde.
+  int best = 1000;
   for (const auto& w : wm_.stack()) {
     if (w == nullptr || w->app == nullptr) continue;
     // La fenetre MINIMISEE ne compte pas : c'est toute la regle.
@@ -928,6 +932,20 @@ void Session::render(Surface& out) {
   // un seul user_rect : c'est ce qui rend le redimensionnement du terminal
   // réversible.
   relayout(wm_, work, out.w(), out.h());
+
+  // LE MONITEUR, EN FOND D'ÉCRAN, sur la moitié DROITE -- là où l'on ne
+  // pose jamais rien en premier, les fenêtres arrivant en cascade depuis
+  // le coin haut-gauche. Il est peint AVANT elles : c'est un fond, il ne
+  // doit jamais couvrir ce sur quoi on travaille.
+  sysinfo_.refresh(std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now().time_since_epoch())
+                       .count());
+  const int half = work.w / 2;
+  if (half >= 18) {
+    sysinfo_.draw(v.sub(Rect{work.x + work.w - half + 1, work.y, half - 2,
+                             work.h}),
+                  theme_);
+  }
 
   // Un bureau vide dit quoi faire, et le dit pour la SOURIS : c'est avec
   // elle qu'on arrive, et le menu est à un clic. Sans cette ligne, fermer

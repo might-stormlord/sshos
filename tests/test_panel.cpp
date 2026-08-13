@@ -209,7 +209,7 @@ TEST(panel_hit_test_matches_its_layout) {
     }
   }
   CHECK_EQ(pinned_cells[catalog_index("editeur")], 8);  // marque + « Editeur »
-  CHECK_EQ(pinned_cells[catalog_index("moniteur")], 9);  // marque + « Moniteur »
+  CHECK_EQ(pinned_cells[catalog_index("fichiers")], 9);  // marque + « Fichiers »
 }
 
 // Le point de la fusion : une application épinglée QU'ON LANCE ne se
@@ -236,7 +236,7 @@ TEST(panel_merges_a_pinned_application_with_the_window_it_opened) {
     if (h.what == PanelHit::Pinned && h.index == catalog_index("editeur")) {
       ++bloc_pinned;
     }
-    if (h.what == PanelHit::Pinned && h.index == catalog_index("moniteur")) {
+    if (h.what == PanelHit::Pinned && h.index == catalog_index("fichiers")) {
       ++battement_pinned;
     }
     if (h.what == PanelHit::Task) {
@@ -312,7 +312,7 @@ TEST(panel_tells_a_running_entry_from_an_idle_one_on_a_vertical_edge) {
       found_live = true;
     }
     if (!found_idle && h.what == PanelHit::Pinned &&
-        h.index == catalog_index("moniteur")) {
+        h.index == catalog_index("fichiers")) {
       idle = h;
       found_idle = true;
     }

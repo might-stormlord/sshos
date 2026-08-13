@@ -7,6 +7,7 @@
 #include "common/platform.hpp"
 #include "daemon/host.hpp"
 #include "daemon/reap.hpp"
+#include "shell/sysinfo.hpp"
 #include "input/events.hpp"
 #include "input/shortcuts.hpp"
 #include "render/profile.hpp"
@@ -119,6 +120,12 @@ class Session : public ChildSink {
   // fenetre Minimized n'entre pas dans le calcul, donc son delai ne
   // reveille personne et son dessin n'a jamais lieu.
   int refresh_delay_ms() const;
+
+  // L'echeance du rafraichissement periodique est arrivee. Marquer
+  // l'horloge du demon ne suffit pas : c'est la SESSION qui decide s'il y
+  // a quelque chose a recomposer, et sans ce mot elle repondrait « rien de
+  // neuf » a chaque reveil.
+  void mark_refresh_due() { dirty_ = true; }
 
   WinHitResult hit_window_at(int x, int y) const;
 
@@ -250,6 +257,9 @@ class Session : public ChildSink {
   // SESSION. Sans ce drapeau, la réponse « oui » ne saurait pas à quoi
   // elle répond.
   bool modal_quits_session_ = false;
+  // Le moniteur, en FOND D'ÉCRAN plutôt qu'en fenêtre : on veut voir la
+  // charge de la machine EN MÊME TEMPS qu'on travaille, pas à la place.
+  SysInfo sysinfo_;
 
   // Repeint demandé hors de toute entrée utilisateur : l'horloge qui change
   // de minute, une application qui appelle Host::invalidate(). HostImpl en

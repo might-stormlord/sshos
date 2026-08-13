@@ -168,3 +168,33 @@ TEST(procstat_refuses_a_line_it_cannot_read) {
   CHECK(!parse_process_stat("42 sans-parentheses S 1", p));
   CHECK(!parse_process_stat("42 (tronque) S 1", p));
 }
+
+// ------------------------------------------------------ /proc/net/dev
+
+TEST(procstat_sums_the_traffic_of_every_interface) {
+  const std::string text =
+      "Inter-|   Receive                    |  Transmit\n"
+      " face |bytes    packets errs drop fifo frame compressed multicast|"
+      "bytes    packets errs drop fifo colls carrier compressed\n"
+      "  eth0: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0\n"
+      " wlan0:  500  5 0 0 0 0 0 0  700  7 0 0 0 0 0 0\n";
+  const sshos::NetTotals t = sshos::parse_netdev(text);
+  CHECK_EQ(t.rx, uint64_t{1500});
+  CHECK_EQ(t.tx, uint64_t{2700});
+}
+
+// `lo` compte DOUBLE : tout ce qui y sort y rentre. La garder gonflerait
+// le débit d'un facteur deux sur une machine qui ne parle à personne.
+TEST(procstat_leaves_the_loopback_out_of_the_traffic) {
+  const std::string text =
+      "    lo: 9999 99 0 0 0 0 0 0 9999 99 0 0 0 0 0 0\n"
+      "  eth0:  100  1 0 0 0 0 0 0  200  2 0 0 0 0 0 0\n";
+  const sshos::NetTotals t = sshos::parse_netdev(text);
+  CHECK_EQ(t.rx, uint64_t{100});
+  CHECK_EQ(t.tx, uint64_t{200});
+}
+
+TEST(procstat_reads_no_traffic_from_a_header_only_file) {
+  CHECK(sshos::parse_netdev("Inter-|   Receive\n face |bytes\n") ==
+        sshos::NetTotals{});
+}

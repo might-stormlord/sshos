@@ -1,8 +1,8 @@
-                                                            
-    Bloc                            [_][o][x]               
+                               PROCESSEUR                   
+    Bloc                            [_][o][x] 00  0.00      
   |taille: 42x12                             |              
   |clics: 0                                  |              
-  |resize: 1                                 |              
+  |resize: 1                                 |Mo            
   |                                          |              
   |                                          |              
   |                                          |              
@@ -17,4 +17,4 @@
                                                             
                                                             
                                                             
- ssh_os  Terminal  Fichiers  Moniteur  Editeur *Bloc  10:05 
+ ssh_os  Terminal  Fichiers  Editeur *Bloc  ^A = aide 10:05 

@@ -37,7 +37,7 @@ TEST(menu_starts_closed_and_lists_everything_when_opened) {
   // Le catalogue, les quatre bords de panneau, les deux commandes de
   // Battement, et de quoi partir.
   CHECK(index_of(m, "app:editeur") >= 0);
-  CHECK(index_of(m, "app:moniteur") >= 0);
+  CHECK(index_of(m, "app:fichiers") >= 0);
   CHECK(index_of(m, "panel:top") >= 0);
   CHECK(index_of(m, "panel:bottom") >= 0);
   CHECK(index_of(m, "panel:left") >= 0);
