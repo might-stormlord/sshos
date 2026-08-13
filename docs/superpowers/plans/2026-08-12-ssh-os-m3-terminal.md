@@ -188,7 +188,18 @@ Modes 1 (`DECCKM`), 7 (retour automatique), 25 (curseur visible), 1000/1002/1003
 
 **Tests :** entrer et sortir de 1049 restitue l'écran principal au caractère près ; l'écran alterné ne pousse rien au scrollback ; 7 désactivé fait écraser la dernière colonne au lieu de retourner ; les modes souris sont lisibles par le liant.
 
-- [ ] Tâche 6 livrée : tests, mutations, commit
+- [x] Tâche 6 livrée : tests, mutations, commit — `a3281f4`, 21 tests, 31 mutations
+
+Ce qui reste au liant (tâche 13) : sur un `CSI ? Pm h/l`, appeler
+`apply_dec_private()` **puis** répercuter les deux modes qui ont un effet
+mécanique — `screen.set_autowrap(modes.autowrap)` et
+`screen.enter_alt_screen()` / `leave_alt_screen()` selon `modes.alt_screen`.
+Le registre reste la seule source de vérité, y compris pour le `DECRQM` de
+la tâche 9.
+
+Pour la tâche 7 : `screen.alt_screen()` dit quand ne rien pousser à
+l'historique. Pour la tâche 8 : `Screen` détient désormais **deux** grilles,
+et le redimensionnement devra traiter `parked_` comme `grid_`.
 
 ## Tâche 7 — Le scrollback
 
