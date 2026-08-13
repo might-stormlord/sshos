@@ -46,7 +46,8 @@
 
 En-tête : charge, mémoire, une barre par cœur. Liste de processus triée par CPU (défaut) ou par mémoire, bascule à la touche. Rafraîchissement au plus une fois par seconde, **depuis le dessin**.
 
-- [ ] Tâche 2 livrée : tests, mutations, commit
+- [x] Tâche 2 livrée : tests, mutations, commit — `ca6f2e5`, 23 tests, 25 mutations
+  (1 équivalente)
 
 ## Tâche 3 — Vérification manuelle
 
