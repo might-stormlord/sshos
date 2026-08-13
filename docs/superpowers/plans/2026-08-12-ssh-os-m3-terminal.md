@@ -310,7 +310,15 @@ Et l'on ne ferme **jamais** le maître sur simple réception de `SIGCHLD` : cela
 
 **Tests :** trois enfants morts d'un coup sont tous récoltés ; aucun zombie ne subsiste ; la sortie écrite juste avant la mort est lue en entier ; un enfant qui ferme l'esclave sans mourir n'affiche pas encore `[processus terminé]`.
 
-- [ ] Tâche 12 livrée : tests, mutations, commit
+- [x] Tâche 12 livrée : tests, mutations, commit — `6c953db`, 8 tests, 17 mutations
+
+Un fichier de plus que prévu : `src/daemon/reap.hpp/.cpp`, pour que la
+boucle de récolte se teste avec de vrais enfants sans monter un démon.
+La dernière mutation n'est mordue que **sous ASan** — retirer la garde
+qui arrête un pid inconnu déréférence `end()`, ce qui ne change rien
+d'observable en Release. Le test de l'enfant qui ferme l'esclave sans
+mourir appartient à la tâche 13 : il n'a de sens qu'avec l'application
+qui affiche `[processus terminé]`.
 
 ## Tâche 13 — L'application Terminal
 
