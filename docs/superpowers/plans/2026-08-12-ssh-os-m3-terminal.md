@@ -279,7 +279,10 @@ aurait sinon imposé une troisième lecture.
 
 **Tests :** la table de conversion ; `ESC ( B` revient à l'ASCII ; le jeu courant est sauvé par `DECSC`.
 
-- [ ] Tâche 10 livrée : tests, mutations, commit
+- [x] Tâche 10 livrée : tests, mutations, commit — `548b7b3`, 13 tests, 18 mutations
+
+`SavedCursor` porte désormais ses quatre champs ; la note laissée à la
+tâche 3 (« la tâche 10 y ajoutera le jeu de caractères ») est soldée.
 
 ## Tâche 11 — L'encodage clavier
 
