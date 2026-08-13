@@ -52,6 +52,12 @@ void Screen::reset_tabs() {
   }
 }
 
+ScreenCell Screen::erased() const {
+  ScreenCell c;
+  c.style.bg = pen_.bg;
+  return c;
+}
+
 ScreenCell& Screen::cell(int x, int y) {
   return grid_[static_cast<size_t>(y) * static_cast<size_t>(cols_) +
                static_cast<size_t>(x)];
@@ -66,9 +72,9 @@ const ScreenCell& Screen::at(int x, int y) const {
 void Screen::clear_wide_at(int x, int y) {
   const ScreenCell& c = at(x, y);
   if (c.width == 2 && x + 1 < cols_) {
-    cell(x + 1, y) = ScreenCell{};
+    cell(x + 1, y) = erased();
   } else if (c.width == 0 && x > 0) {
-    cell(x - 1, y) = ScreenCell{};
+    cell(x - 1, y) = erased();
   }
 }
 
@@ -94,12 +100,12 @@ void Screen::scroll_slice_up(int top, int bottom, int n) {
       grid_.begin() + static_cast<std::ptrdiff_t>(bottom + 1) * cols_;
   if (n >= height) {
     // Tout sort : inutile de faire tourner ce qui va disparaître.
-    std::fill(first, last, ScreenCell{});
+    std::fill(first, last, erased());
     return;
   }
   const auto cut = first + static_cast<std::ptrdiff_t>(n) * cols_;
   std::rotate(first, cut, last);
-  std::fill(last - static_cast<std::ptrdiff_t>(n) * cols_, last, ScreenCell{});
+  std::fill(last - static_cast<std::ptrdiff_t>(n) * cols_, last, erased());
 }
 
 void Screen::scroll_slice_down(int top, int bottom, int n) {
@@ -109,13 +115,13 @@ void Screen::scroll_slice_down(int top, int bottom, int n) {
   const auto last =
       grid_.begin() + static_cast<std::ptrdiff_t>(bottom + 1) * cols_;
   if (n >= height) {
-    std::fill(first, last, ScreenCell{});
+    std::fill(first, last, erased());
     return;
   }
   const auto cut = last - static_cast<std::ptrdiff_t>(n) * cols_;
   std::rotate(first, cut, last);
   std::fill(first, first + static_cast<std::ptrdiff_t>(n) * cols_,
-            ScreenCell{});
+            erased());
 }
 
 void Screen::print(char32_t cp) {
@@ -149,10 +155,15 @@ void Screen::print(char32_t cp) {
   ScreenCell& c = cell(cx_, cy_);
   c.ch = cp;
   c.width = static_cast<uint8_t>(w);
+  c.style = pen_;
   if (w == 2 && cx_ + 1 < cols_) {
+    // La moitié droite porte LE MÊME style que la gauche : le rendu la
+    // peint comme n'importe quelle cellule, et un fond qui s'arrêterait au
+    // milieu de l'idéogramme se verrait.
     ScreenCell& tail = cell(cx_ + 1, cy_);
     tail.ch = U' ';
     tail.width = 0;
+    tail.style = pen_;
   }
 
   cx_ += w;
@@ -278,7 +289,7 @@ void Screen::erase_span(int x0, int x1, int y) {
   // demi idéogramme collé au bord de la plage effacée.
   clear_wide_at(x0, y);
   clear_wide_at(x1, y);
-  for (int x = x0; x <= x1; ++x) cell(x, y) = ScreenCell{};
+  for (int x = x0; x <= x1; ++x) cell(x, y) = erased();
 }
 
 void Screen::erase_display(int mode) {
@@ -315,11 +326,11 @@ void Screen::erase_chars(int n) {
 void Screen::break_wide_at(int x, int y) {
   const ScreenCell& c = at(x, y);
   if (c.width == 2 && x + 1 < cols_) {
-    cell(x, y) = ScreenCell{};
-    cell(x + 1, y) = ScreenCell{};
+    cell(x, y) = erased();
+    cell(x + 1, y) = erased();
   } else if (c.width == 0 && x > 0) {
-    cell(x, y) = ScreenCell{};
-    cell(x - 1, y) = ScreenCell{};
+    cell(x, y) = erased();
+    cell(x - 1, y) = erased();
   }
 }
 
@@ -344,7 +355,7 @@ void Screen::insert_chars(int n) {
   erase_span(cx_, cx_ + n - 1, cy_);
   // Le décalage a pu pousser la première moitié d'une pleine chasse contre
   // le bord droit, sa seconde étant tombée de la ligne.
-  if (at(cols_ - 1, cy_).width == 2) cell(cols_ - 1, cy_) = ScreenCell{};
+  if (at(cols_ - 1, cy_).width == 2) cell(cols_ - 1, cy_) = erased();
 }
 
 void Screen::delete_chars(int n) {
@@ -398,13 +409,20 @@ void Screen::reset_scroll_region() {
   wrap_pending_ = false;
 }
 
-void Screen::save_cursor() { saved_ = SavedCursor{cx_, cy_, wrap_pending_}; }
+void Screen::save_cursor() {
+  saved_ = SavedCursor{cx_, cy_, wrap_pending_, pen_};
+}
 
 void Screen::restore_cursor() {
   // Bornée : entre la sauvegarde et la reprise, l'écran a pu rétrécir.
   cx_ = std::clamp(saved_.x, 0, cols_ - 1);
   cy_ = std::clamp(saved_.y, 0, rows_ - 1);
   wrap_pending_ = saved_.wrap_pending && cx_ == cols_ - 1;
+  // Le style repart avec le curseur : une application qui sauve au milieu
+  // d'un passage en gras attend de le retrouver en gras. Sans DECSC
+  // préalable, `saved_` est vierge -- et un DECRC seul rend donc un
+  // terminal fraîchement allumé, curseur à l'origine et stylo neuf.
+  pen_ = saved_.style;
 }
 
 std::string Screen::line_text(int y) const {

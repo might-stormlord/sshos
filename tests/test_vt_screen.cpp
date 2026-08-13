@@ -1033,3 +1033,295 @@ TEST(screen_ignores_a_line_edit_above_the_region) {
   s.delete_lines(1);
   CHECK_EQ(dump(s), "0000/1111/2222/3333");
 }
+
+// ---------------------------------------------------------------------------
+// Le stylo. La grille porte un style par cellule, et `print()` y dépose
+// celui du stylo courant. Sans lui, `apply_sgr` n'aurait aucun appelant :
+// l'invité écrirait ses couleurs dans le vide.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Un stylo reconnaissable : les trois champs sont distincts, pour qu'un
+// style à moitié recopié se voie.
+sshos::Style painted_pen() {
+  sshos::Style p;
+  p.fg = sshos::Color::indexed(2);
+  p.bg = sshos::Color::indexed(4);
+  p.attrs = sshos::attr::Bold | sshos::attr::Underline;
+  return p;
+}
+
+}  // namespace
+
+TEST(screen_starts_with_a_blank_pen_on_a_blank_grid) {
+  Screen s(4, 2);
+  CHECK(s.pen() == sshos::Style{});
+  CHECK(s.at(0, 0).style == sshos::Style{});
+}
+
+TEST(screen_paints_what_it_prints_with_the_current_pen) {
+  Screen s(4, 2);
+  s.set_pen(painted_pen());
+
+  puts_ascii(s, "ab");
+  CHECK(s.at(0, 0).style == painted_pen());
+  CHECK(s.at(1, 0).style == painted_pen());
+  // Ce qui n'a pas été écrit n'a pas été peint.
+  CHECK(s.at(2, 0).style == sshos::Style{});
+}
+
+// Le stylo n'est pas un calque : changer de couleur ne repeint pas ce qui
+// est déjà à l'écran. C'est la différence entre un terminal et un tableau.
+TEST(screen_leaves_what_is_already_printed_alone_when_the_pen_changes) {
+  Screen s(4, 2);
+  s.set_pen(painted_pen());
+  puts_ascii(s, "a");
+
+  sshos::Style other;
+  other.fg = sshos::Color::indexed(1);
+  s.set_pen(other);
+  puts_ascii(s, "b");
+
+  CHECK(s.at(0, 0).style == painted_pen());
+  CHECK(s.at(1, 0).style == other);
+}
+
+// Les deux moitiés d'une pleine chasse portent le MÊME style : la moitié
+// droite est peinte par le rendu comme n'importe quelle cellule, et un
+// fond qui s'arrêterait au milieu de l'idéogramme se verrait.
+TEST(screen_gives_both_halves_of_a_wide_character_the_same_style) {
+  Screen s(4, 2);
+  s.set_pen(painted_pen());
+
+  s.print(kWide);
+  CHECK_EQ(s.at(0, 0).width, 2);
+  CHECK_EQ(s.at(1, 0).width, 0);
+  CHECK(s.at(0, 0).style == painted_pen());
+  CHECK(s.at(1, 0).style == painted_pen());
+}
+
+// ---------------------------------------------------------------------------
+// L'effacement peint le FOND COURANT (« background colour erase »). Le
+// terminfo d'xterm-256color, que nous promettons à l'invité, porte la
+// capacité `bce` : une application qui pose son fond puis efface attend
+// que la zone effacée prenne ce fond.
+// ---------------------------------------------------------------------------
+
+TEST(screen_erases_the_display_with_the_current_background) {
+  Screen s = marked(4, 3);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.erase_display(2);
+  for (int y = 0; y < 3; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      CHECK(s.at(x, y).style.bg == sshos::Color::indexed(4));
+    }
+  }
+}
+
+// Le fond SEUL. Une cellule vide n'a pas de glyphe : lui recopier le
+// premier plan ne se verrait pas, mais lui recopier les attributs
+// soulignerait le vide.
+TEST(screen_erases_with_the_background_alone_and_not_the_rest_of_the_pen) {
+  Screen s = marked(4, 3);
+  s.set_pen(painted_pen());
+
+  s.move_to(0, 0);
+  s.erase_chars(2);
+
+  sshos::Style expected;
+  expected.bg = sshos::Color::indexed(4);
+  CHECK(s.at(0, 0).style == expected);
+  CHECK(s.at(1, 0).style == expected);
+}
+
+// Une ligne qui entre par défilement est une ligne effacée : elle prend le
+// fond courant elle aussi. C'est ce qui donne une marge de couleur uniforme
+// quand un pager fait défiler sa page.
+TEST(screen_scrolls_in_a_line_painted_with_the_current_background) {
+  Screen s = marked(4, 3);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(0, 2);
+  s.line_feed();  // au bas de la région : l'écran tourne
+
+  for (int x = 0; x < 4; ++x) {
+    CHECK(s.at(x, 2).style.bg == sshos::Color::indexed(4));
+  }
+  // Ce qui a seulement remonté garde son style d'origine.
+  CHECK(s.at(0, 0).style == sshos::Style{});
+}
+
+TEST(screen_opens_an_insert_gap_in_the_current_background) {
+  Screen s = marked(4, 2);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(1, 0);
+  s.insert_chars(2);
+
+  CHECK(s.at(1, 0).style.bg == sshos::Color::indexed(4));
+  CHECK(s.at(2, 0).style.bg == sshos::Color::indexed(4));
+  // La cellule poussée à droite n'a pas été effacée : elle garde le sien.
+  CHECK(s.at(3, 0).style == sshos::Style{});
+}
+
+TEST(screen_leaves_the_current_background_behind_a_delete) {
+  Screen s = marked(4, 2);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(0, 0);
+  s.delete_chars(2);
+
+  CHECK(s.at(2, 0).style.bg == sshos::Color::indexed(4));
+  CHECK(s.at(3, 0).style.bg == sshos::Color::indexed(4));
+  CHECK(s.at(0, 0).style == sshos::Style{});
+}
+
+TEST(screen_inserts_a_line_painted_with_the_current_background) {
+  Screen s = marked(4, 3);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(0, 0);
+  s.insert_lines(1);
+
+  for (int x = 0; x < 4; ++x) {
+    CHECK(s.at(x, 0).style.bg == sshos::Color::indexed(4));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DECSC / DECRC. La dette de la tâche 4 : « DECSC sauve curseur ET
+// attributs », reporté ici faute d'attributs à sauver.
+// ---------------------------------------------------------------------------
+
+TEST(screen_saves_the_pen_with_the_cursor_and_gives_it_back) {
+  Screen s(8, 3);
+  s.set_pen(painted_pen());
+  s.save_cursor();
+
+  sshos::Style other;
+  other.fg = sshos::Color::indexed(1);
+  s.set_pen(other);
+
+  s.restore_cursor();
+  CHECK(s.pen() == painted_pen());
+}
+
+// Un DECRC sans DECSC rend un terminal fraîchement allumé : le curseur à
+// l'origine ET le stylo vierge.
+TEST(screen_restores_a_blank_pen_when_nothing_was_saved) {
+  Screen s(8, 3);
+  s.set_pen(painted_pen());
+
+  s.restore_cursor();
+  CHECK(s.pen() == sshos::Style{});
+}
+
+// Les quatre chemins d'effacement que les mutations ont montrés à
+// découvert. Chacun peint des cellules que ni ED, ni EL, ni le défilement
+// d'une seule ligne n'atteignent -- et chacun laissait donc passer un
+// effacement qui oubliait le fond courant.
+
+// Quand une tranche sort ENTIÈRE, le défilement ne fait rien tourner : il
+// remplit d'un coup. C'est un chemin à part, et il doit peindre comme
+// l'autre.
+TEST(screen_scrolls_a_whole_region_out_in_the_current_background) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);  // deux lignes de haut
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(0, 1);
+  s.delete_lines(2);  // autant que la région : tout sort
+
+  for (int y = 1; y <= 2; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      CHECK(s.at(x, y).style.bg == sshos::Color::indexed(4));
+    }
+  }
+  CHECK_EQ(dump(s), "0000///3333");
+}
+
+TEST(screen_scrolls_a_whole_region_backwards_in_the_current_background) {
+  Screen s = marked(4, 4);
+  s.set_scroll_region(1, 2);
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+
+  s.move_to(0, 1);
+  s.insert_lines(2);
+
+  for (int y = 1; y <= 2; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      CHECK(s.at(x, y).style.bg == sshos::Color::indexed(4));
+    }
+  }
+}
+
+// La moitié orpheline d'une pleine chasse qu'on recouvre est effacée, donc
+// peinte du fond courant : sans cela, écrire sur un idéogramme laisse à
+// côté de lui un trou de la couleur d'avant.
+TEST(screen_repaints_the_orphan_half_of_a_wide_character_it_covers) {
+  Screen s(6, 1);
+  s.print(kWide);  // colonnes 0 et 1
+  REQUIRE_EQ(s.at(0, 0).width, 2);
+
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+  s.move_to(0, 0);
+  s.print(U'a');  // recouvre la moitié gauche ; la droite reste orpheline
+
+  CHECK_EQ(s.at(1, 0).width, 1);
+  CHECK(s.at(1, 0).style.bg == sshos::Color::indexed(4));
+}
+
+// Une édition qui coupe une paire en deux l'emporte ENTIÈRE, et les deux
+// cellules libérées sont des cellules effacées comme les autres.
+TEST(screen_repaints_the_wide_pair_an_edit_breaks) {
+  Screen s(6, 1);
+  s.print(kWide);  // colonnes 0 et 1
+
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+  s.move_to(1, 0);  // sur la SECONDE moitié
+  s.insert_chars(1);
+
+  CHECK_EQ(s.at(0, 0).width, 1);
+  CHECK(s.at(0, 0).style.bg == sshos::Color::indexed(4));
+}
+
+// Poussée contre le bord droit, une pleine chasse perd sa seconde moitié
+// hors de la ligne ; la première est effacée sur place -- avec le fond
+// courant, comme tout effacement.
+TEST(screen_repaints_a_half_wide_left_against_the_right_edge) {
+  Screen s(6, 1);
+  puts_ascii(s, "abc");
+  s.print(kWide);  // colonnes 3 et 4
+  s.move_to(0, 0);
+  s.insert_chars(1);  // la paire glisse en 4 et 5
+  REQUIRE_EQ(s.at(4, 0).width, 2);
+
+  sshos::Style p;
+  p.bg = sshos::Color::indexed(4);
+  s.set_pen(p);
+  s.move_to(0, 0);
+  s.insert_chars(1);  // la seconde moitié tombe de la ligne
+
+  CHECK_EQ(s.at(5, 0).width, 1);
+  CHECK(s.at(5, 0).style.bg == sshos::Color::indexed(4));
+}

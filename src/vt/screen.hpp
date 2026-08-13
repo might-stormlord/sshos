@@ -4,15 +4,24 @@
 #include <string>
 #include <vector>
 
+#include "render/cell.hpp"
+
 namespace sshos {
 
-// Une cellule de la grille. Le style arrive à la tâche 5 (SGR) : ici, le
-// texte seul. `width` vaut 2 sur la première moitié d'un caractère pleine
-// chasse et 0 sur la seconde, jamais 2 deux fois de suite -- c'est ce qui
-// permet au rendu de sauter la moitié droite sans la deviner.
+// Une cellule de la grille. `width` vaut 2 sur la première moitié d'un
+// caractère pleine chasse et 0 sur la seconde, jamais 2 deux fois de suite
+// -- c'est ce qui permet au rendu de sauter la moitié droite sans la
+// deviner.
+//
+// Le style est celui du RENDU, pas un type VT parallèle : le pont vers la
+// `View` (tâche 13) devient une copie de champ à champ. C'est le sens
+// inverse du choix fait pour le texte, où `ScreenCell` ne partage rien avec
+// `Cell` -- une cellule de grille et une cellule de rendu ont des
+// invariants différents, une couleur n'en a qu'un.
 struct ScreenCell {
   char32_t ch = U' ';
   uint8_t width = 1;
+  Style style{};
 };
 
 struct CursorPos {
@@ -20,14 +29,15 @@ struct CursorPos {
   int y = 0;
 };
 
-// Ce que DECSC met de côté. Aujourd'hui la position et le retour différé ;
-// la tâche 5 y ajoutera les attributs courants et la tâche 10 le jeu de
-// caractères, car DECRC restitue les trois -- une application qui sauve le
-// curseur au milieu d'un passage en gras attend de le retrouver en gras.
+// Ce que DECSC met de côté : la position, le retour différé et le STYLE
+// COURANT. La tâche 10 y ajoutera le jeu de caractères, car DECRC restitue
+// les trois -- une application qui sauve le curseur au milieu d'un passage
+// en gras attend de le retrouver en gras.
 struct SavedCursor {
   int x = 0;
   int y = 0;
   bool wrap_pending = false;
+  Style style{};
 };
 
 // La grille et son curseur. Rien ici ne connaît le parseur : l'écran reçoit
@@ -47,6 +57,13 @@ class Screen {
   // Le retour à la ligne DIFFÉRÉ, exposé pour les tests : écrire dans la
   // dernière colonne ne descend pas, il pose ce drapeau.
   bool wrap_pending() const { return wrap_pending_; }
+
+  // Le STYLO : le style que `print()` dépose dans chaque cellule qu'il
+  // écrit. C'est le seul état que SGR modifie, et il ne repeint jamais ce
+  // qui est déjà là -- une couleur posée maintenant ne concerne que la
+  // suite.
+  const Style& pen() const { return pen_; }
+  void set_pen(const Style& s) { pen_ = s; }
 
   void print(char32_t cp);
 
@@ -111,6 +128,16 @@ class Screen {
   std::string line_text(int y) const;
 
  private:
+  // La cellule que laisse un EFFACEMENT : vide, mais peinte du FOND
+  // courant. C'est le « background colour erase » du terminfo
+  // `xterm-256color` qu'on promet à l'invité -- sans lui, un `clear` sur un
+  // fond bleu rend un écran noir, et toute application qui compte dessus
+  // pour peindre ses marges se retrouve en damier.
+  //
+  // Le fond SEUL : une cellule sans glyphe ne montre rien d'autre. Y
+  // recopier le premier plan ou les attributs ferait souligner le vide.
+  ScreenCell erased() const;
+
   ScreenCell& cell(int x, int y);
   void scroll_up();    // le haut s'en va, une ligne vierge en bas
   void scroll_down();  // le bas s'en va, une ligne vierge en haut
@@ -147,7 +174,11 @@ class Screen {
   bool wrap_pending_ = false;
   int top_ = 0;
   int bottom_ = 0;  // posé à rows_ - 1 par le constructeur
+  Style pen_{};
   SavedCursor saved_{};
+  // Ce que rend une lecture HORS grille. Rien à voir avec erased() : ce
+  // n'est pas un effacement, c'est l'absence de cellule, et elle ne prend
+  // donc jamais le fond courant.
   ScreenCell blank_{};
 };
 
