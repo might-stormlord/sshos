@@ -355,7 +355,12 @@ Fuzzer déterministe, sans dépendance : un générateur ensemencé produit des 
 
 Tourne dans la suite normale avec un budget de temps borné ; la graine est imprimée pour rejouer un échec.
 
-- [ ] Tâche 14 livrée : tests, commit
+- [x] Tâche 14 livrée : tests, commit — `f409a13`, 4 propriétés, 480 tours
+
+La quatrième propriété a d'abord été écrite fausse (« un octet final
+ramène en `Ground` ») et le fuzzer l'a réfutée en trois tours : un flux
+qui finit dans un `OSC` y reste légitimement. C'était le test qui avait
+tort.
 
 ---
 
