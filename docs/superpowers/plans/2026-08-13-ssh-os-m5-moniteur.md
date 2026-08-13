@@ -51,6 +51,44 @@ En-tête : charge, mémoire, une barre par cœur. Liste de processus triée par 
 
 ## Tâche 3 — Vérification manuelle
 
-- [ ] le moniteur s'ouvre depuis le menu et montre de vrais chiffres
-- [ ] les pourcentages bougent sous charge
-- [ ] le démon reste à 0 jiffie au repos, moniteur MINIMISÉ
+Sonde bout-en-bout du 13 août 2026 : vrai démon, vraie fenêtre Moniteur.
+
+- [x] le moniteur s'ouvre depuis le menu et montre de **vrais chiffres** —
+      `charge 1.19 1.79 2.31`, `Mem[||||||  ] 44%`, neuf barres de cœur,
+      l'en-tête `PID CPU% MEM COMMANDE`
+- [x] les pourcentages **changent** d'un échantillon à l'autre
+- [x] le démon reste à **0 jiffie / 3 s** avec le moniteur MINIMISÉ
+- [ ] ⚠️ **et à 0 jiffie fenêtre VISIBLE aussi** — ce qui est le défaut
+      ci-dessous, pas une réussite
+
+### Dette ouverte : le moniteur ne se rafraîchit pas tout seul
+
+**Trouvé par la sonde, invisible pour les 857 tests.** Le rafraîchissement
+est déclenché par le dessin ; or le démon ne dessine que sur une trame
+*sale*, et rien ne salit la trame quand seul le temps passe. Le moniteur ne
+se met donc à jour que si autre chose provoque un repeint — une frappe, un
+changement de minute à l'horloge du panneau.
+
+La moitié structurelle marche : minimisé, il ne consomme **rien**. C'est
+l'autre moitié de l'énoncé — « rafraîchi sur le tick d'une seconde » — qui
+manque.
+
+**Le correctif est dessiné, il reste à l'écrire** (≈40 lignes, 4 fichiers) :
+
+1. `App` gagne `virtual int refresh_ms() const { return -1; }` ; `Monitor`
+   rend `1000`.
+2. `Session` gagne `refresh_delay_ms()`, sur le modèle exact de
+   `help_delay_ms()` : le plus petit `refresh_ms()` parmi les fenêtres **non
+   minimisées**, ou -1 s'il n'y en a aucune. C'est là que se joue la règle
+   de visibilité — une fenêtre minimisée n'y entre pas.
+3. La boucle du démon replie ce délai dans son `epoll_wait`, comme elle le
+   fait déjà pour l'aide, et marque la trame sale à l'échéance.
+4. Test de régression par le vrai démon : ouvrir le moniteur, ne rien
+   taper, et vérifier qu'une trame arrive dans les deux secondes — puis
+   qu'aucune n'arrive une fois la fenêtre minimisée.
+
+C'est la **quatrième** fois sur ce projet qu'une sonde bout-en-bout trouve
+ce qu'aucun test unitaire ne pouvait voir, après `Decoder::failed()`, la
+garde A2 et `InputParser::timeout()`.
+
+- [x] Tâche 3 livrée : sonde, commit — dette ci-dessus ouverte et chiffrée
