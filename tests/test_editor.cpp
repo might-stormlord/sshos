@@ -381,3 +381,124 @@ TEST(editor_puts_the_cursor_where_the_text_is) {
   CHECK_EQ(p.x, 1);
   CHECK_EQ(p.y, 0);
 }
+
+// ------------------------- huit trous montrés par les mutations
+
+// La ligne d'état prend UNE ligne : le texte occupe le reste. Lui laisser
+// toute la fenêtre ferait peindre une ligne de texte sous la barre, que le
+// clip masquerait sans la corriger.
+TEST(editor_leaves_exactly_one_row_to_its_status_line) {
+  std::string big;
+  for (int i = 0; i < 20; ++i) big += "L" + std::to_string(i) + "\n";
+  TempFile f(big);
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 6});  // 6 - 1 = 5 lignes de texte
+
+  e.on_key(key(Key::PgDn));
+  e.on_key(key(Key::PgDn));
+  e.on_key(key(Key::PgDn));
+  e.on_key(key(Key::PgDn));
+  CHECK_EQ(e.top_for_tests(), e.buffer_for_tests().line_count() - 5);
+}
+
+// L'ÉCRITURE EST ATOMIQUE : on écrit à côté puis on renomme. Écrire en
+// place et mourir au milieu laisse le fichier de l'utilisateur tronqué.
+// Le fichier voisin ne doit pas survivre à l'enregistrement.
+TEST(editor_leaves_no_temporary_file_behind) {
+  TempFile f("avant\n");
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 10});
+  e.on_key(ch(U'x'));
+  e.on_key(ctrl(U's'));
+
+  struct stat st {};
+  CHECK_EQ(::lstat((f.path() + ".sshos-tmp").c_str(), &st), -1);
+  CHECK_EQ(f.read(), std::string("xavant\n"));
+}
+
+// TOUTE autre réponse annule. Une confirmation qui accepte l'à-peu-près
+// n'en est pas une -- et ici, ce qui se perd est le travail.
+TEST(editor_keeps_the_buffer_when_the_answer_is_not_yes) {
+  TempFile f("a\n");
+  REQUIRE(f.valid());
+  MuteHost host;
+  Editor e(f.path());
+  e.on_resize(Size{40, 10});
+  e.attach(host);
+  e.on_key(ch(U'z'));
+  e.on_key(ctrl(U'x'));
+
+  e.on_key(ch(U'n'));
+  CHECK_EQ(host.close_requests, 0);
+}
+
+// La recherche repart d'UNE COLONNE PLUS LOIN : sinon la même occurrence
+// se retrouve indéfiniment et « chercher encore » n'avance jamais.
+TEST(editor_finds_the_next_occurrence_not_the_same_one) {
+  TempFile f("cible\nautre\ncible\n");
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 10});
+
+  e.on_key(ctrl(U'f'));
+  e.on_key(ch(U'c'));
+  e.on_key(key(Key::Enter));
+  REQUIRE_EQ(e.cursor_for_tests().line, size_t{2});
+
+  e.on_key(ctrl(U'f'));
+  e.on_key(ch(U'c'));
+  e.on_key(key(Key::Enter));
+  CHECK_EQ(e.cursor_for_tests().line, size_t{0});  // bouclé par le début
+}
+
+// La flèche gauche en colonne 0 remonte en BOUT de ligne précédente : tout
+// éditeur le fait, et s'arrêter net donne une touche sans effet.
+TEST(editor_wraps_the_left_arrow_to_the_end_of_the_line_above) {
+  TempFile f("abc\nd\n");
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 10});
+  e.on_key(key(Key::Down));
+  REQUIRE_EQ(e.cursor_for_tests().col, size_t{0});
+
+  e.on_key(key(Key::Left));
+  CHECK_EQ(e.cursor_for_tests().line, size_t{0});
+  CHECK_EQ(e.cursor_for_tests().col, size_t{3});
+}
+
+// La page peinte est celle du DÉFILEMENT : sinon on tape en bas d'un
+// fichier tout en regardant son début.
+TEST(editor_paints_the_page_the_scroll_points_at) {
+  std::string big;
+  for (int i = 0; i < 30; ++i) big += "ligne" + std::to_string(i) + "\n";
+  TempFile f(big);
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 6});
+  for (int i = 0; i < 20; ++i) e.on_key(key(Key::Down));
+  REQUIRE(e.top_for_tests() > size_t{0});
+
+  const std::string g = painted(e, 40, 6);
+  CHECK(g.find("ligne0\n") == std::string::npos);
+  CHECK(g.find(e.buffer_for_tests().line(e.top_for_tests())) != std::string::npos);
+}
+
+// Le curseur d'écran tient compte du défilement, et disparaît quand la
+// ligne courante n'est pas à l'écran -- le montrer ailleurs qu'où il est
+// serait pire que ne pas le montrer.
+TEST(editor_places_the_cursor_through_the_scroll_offset) {
+  std::string big;
+  for (int i = 0; i < 30; ++i) big += "L" + std::to_string(i) + "\n";
+  TempFile f(big);
+  REQUIRE(f.valid());
+  Editor e(f.path());
+  e.on_resize(Size{40, 6});
+  for (int i = 0; i < 20; ++i) e.on_key(key(Key::Down));
+
+  sshos::Pos p{};
+  REQUIRE(e.wants_cursor(p));
+  CHECK_EQ(p.y, static_cast<int>(e.cursor_for_tests().line - e.top_for_tests()));
+  CHECK(p.y < 5);
+}
