@@ -135,6 +135,10 @@ bool parse_process_stat(std::string_view text, ProcInfo& out) {
   // première tronquerait le nom ET décalerait tous les champs suivants --
   // le temps CPU deviendrait le numéro de session.
   const size_t close = text.rfind(')');
+  // Garde de forme, ÉQUIVALENTE aujourd'hui : sans elle, `npos` fait lire
+  // la ligne entière des deux côtés, et le compte de champs plus bas
+  // refuse de toute façon. Elle reste parce qu'elle dit ce que la fonction
+  // attend, et parce que le compte de champs, lui, pourrait changer.
   if (open == std::string_view::npos || close == std::string_view::npos ||
       close < open) {
     return false;

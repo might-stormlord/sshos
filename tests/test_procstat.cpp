@@ -35,10 +35,13 @@ TEST(procstat_reads_the_total_then_each_core) {
 // Une ligne qui n'est pas un cœur ne doit pas entrer dans la liste : le
 // nombre de barres serait faux.
 TEST(procstat_ignores_the_lines_that_are_not_cpus) {
+  // La ligne intruse porte AUTANT DE CHAMBRES qu'un cœur : sans cela,
+  // c'est la garde de longueur qui l'écarte, et le test ne dit rien du
+  // préfixe.
   const std::string text =
       "cpu  1 1 1 1 1 1 1 0 0 0\n"
+      "intr 10 11 12 13 14 15 16 17\n"
       "ctxt 999\n"
-      "btime 123\n"
       "processes 42\n";
   CHECK_EQ(parse_cpu_times(text).size(), size_t{1});
 }
