@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -298,7 +299,26 @@ TEST(monitor_never_paints_the_total_as_a_core) {
   const std::string g = painted(m, 50, 12);
   CHECK(g.find("0[") != std::string::npos);
   CHECK(g.find("1[") != std::string::npos);
-  CHECK(g.find("2[") == std::string::npos);
+  // COMPTER les barres : chercher « 2[ » ne suffit pas, un index qui
+  // déborde par le bas donne une étiquette énorme, pas un « 2 ». Trois
+  // crochets ouvrants : la mémoire, et deux cœurs.
+  CHECK_EQ(std::count(g.begin(), g.end(), '['), 3);
+}
+
+// Une barre DIT quelque chose : pleine à 100, vide à 0. Toujours pleine,
+// elle ne dit plus rien et donne l'impression d'une machine à genoux.
+TEST(monitor_draws_an_empty_bar_for_an_idle_core) {
+  Monitor m;
+  m.sample_for_tests(1000, kStat1, kMem, kLoad, procs1());
+  m.sample_for_tests(2000, kStat2, kMem, kLoad, procs2());
+
+  // cpu1 est à 0 % : sa barre ne doit contenir aucune barre verticale.
+  const std::string g = painted(m, 50, 12);
+  const size_t at = g.find("1[");
+  REQUIRE(at != std::string::npos);
+  const size_t close = g.find(']', at);
+  REQUIRE(close != std::string::npos);
+  CHECK_EQ(g.substr(at, close - at).find('|'), std::string::npos);
 }
 
 TEST(monitor_names_the_load_it_paints) {
