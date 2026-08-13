@@ -61,34 +61,41 @@ Sonde bout-en-bout du 13 août 2026 : vrai démon, vraie fenêtre Moniteur.
 - [ ] ⚠️ **et à 0 jiffie fenêtre VISIBLE aussi** — ce qui est le défaut
       ci-dessous, pas une réussite
 
-### Dette ouverte : le moniteur ne se rafraîchit pas tout seul
+### La dette qu'elle a trouvée, et sa fermeture — `d5a7bb5`
 
 **Trouvé par la sonde, invisible pour les 857 tests.** Le rafraîchissement
 est déclenché par le dessin ; or le démon ne dessine que sur une trame
 *sale*, et rien ne salit la trame quand seul le temps passe. Le moniteur ne
-se met donc à jour que si autre chose provoque un repeint — une frappe, un
-changement de minute à l'horloge du panneau.
+se mettait donc à jour qu'à la frappe suivante.
 
-La moitié structurelle marche : minimisé, il ne consomme **rien**. C'est
-l'autre moitié de l'énoncé — « rafraîchi sur le tick d'une seconde » — qui
-manque.
+C'était la **quatrième** fois sur ce projet qu'une sonde bout-en-bout
+trouve ce qu'aucun test unitaire ne pouvait voir, après `Decoder::failed()`,
+la garde A2 et `InputParser::timeout()`.
 
-**Le correctif est dessiné, il reste à l'écrire** (≈40 lignes, 4 fichiers) :
+**Fermée le jour même**, en quatre points :
 
-1. `App` gagne `virtual int refresh_ms() const { return -1; }` ; `Monitor`
-   rend `1000`.
-2. `Session` gagne `refresh_delay_ms()`, sur le modèle exact de
-   `help_delay_ms()` : le plus petit `refresh_ms()` parmi les fenêtres **non
-   minimisées**, ou -1 s'il n'y en a aucune. C'est là que se joue la règle
-   de visibilité — une fenêtre minimisée n'y entre pas.
-3. La boucle du démon replie ce délai dans son `epoll_wait`, comme elle le
-   fait déjà pour l'aide, et marque la trame sale à l'échéance.
-4. Test de régression par le vrai démon : ouvrir le moniteur, ne rien
-   taper, et vérifier qu'une trame arrive dans les deux secondes — puis
-   qu'aucune n'arrive une fois la fenêtre minimisée.
+1. `App::refresh_ms()` rend -1 par défaut ; `Monitor` rend 1000.
+2. `Session::refresh_delay_ms()` collecte le plus petit délai parmi les
+   fenêtres **non minimisées** — c'est là que se joue la règle de
+   visibilité.
+3. La boucle du démon replie ce délai dans son `epoll_wait`, comme pour
+   l'aide et l'ambiguïté de l'échappement.
+4. Test de régression par le vrai démon, qui échoue 2 fois sur 2 contre le
+   code d'avant.
 
-C'est la **quatrième** fois sur ce projet qu'une sonde bout-en-bout trouve
-ce qu'aucun test unitaire ne pouvait voir, après `Decoder::failed()`, la
-garde A2 et `InputParser::timeout()`.
+Mesuré après coup : **visible**, 632 octets reçus sans rien taper et
+10 jiffies / 3 s ; **minimisé**, 0 octet et 0 jiffie.
 
-- [x] Tâche 3 livrée : sonde, commit — dette ci-dessus ouverte et chiffrée
+- [x] Tâche 3 livrée : sonde, dette trouvée et fermée
+
+---
+
+## Bilan du jalon
+
+**3 tâches sur 3, 858 cas verts** en Release et sous ASan/UBSan. **47
+mutations** jouées, 44 mordues, 3 déclarées non discriminables et
+documentées sur place.
+
+Deux défauts que seule l'exécution réelle a montrés : le chiffre du nom de
+cœur (`cpu0`) lu comme un champ, qui affichait un cœur à 100 % à 50 % — et
+le rafraîchissement qui n'avait pas lieu.
