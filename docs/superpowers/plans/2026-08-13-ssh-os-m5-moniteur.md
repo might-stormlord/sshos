@@ -37,7 +37,8 @@
 
 **Les pièges :** le nom d'un processus est entre parenthèses et **peut contenir des espaces et des parenthèses** — découper sur les espaces donne n'importe quoi ; un compteur qui recule (processus disparu, cœur ajouté) doit rendre zéro et non un pourcentage négatif ; `MemAvailable` n'existe pas sur les vieux noyaux.
 
-- [ ] Tâche 1 livrée : tests, mutations, commit
+- [x] Tâche 1 livrée : tests, mutations, commit — `3b858e7`, 16 tests, 22 mutations
+  (2 non discriminables, déclarées)
 
 ## Tâche 2 — L'application
 
