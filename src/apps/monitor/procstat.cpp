@@ -49,7 +49,13 @@ std::vector<CpuTimes> parse_cpu_times(std::string_view text) {
   std::vector<CpuTimes> out;
   for (std::string_view line : lines_of(text)) {
     if (line.substr(0, 3) != "cpu") continue;
-    const std::vector<uint64_t> n = numbers_of(line);
+    // LE NOM DU CŒUR CONTIENT UN CHIFFRE. « cpu0 » donnerait un premier
+    // nombre parasite, qui décalerait tous les champs d'un rang : le repos
+    // serait lu à la place du système, et un cœur à 100 % s'afficherait à
+    // 50. Trouvé par le test, pas à la relecture.
+    const size_t sp = line.find(' ');
+    if (sp == std::string_view::npos) continue;
+    const std::vector<uint64_t> n = numbers_of(line.substr(sp));
     // Il en faut au moins cinq pour distinguer l'attente d'E/S du repos.
     //
     // Garde contre un COMPORTEMENT INDÉFINI, et non discriminable par un

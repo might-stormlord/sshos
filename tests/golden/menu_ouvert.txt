@@ -17,4 +17,4 @@
 |Panneau : gauche                |                          
 |Panneau : droite                |                          
 +--------------------------------+                          
- ssh_os  Terminal  Fichiers *Bloc  Batteme~ ^A = aide 10:05 
+ ssh_os  Terminal  Fichiers  Moniteur *Bloc  Batteme~ 10:05 

@@ -3,6 +3,7 @@
 #include "apps/battement.hpp"
 #include "apps/bloc.hpp"
 #include "apps/files/files.hpp"
+#include "apps/monitor/monitor.hpp"
 #include "apps/terminal.hpp"
 
 namespace sshos {
@@ -12,6 +13,7 @@ std::unique_ptr<App> make_bloc() { return std::make_unique<Bloc>(); }
 std::unique_ptr<App> make_battement() { return std::make_unique<Battement>(); }
 std::unique_ptr<App> make_terminal() { return std::make_unique<Terminal>(); }
 std::unique_ptr<App> make_files() { return std::make_unique<Files>(); }
+std::unique_ptr<App> make_monitor() { return std::make_unique<Monitor>(); }
 
 }  // namespace
 
@@ -25,6 +27,7 @@ const std::vector<CatalogEntry>& catalog() {
       // Le Terminal EN TETE : c'est desormais la raison d'etre du bureau.
       {"terminal", "Terminal", &make_terminal},
       {"fichiers", "Fichiers", &make_files},
+      {"moniteur", "Moniteur", &make_monitor},
       {"bloc", "Bloc", &make_bloc},
       {"battement", "Battement", &make_battement},
   };
