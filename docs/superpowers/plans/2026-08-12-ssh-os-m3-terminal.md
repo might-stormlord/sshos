@@ -139,7 +139,7 @@ Le piège : `IL`/`DL` hors région ne font rien, et une région rétrécie ne d�
 
 **Tests :** chaque mode de `ED`/`EL` sur une grille marquée ; `IL` au bas de la région ; `DL` en haut ; `DECSTBM` à une seule ligne ; `DECSC`/`DECRC` restitue les attributs ; un défilement pousse la ligne sortante au scrollback (tâche 7) et pas ailleurs.
 
-- [x] Tâche 4 livrée : tests, mutations, commit — 43 tests, 51 mutations (4 équivalentes)
+- [x] Tâche 4 livrée : tests, mutations, commit — efda2a0, 43 tests, 51 mutations (4 équivalentes)
 
 Deux parties de l'énoncé sont **reportées, faute de matière** : `DECSC` ne
 sauve pour l'instant que la position et le retour différé, parce que les

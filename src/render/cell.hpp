@@ -51,6 +51,13 @@ inline constexpr uint16_t Italic = 1 << 2;
 inline constexpr uint16_t Underline = 1 << 3;
 inline constexpr uint16_t Reverse = 1 << 4;
 inline constexpr uint16_t Strike = 1 << 5;
+// Ces deux-là, l'interface du bureau ne les emploie pas ; ils existent
+// pour le VT, qui doit pouvoir porter un SGR 5 ou un SGR 8 reçu de
+// l'invité. Sans eux, `SGR 5` puis `SGR 25` ne se distinguerait plus
+// d'une paire de non-opérations, et un mot de passe demandé caché
+// s'afficherait en clair.
+inline constexpr uint16_t Blink = 1 << 6;
+inline constexpr uint16_t Hidden = 1 << 7;
 }  // namespace attr
 
 struct Style {

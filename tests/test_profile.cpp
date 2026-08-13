@@ -50,6 +50,28 @@ TEST(sgr_adds_attribute_incrementally) {
   CHECK_EQ(sgr_transition(Style{}, to, p), std::string("\033[1m"));
 }
 
+// Blink et Hidden ne viennent jamais de l'interface du bureau, seulement
+// d'un invité du terminal. Sans eux dans la table, un `SGR 8` reçu de
+// l'invité se poserait dans le style sans jamais être émis, et le mot de
+// passe qu'une application demande caché s'afficherait en clair. Le
+// troisième cas fixe aussi l'ORDRE : la table se parcourt par code
+// croissant, et un pinceau qui poserait 8 avant 5 se relirait mal.
+TEST(sgr_emits_the_attributes_that_only_a_terminal_guest_uses) {
+  const auto p = OutputProfile::detect("xterm", "truecolor", true);
+  Style blink;
+  blink.attrs = sshos::attr::Blink;
+  CHECK_EQ(sgr_transition(Style{}, blink, p), std::string("\033[5m"));
+
+  Style hidden;
+  hidden.attrs = sshos::attr::Hidden;
+  CHECK_EQ(sgr_transition(Style{}, hidden, p), std::string("\033[8m"));
+
+  Style all;
+  all.attrs = sshos::attr::Hidden | sshos::attr::Blink | sshos::attr::Bold;
+  CHECK_EQ(sgr_transition(Style{}, all, p),
+           std::string("\033[1m\033[5m\033[8m"));
+}
+
 // Retirer un attribut n'a pas de code incrémental fiable : on réinitialise
 // puis on repose l'état complet.
 TEST(sgr_resets_when_an_attribute_is_removed) {

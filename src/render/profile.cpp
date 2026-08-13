@@ -119,12 +119,18 @@ std::string sgr_transition(const Style& from, const Style& to,
     base = Style{};
   }
 
-  const std::array<std::pair<uint16_t, int>, 6> codes{{
+  // Blink et Hidden ne viennent jamais de l'interface, seulement d'un
+  // invité du terminal. Ils figurent tout de même ici : les poser sans
+  // les émettre laisserait un SGR 8 s'afficher en clair, et ferait
+  // réinitialiser le pinceau pour un changement que personne ne verrait.
+  const std::array<std::pair<uint16_t, int>, 8> codes{{
       {attr::Bold, 1},
       {attr::Dim, 2},
       {attr::Italic, 3},
       {attr::Underline, 4},
+      {attr::Blink, 5},
       {attr::Reverse, 7},
+      {attr::Hidden, 8},
       {attr::Strike, 9},
   }};
   for (const auto& [bit, code] : codes) {
