@@ -49,7 +49,13 @@ Le filtre est une sous-chaîne, insensible à la casse. Il ne relit pas le disqu
 
 **Tests :** un répertoire fabriqué de toutes pièces se lit trié dossiers d'abord ; `..` est là, et absent à la racine ; les cachés apparaissent et disparaissent ; le filtre est insensible à la casse et ne relit pas ; un répertoire sans droit de lecture rend une erreur nommée.
 
-- [ ] Tâche 1 livrée : tests, mutations, commit
+- [x] Tâche 1 livrée : tests, mutations, commit — `16e1423`, 21 tests, 23 mutations
+  (2 équivalentes)
+
+La comparaison est devenue un **ordre total** en cours de route : le pliage
+de casse rendait deux orthographes d'un même nom égales, ce qui laissait
+leur ordre à la merci de l'algorithme de tri. Le départage par le nom brut
+rend du même coup la stabilité du tri sans objet.
 
 ## Tâche 2 — L'application : navigation et sélection
 

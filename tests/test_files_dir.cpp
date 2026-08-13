@@ -293,13 +293,23 @@ TEST(dir_never_lists_the_current_directory) {
 
 // La liste rendue par la lecture est DÉJÀ triée : l'appelant ne doit pas
 // avoir à s'en souvenir, et `readdir` ne garantit aucun ordre.
+// Assez d'entrées, et créées dans le DÉSORDRE, pour que l'ordre brut de
+// `readdir` -- qui n'est ni celui de création ni l'alphabétique -- ne
+// puisse pas coïncider par hasard avec le résultat attendu. Une première
+// version avec trois entrées y était arrivée, et ne mordait donc pas.
 TEST(dir_returns_an_already_sorted_listing) {
   TempDir t;
   REQUIRE(t.valid());
   t.file("zeta");
+  t.dir("sierra");
   t.file("alpha");
-  t.dir("mid");
+  t.file("mike");
+  t.dir("bravo");
+  t.file("kilo");
+  t.dir("delta");
+  t.file("echo");
 
   const DirListing l = read_dir(t.path(), false);
-  CHECK_EQ(joined(l.entries), std::string("..|mid|alpha|zeta"));
+  CHECK_EQ(joined(l.entries),
+           std::string("..|bravo|delta|sierra|alpha|echo|kilo|mike|zeta"));
 }
