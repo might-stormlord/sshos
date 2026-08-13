@@ -69,6 +69,11 @@ void Editor::save() {
   // ÉCRITURE ATOMIQUE : on écrit à côté, puis on renomme. Écrire en place
   // et mourir au milieu laisse un fichier TRONQUÉ -- et c'est le fichier
   // de l'utilisateur, pas le nôtre.
+  // NON DISCRIMINABLE par un test, et gardé quand même : l'atomicité ne
+  // se mesure qu'en mourant au milieu de l'écriture. La mutation qui écrit
+  // en place produit exactement le même fichier -- tant que rien
+  // n'interrompt. C'est précisément la fenêtre d'interruption qu'on ferme
+  // ici, et le fichier en jeu est celui de l'utilisateur.
   const std::string tmp = path_ + ".sshos-tmp";
   const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
   if (fd < 0) {
@@ -234,6 +239,10 @@ void Editor::on_key(const KeyEvent& k) {
 }
 
 bool Editor::wants_cursor(Pos& out) const {
+  // Garde DÉFENSIVE, non discriminable : `settle()` maintient toujours
+  // `top_ <= cur_.line`. Elle reste parce qu'elle dit ce que la fonction
+  // suppose, et qu'un futur défilement indépendant du curseur -- une
+  // molette, par exemple -- la rendrait porteuse du jour au lendemain.
   if (cur_.line < top_) return false;
   const int y = static_cast<int>(cur_.line - top_);
   if (y >= rows_for_text()) return false;
