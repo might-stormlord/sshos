@@ -116,7 +116,7 @@ std::string elide_right(const std::string& s, int width) {
 Files::Files() : Files("/") {}
 
 Files::Files(std::string start) {
-  listing_.path = std::move(start);
+  pane().listing.path = std::move(start);
   reload();
 }
 
@@ -129,6 +129,14 @@ void Files::on_resize(Size s) {
   if (s.w <= 0 || s.h <= 0) return;
   size_ = s;
   settle();
+}
+
+int Files::pane_width() const {
+  // La cloison prend une colonne, et le reste se partage. Le panneau de
+  // gauche prend la part impaire : deux panneaux qui se touchent sans
+  // colonne perdue valent mieux qu'une symétrie parfaite.
+  if (!split_) return std::max(1, size_.w);
+  return std::max(1, (size_.w - 1) / 2);
 }
 
 int Files::rows_for_list() const {
@@ -167,11 +175,11 @@ void Files::sort_on(SortBy by) {
   // Recliquer la même colonne INVERSE ; en choisir une autre repart dans
   // le sens croissant -- personne n'attend qu'un tri par date hérite du
   // sens qu'on avait donné aux tailles.
-  if (sort_by_ == by) {
-    sort_desc_ = !sort_desc_;
+  if (pane().sort_by == by) {
+    pane().sort_desc = !pane().sort_desc;
   } else {
-    sort_by_ = by;
-    sort_desc_ = false;
+    pane().sort_by = by;
+    pane().sort_desc = false;
   }
   refilter();
 }
@@ -180,9 +188,9 @@ void Files::reload() {
   // Les noms marqués sont ceux d'AVANT. Les garder ferait porter la
   // prochaine action sur leurs homonymes ici, ce qui est le pire résultat
   // possible.
-  marked_.clear();
-  listing_ = read_dir(listing_.path, show_hidden_);
-  status_ = listing_.error;
+  pane().marked.clear();
+  pane().listing = read_dir(pane().listing.path, show_hidden_);
+  pane().status = pane().listing.error;
   refilter();
 }
 
@@ -191,15 +199,15 @@ void Files::refilter() {
   // la retrouver ailleurs dans la liste est le minimum qu'on attende d'un
   // clic sur un en-tête.
   const std::string kept =
-      sel_ < visible_.size() ? visible_[sel_].name : std::string();
+      pane().sel < pane().visible.size() ? pane().visible[pane().sel].name : std::string();
 
-  visible_ = filter_entries(listing_.entries, filter_);
-  sort_entries(visible_, sort_by_, sort_desc_);
+  pane().visible = filter_entries(pane().listing.entries, pane().filter);
+  sort_entries(pane().visible, pane().sort_by, pane().sort_desc);
 
   if (!kept.empty()) {
-    for (size_t i = 0; i < visible_.size(); ++i) {
-      if (visible_[i].name == kept) {
-        sel_ = i;
+    for (size_t i = 0; i < pane().visible.size(); ++i) {
+      if (pane().visible[i].name == kept) {
+        pane().sel = i;
         break;
       }
     }
@@ -211,25 +219,25 @@ void Files::settle() {
   // La sélection D'ABORD : borner le défilement sur une sélection hors
   // bornes le poserait n'importe où, et la fenêtre montrerait une page qui
   // ne contient pas la ligne choisie.
-  if (visible_.empty()) {
+  if (pane().visible.empty()) {
     // Remise à zéro DÉFENSIVE, et non discriminable aujourd'hui : la seule
     // façon d'avoir une liste vide est de partir d'un répertoire
     // illisible, et la sélection y vaut déjà zéro. Elle reste parce
     // qu'elle deviendra porteuse le jour où une liste non vide pourra le
     // devenir -- une suppression qui vide le dossier, par exemple.
-    sel_ = 0;
-    top_ = 0;
+    pane().sel = 0;
+    pane().top = 0;
     return;
   }
-  if (sel_ >= visible_.size()) sel_ = visible_.size() - 1;
+  if (pane().sel >= pane().visible.size()) pane().sel = pane().visible.size() - 1;
 
   const size_t rows = static_cast<size_t>(rows_for_list());
-  if (sel_ < top_) top_ = sel_;
-  if (sel_ >= top_ + rows) top_ = sel_ - rows + 1;
+  if (pane().sel < pane().top) pane().top = pane().sel;
+  if (pane().sel >= pane().top + rows) pane().top = pane().sel - rows + 1;
   // Et jamais de page vide en bas : quand la liste rétrécit sous le
   // défilement, celui-ci doit remonter.
-  if (top_ + rows > visible_.size()) {
-    top_ = visible_.size() > rows ? visible_.size() - rows : 0;
+  if (pane().top + rows > pane().visible.size()) {
+    pane().top = pane().visible.size() > rows ? pane().visible.size() - rows : 0;
   }
 }
 
@@ -238,26 +246,26 @@ bool Files::load(const std::string& path, const std::string& came_from) {
   if (!probe.error.empty()) {
     // On RESTE où l'on est. Descendre dans un répertoire illisible pour y
     // afficher une liste vide donnerait l'impression d'un dossier vide.
-    status_ = probe.error;
+    pane().status = probe.error;
     return false;
   }
-  listing_ = probe;
-  status_.clear();
-  filter_.clear();
-  marked_.clear();
-  sel_ = 0;
-  top_ = 0;
+  pane().listing = probe;
+  pane().status.clear();
+  pane().filter.clear();
+  pane().marked.clear();
+  pane().sel = 0;
+  pane().top = 0;
   // Vidée AVANT le refiltrage : celui-ci garde la ligne choisie par son
   // NOM, et un nom de l'ancien répertoire n'a rien à faire ici.
   //
-  // ÉQUIVALENTE aujourd'hui, et par un enchaînement fragile : `sel_` vient
+  // ÉQUIVALENTE aujourd'hui, et par un enchaînement fragile : `pane().sel` vient
   // d'être remis à zéro, donc le nom retenu est celui de la première ligne
   // de l'ancienne liste -- c'est-à-dire « .. », qui existe aussi dans la
   // nouvelle et s'y trouve déjà en tête. La garde reste parce que ce
-  // raisonnement tient à l'ordre de trois lignes : déplacer `sel_ = 0`
+  // raisonnement tient à l'ordre de trois lignes : déplacer `pane().sel = 0`
   // après le refiltrage suffirait à faire atterrir la sélection sur un
   // homonyme, et rien ne le dirait.
-  visible_.clear();
+  pane().visible.clear();
   refilter();
 
   // Le dossier d'où l'on sort devient la sélection : remonter puis
@@ -268,9 +276,9 @@ bool Files::load(const std::string& path, const std::string& came_from) {
     const size_t slash = rest.find('/');
     const std::string child = slash == std::string::npos ? rest
                                                          : rest.substr(0, slash);
-    for (size_t i = 0; i < visible_.size(); ++i) {
-      if (visible_[i].name == child) {
-        sel_ = i;
+    for (size_t i = 0; i < pane().visible.size(); ++i) {
+      if (pane().visible[i].name == child) {
+        pane().sel = i;
         break;
       }
     }
@@ -280,36 +288,36 @@ bool Files::load(const std::string& path, const std::string& came_from) {
 }
 
 void Files::go_to(const std::string& path) {
-  if (path == listing_.path) return;
-  const std::string from = listing_.path;
+  if (path == pane().listing.path) return;
+  const std::string from = pane().listing.path;
   if (!load(path, from)) return;
-  back_.push_back(from);
-  forward_.clear();
+  pane().back.push_back(from);
+  pane().forward.clear();
 }
 
 void Files::go_back() {
-  if (back_.empty()) return;
-  const std::string from = listing_.path;
-  const std::string target = back_.back();
+  if (pane().back.empty()) return;
+  const std::string from = pane().listing.path;
+  const std::string target = pane().back.back();
   if (!load(target, from)) return;
-  back_.pop_back();
-  forward_.push_back(from);
+  pane().back.pop_back();
+  pane().forward.push_back(from);
 }
 
 void Files::go_forward() {
-  if (forward_.empty()) return;
-  const std::string from = listing_.path;
-  const std::string target = forward_.back();
+  if (pane().forward.empty()) return;
+  const std::string from = pane().listing.path;
+  const std::string target = pane().forward.back();
   if (!load(target, from)) return;
-  forward_.pop_back();
-  back_.push_back(from);
+  pane().forward.pop_back();
+  pane().back.push_back(from);
 }
 
-std::vector<Files::Segment> Files::path_segments(int w) const {
+std::vector<Files::Segment> Files::path_segments(const Pane& pn, int w) const {
   // Le chemin découpé à chaque barre : « /a/b » donne « / », « a », « b »,
   // et chacun porte le chemin ABSOLU qu'il désigne.
   std::vector<Segment> out;
-  const std::string& p = listing_.path;
+  const std::string& p = pn.listing.path;
   size_t i = 0;
   std::string built;
   while (i < p.size()) {
@@ -346,8 +354,8 @@ std::vector<Files::Segment> Files::path_segments(int w) const {
 }
 
 void Files::go_up() {
-  const std::string up = parent_path(listing_.path);
-  if (up == listing_.path) {
+  const std::string up = parent_path(pane().listing.path);
+  if (up == pane().listing.path) {
     // La racine n'a pas de parent. Ne rien faire est la seule réponse
     // honnête -- et surtout pas effacer le filtre au passage.
     return;
@@ -355,7 +363,7 @@ void Files::go_up() {
   // Le répertoire qu'on quitte devient la sélection dans son parent :
   // remonter puis redescendre doit ramener au même endroit, sans avoir à
   // rechercher des yeux d'où l'on vient.
-  std::string leaving = listing_.path;
+  std::string leaving = pane().listing.path;
   while (leaving.size() > 1 && leaving.back() == '/') leaving.pop_back();
   const size_t cut = leaving.rfind('/');
   const std::string name =
@@ -366,13 +374,13 @@ void Files::go_up() {
 }
 
 void Files::activate() {
-  if (visible_.empty()) return;
-  const DirEntry& e = visible_[sel_];
+  if (pane().visible.empty()) return;
+  const DirEntry& e = pane().visible[pane().sel];
   if (e.kind != EntryKind::Dir) {
     // Un fichier s'ouvrirait dans l'éditeur, qui est le jalon 6. D'ici là,
     // le dire vaut mieux que ne rien faire : une touche sans effet et sans
     // explication passe pour une panne.
-    status_ = "l'editeur arrive au jalon 6";
+    pane().status = "l'editeur arrive au jalon 6";
     return;
   }
   if (e.name == "..") {
@@ -380,12 +388,12 @@ void Files::activate() {
     return;
   }
 
-  go_to(join_path(listing_.path, e.name));
+  go_to(join_path(pane().listing.path, e.name));
 }
 
 std::string Files::touchable_selection() const {
-  if (visible_.empty()) return {};
-  const std::string& name = visible_[sel_].name;
+  if (pane().visible.empty()) return {};
+  const std::string& name = pane().visible[pane().sel].name;
   // `..` n'est pas un fichier de CE répertoire : le renommer renommerait
   // le parent, et le supprimer effacerait le dossier qui nous contient.
   // Personne ne demande ça en visant la première ligne.
@@ -394,21 +402,21 @@ std::string Files::touchable_selection() const {
 }
 
 std::string Files::markable_at(size_t i) const {
-  if (i >= visible_.size()) return {};
+  if (i >= pane().visible.size()) return {};
   // `..` n'est pas un fichier, c'est la sortie : le laisser entrer dans une
   // sélection ferait porter une copie ou une suppression sur le parent.
-  if (visible_[i].name == "..") return {};
-  return visible_[i].name;
+  if (pane().visible[i].name == "..") return {};
+  return pane().visible[i].name;
 }
 
 bool Files::toggle_mark(size_t i) {
   const std::string name = markable_at(i);
   if (name.empty()) return false;
-  const auto at = marked_.find(name);
-  if (at == marked_.end()) {
-    marked_.insert(name);
+  const auto at = pane().marked.find(name);
+  if (at == pane().marked.end()) {
+    pane().marked.insert(name);
   } else {
-    marked_.erase(at);
+    pane().marked.erase(at);
   }
   return true;
 }
@@ -416,9 +424,9 @@ bool Files::toggle_mark(size_t i) {
 void Files::mark_range(size_t a, size_t b) {
   const size_t lo = std::min(a, b);
   const size_t hi = std::max(a, b);
-  for (size_t i = lo; i <= hi && i < visible_.size(); ++i) {
+  for (size_t i = lo; i <= hi && i < pane().visible.size(); ++i) {
     const std::string name = markable_at(i);
-    if (!name.empty()) marked_.insert(name);
+    if (!name.empty()) pane().marked.insert(name);
   }
 }
 
@@ -426,8 +434,8 @@ std::vector<std::string> Files::targets() const {
   // LES MARQUÉS S'IL Y EN A, sinon la seule ligne sous la sélection. C'est
   // la règle de tous les gestionnaires, et elle évite d'avoir à marquer un
   // fichier pour agir sur lui.
-  if (!marked_.empty()) {
-    return std::vector<std::string>(marked_.begin(), marked_.end());
+  if (!pane().marked.empty()) {
+    return std::vector<std::string>(pane().marked.begin(), pane().marked.end());
   }
   const std::string one = touchable_selection();
   if (one.empty()) return {};
@@ -442,33 +450,33 @@ void Files::commit_rename() {
   // déplacement -- et un déplacement à l'aveugle vers un chemin qu'on ne
   // voit pas est exactement ce qu'on ne veut pas offrir sur une touche.
   if (edit_.find('/') != std::string::npos) {
-    status_ = "un nom ne peut pas contenir de barre";
+    pane().status = "un nom ne peut pas contenir de barre";
     return;
   }
 
-  const std::string src = join_path(listing_.path, from);
-  const std::string dst = join_path(listing_.path, edit_);
+  const std::string src = join_path(pane().listing.path, from);
+  const std::string dst = join_path(pane().listing.path, edit_);
 
   // `rename()` ECRASE silencieusement une cible existante. C'est la façon
   // la plus rapide de perdre un fichier, et le noyau n'offre pas de garde
   // portable : on regarde d'abord.
   struct stat st {};
   if (::lstat(dst.c_str(), &st) == 0) {
-    status_ = "ce nom est deja pris";
+    pane().status = "ce nom est deja pris";
     return;
   }
   if (::rename(src.c_str(), dst.c_str()) != 0) {
-    status_ = std::string("renommage impossible : ") + std::strerror(errno);
+    pane().status = std::string("renommage impossible : ") + std::strerror(errno);
     return;
   }
 
-  status_.clear();
+  pane().status.clear();
   reload();
   // La sélection SUIT le nom renommé : le perdre de vue après l'avoir
   // renommé oblige à le rechercher pour vérifier.
-  for (size_t i = 0; i < visible_.size(); ++i) {
-    if (visible_[i].name == edit_) {
-      sel_ = i;
+  for (size_t i = 0; i < pane().visible.size(); ++i) {
+    if (pane().visible[i].name == edit_) {
+      pane().sel = i;
       break;
     }
   }
@@ -485,11 +493,11 @@ void Files::commit_create() {
   // UN NOM AVEC UNE BARRE EST REFUSÉ. « ../ailleurs » créerait hors du
   // répertoire affiché, ce que rien à l'écran n'aurait laissé prévoir.
   if (name.find('/') != std::string::npos || name == "." || name == "..") {
-    status_ = "nom invalide : " + name;
+    pane().status = "nom invalide : " + name;
     return;
   }
 
-  const std::string target = join_path(listing_.path, name);
+  const std::string target = join_path(pane().listing.path, name);
   // `O_EXCL` et `mkdir` refusent tous deux un nom déjà pris, et c'est le
   // noyau qui tranche : vérifier soi-même laisserait une fenêtre entre le
   // test et la création.
@@ -503,7 +511,7 @@ void Files::commit_create() {
     if (fd >= 0) ::close(fd);
   }
   if (rc != 0) {
-    status_ = std::string("creation impossible : ") + std::strerror(errno);
+    pane().status = std::string("creation impossible : ") + std::strerror(errno);
     return;
   }
 
@@ -511,9 +519,9 @@ void Files::commit_create() {
   // CE QU'ON VIENT DE CRÉER EST SOUS LE CURSEUR : le chercher des yeux
   // juste après l'avoir nommé est le genre de détail qui fait qu'on
   // n'utilise pas la fonction.
-  for (size_t i = 0; i < visible_.size(); ++i) {
-    if (visible_[i].name == name) {
-      sel_ = i;
+  for (size_t i = 0; i < pane().visible.size(); ++i) {
+    if (pane().visible[i].name == name) {
+      pane().sel = i;
       break;
     }
   }
@@ -525,11 +533,11 @@ void Files::commit_delete() {
   mode_ = Mode::Normal;
   if (victims.empty()) return;
 
-  status_.clear();
+  pane().status.clear();
   int failed = 0;
   std::string first_error;
   for (const std::string& name : victims) {
-    const std::string victim = join_path(listing_.path, name);
+    const std::string victim = join_path(pane().listing.path, name);
     // Pas de suppression RÉCURSIVE : `rmdir` refuse un dossier non vide, et
     // c'est exactement ce qu'on veut. Effacer une arborescence entière sur
     // une touche est le genre de fonction qu'on regrette une seule fois.
@@ -544,7 +552,7 @@ void Files::commit_delete() {
       if (first_error.empty()) first_error = std::strerror(errno);
     }
   }
-  // RELIRE D'ABORD, DIRE ENSUITE : `reload()` repose `status_` sur l'erreur
+  // RELIRE D'ABORD, DIRE ENSUITE : `reload()` repose `pane().status` sur l'erreur
   // de lecture du répertoire -- vide quand tout va bien -- et effacerait
   // donc le message qu'on vient d'écrire.
   reload();
@@ -552,7 +560,7 @@ void Files::commit_delete() {
   // laisserait une sélection à moitié traitée dont l'utilisateur ne
   // saurait pas où elle en est.
   if (failed > 0) {
-    status_ = failed == 1 && victims.size() == 1
+    pane().status = failed == 1 && victims.size() == 1
                   ? "suppression impossible : " + first_error
                   : std::to_string(failed) + " sur " +
                         std::to_string(victims.size()) +
@@ -608,10 +616,10 @@ void Files::on_key(const KeyEvent& k) {
   // fait les deux.
   if (k.key == Key::Char && (k.ch == U'a' || k.ch == U'A') &&
       (k.mods & mod::Ctrl) != 0) {
-    if (marked_.empty()) {
-      mark_range(0, visible_.empty() ? 0 : visible_.size() - 1);
+    if (pane().marked.empty()) {
+      mark_range(0, pane().visible.empty() ? 0 : pane().visible.size() - 1);
     } else {
-      marked_.clear();
+      pane().marked.clear();
     }
     return;
   }
@@ -619,9 +627,9 @@ void Files::on_key(const KeyEvent& k) {
   // passage, sans relever les doigts pour bouger. Il descend MÊME sur `..`,
   // qui ne se marque pas -- rester bloqué là donnerait l'impression que la
   // touche ne fait rien.
-  if (k.key == Key::Char && k.ch == U' ' && filter_.empty()) {
-    toggle_mark(sel_);
-    if (sel_ + 1 < visible_.size()) ++sel_;
+  if (k.key == Key::Char && k.ch == U' ' && pane().filter.empty()) {
+    toggle_mark(pane().sel);
+    if (pane().sel + 1 < pane().visible.size()) ++pane().sel;
     settle();
     return;
   }
@@ -644,37 +652,37 @@ void Files::on_key(const KeyEvent& k) {
     case Key::Up:
       // `Maj+flèche` ÉTEND depuis la position courante : c'est le geste
       // qu'on essaie en premier quand on vient d'un vrai bureau.
-      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
-      if (sel_ > 0) --sel_;
-      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
+      if ((k.mods & mod::Shift) != 0) mark_range(pane().sel, pane().sel);
+      if (pane().sel > 0) --pane().sel;
+      if ((k.mods & mod::Shift) != 0) mark_range(pane().sel, pane().sel);
       settle();
       return;
     case Key::Down:
       // Cette garde-ci n'est PAS porteuse -- `settle()` borne juste après,
       // et la mutation qui la retire est équivalente. Celle de la flèche
-      // haut l'est, elle : `--sel_` sur zéro déborde par le bas et
+      // haut l'est, elle : `--pane().sel` sur zéro déborde par le bas et
       // enverrait la sélection À LA FIN de la liste. On les garde
       // symétriques pour que le lecteur n'ait pas à refaire cette
       // vérification.
-      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
-      if (sel_ + 1 < visible_.size()) ++sel_;
-      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
+      if ((k.mods & mod::Shift) != 0) mark_range(pane().sel, pane().sel);
+      if (pane().sel + 1 < pane().visible.size()) ++pane().sel;
+      if ((k.mods & mod::Shift) != 0) mark_range(pane().sel, pane().sel);
       settle();
       return;
     case Key::PgUp:
-      sel_ = sel_ > rows ? sel_ - rows : 0;
+      pane().sel = pane().sel > rows ? pane().sel - rows : 0;
       settle();
       return;
     case Key::PgDn:
-      sel_ = std::min(sel_ + rows, visible_.empty() ? 0 : visible_.size() - 1);
+      pane().sel = std::min(pane().sel + rows, pane().visible.empty() ? 0 : pane().visible.size() - 1);
       settle();
       return;
     case Key::Home:
-      sel_ = 0;
+      pane().sel = 0;
       settle();
       return;
     case Key::End:
-      sel_ = visible_.empty() ? 0 : visible_.size() - 1;
+      pane().sel = pane().visible.empty() ? 0 : pane().visible.size() - 1;
       settle();
       return;
     case Key::Enter:
@@ -689,6 +697,31 @@ void Files::on_key(const KeyEvent& k) {
       mode_ = Mode::Renaming;
       return;
     }
+    case Key::F3:
+      // `F3` SCINDE, et rescinde referme. C'est LA fonction de Dolphin :
+      // deux répertoires côte à côte, et le geste de copie qui va de l'un
+      // à l'autre devient évident.
+      if (split_) {
+        // Refermer garde CE QU'ON REGARDE : retomber sur le répertoire de
+        // l'autre panneau perdrait le travail de navigation qu'on venait
+        // d'y faire.
+        if (active_ == 1) panes_[0] = panes_[1];
+        active_ = 0;
+        split_ = false;
+      } else {
+        // Le second s'ouvre OÙ L'ON EST, pas à la racine : on scinde pour
+        // comparer ou pour copier, et repartir de « / » ferait refaire
+        // tout le chemin.
+        panes_[1] = panes_[0];
+        panes_[1].marked.clear();
+        split_ = true;
+      }
+      return;
+    case Key::Tab:
+      // Sans scission, changer de panneau enverrait les frappes suivantes
+      // dans un panneau invisible.
+      if (split_) active_ = 1 - active_;
+      return;
     case Key::F7:
       // `F7` un dossier, `Maj+F7` un fichier vide : le même geste, et
       // `Maj` en change la sorte.
@@ -706,19 +739,19 @@ void Files::on_key(const KeyEvent& k) {
       // L'échappement RÉTABLIT, du plus récent au plus ancien : le filtre
       // d'abord, la sélection ensuite. Il ne ferme jamais la fenêtre -- on
       // perdrait le répertoire courant pour une frappe de trop.
-      if (!filter_.empty()) {
-        filter_.clear();
+      if (!pane().filter.empty()) {
+        pane().filter.clear();
         refilter();
         return;
       }
-      marked_.clear();
+      pane().marked.clear();
       return;
     case Key::Backspace:
       // Le retour arrière EFFACE LE FILTRE tant qu'il en reste, et remonte
       // seulement ensuite. Remonter avec un filtre à moitié tapé ferait
       // perdre le répertoire pour une faute de frappe.
-      if (!filter_.empty()) {
-        filter_.pop_back();
+      if (!pane().filter.empty()) {
+        pane().filter.pop_back();
         refilter();
         return;
       }
@@ -730,7 +763,7 @@ void Files::on_key(const KeyEvent& k) {
       return;
   }
 
-  if (k.ch == U'.' && filter_.empty()) {
+  if (k.ch == U'.' && pane().filter.empty()) {
     // `.` bascule les cachés -- mais seulement hors filtre, sinon on ne
     // pourrait jamais chercher un nom qui en contient un.
     show_hidden_ = !show_hidden_;
@@ -738,29 +771,48 @@ void Files::on_key(const KeyEvent& k) {
     return;
   }
   if (k.ch >= U' ') {
-    filter_ += encode_utf8(k.ch);
+    pane().filter += encode_utf8(k.ch);
     refilter();
   }
 }
 
 void Files::on_mouse(const MouseEvent& m) {
+  // CLIQUER DANS UN PANNEAU LUI DONNE LA MAIN, avant tout le reste. Sans
+  // cela il faudrait viser à la souris puis appuyer sur `Tab` pour que la
+  // frappe suivante y aille.
+  MouseEvent e = m;
+  if (split_) {
+    const int left = pane_width();
+    if (m.x > left) {
+      active_ = 1;
+      // Les coordonnées passent en LOCALES au panneau : tout ce qui suit
+      // parle de sa vue, pas de la fenêtre.
+      e.x = m.x - left - 1;
+    } else if (m.x < left) {
+      active_ = 0;
+    } else {
+      // La cloison n'appartient à personne.
+      return;
+    }
+  }
+
   const size_t rows = static_cast<size_t>(rows_for_list());
-  if (m.action == MouseAction::WheelUp) {
-    sel_ = sel_ > 3 ? sel_ - 3 : 0;
+  if (e.action == MouseAction::WheelUp) {
+    pane().sel = pane().sel > 3 ? pane().sel - 3 : 0;
     settle();
     return;
   }
-  if (m.action == MouseAction::WheelDown) {
-    sel_ = std::min(sel_ + 3, visible_.empty() ? 0 : visible_.size() - 1);
+  if (e.action == MouseAction::WheelDown) {
+    pane().sel = std::min(pane().sel + 3, pane().visible.empty() ? 0 : pane().visible.size() - 1);
     settle();
     return;
   }
-  if (m.action != MouseAction::Press) return;
+  if (e.action != MouseAction::Press) return;
 
   // LA LIGNE 0 EST LE FIL D'ARIANE : cliquer un segment y monte.
-  if (m.y == 0) {
-    for (const Segment& sg : path_segments(size_.w)) {
-      if (m.x < sg.x || m.x >= sg.x + sg.w) continue;
+  if (e.y == 0) {
+    for (const Segment& sg : path_segments(pane(), pane_width())) {
+      if (e.x < sg.x || e.x >= sg.x + sg.w) continue;
       // Le dernier segment est là où l'on est déjà : recharger pour rien
       // perdrait la sélection en cours.
       go_to(sg.path);
@@ -772,11 +824,11 @@ void Files::on_mouse(const MouseEvent& m) {
   // LA LIGNE 1 EST L'EN-TÊTE, et cliquer une colonne trie dessus. C'est le
   // geste de tous les gestionnaires, et il n'a aucun équivalent au clavier
   // qui se devine.
-  if (m.y == 1) {
-    const Columns c = columns(size_.w);
-    if (c.date_w > 0 && m.x >= c.date_x) {
+  if (e.y == 1) {
+    const Columns c = columns(pane_width());
+    if (c.date_w > 0 && e.x >= c.date_x) {
       sort_on(SortBy::Time);
-    } else if (c.size_w > 0 && m.x >= c.size_x) {
+    } else if (c.size_w > 0 && e.x >= c.size_x) {
       sort_on(SortBy::Size);
     } else {
       sort_on(SortBy::Name);
@@ -785,23 +837,23 @@ void Files::on_mouse(const MouseEvent& m) {
   }
 
   // La barre de chemin, puis l'en-tête : la liste commence en 2.
-  const int row = m.y - 2;
+  const int row = e.y - 2;
   if (row < 0 || static_cast<size_t>(row) >= rows) return;
-  const size_t hit = top_ + static_cast<size_t>(row);
-  if (hit >= visible_.size()) return;
+  const size_t hit = pane().top + static_cast<size_t>(row);
+  if (hit >= pane().visible.size()) return;
 
   // `Ctrl+clic` ajoute ou retire UNE entrée sans toucher au reste et sans
   // l'ouvrir : c'est ce qui distingue le clic qui choisit du clic qui agit.
-  if ((m.mods & mod::Ctrl) != 0) {
+  if ((e.mods & mod::Ctrl) != 0) {
     toggle_mark(hit);
-    sel_ = hit;
+    pane().sel = hit;
     settle();
     return;
   }
   // `Maj+clic` prend TOUT ce qui va de la position courante au clic.
-  if ((m.mods & mod::Shift) != 0) {
-    mark_range(sel_, hit);
-    sel_ = hit;
+  if ((e.mods & mod::Shift) != 0) {
+    mark_range(pane().sel, hit);
+    pane().sel = hit;
     settle();
     return;
   }
@@ -809,21 +861,42 @@ void Files::on_mouse(const MouseEvent& m) {
   // Cliquer SÉLECTIONNE ; recliquer la ligne déjà choisie l'OUVRE. Pas de
   // double-clic : l'application n'a pas à savoir compter les clics, et
   // « cliquer deux fois » se découvre tout seul.
-  if (hit == sel_) {
+  if (hit == pane().sel) {
     activate();
     return;
   }
-  sel_ = hit;
+  pane().sel = hit;
   settle();
 }
 
 bool Files::wants_cursor(Pos& out) const {
-  if (visible_.empty()) return false;
-  out = Pos{0, 2 + static_cast<int>(sel_ - top_)};
+  if (pane().visible.empty()) return false;
+  out = Pos{0, 2 + static_cast<int>(pane().sel - pane().top)};
   return true;
 }
 
 void Files::render(View v) {
+  if (!split_) {
+    draw_pane(v, panes_[0], true);
+    return;
+  }
+  const int left = pane_width();
+  draw_pane(v.sub(Rect{0, 0, left, v.h()}), panes_[0], active_ == 0);
+
+  // La cloison, en creux : elle sépare sans attirer l'œil, et c'est la
+  // seule chose à l'écran qui dise qu'il y a deux vues et non une liste
+  // à deux colonnes.
+  Style wall;
+  wall.attrs = attr::Dim;
+  for (int y = 0; y < v.h(); ++y) v.put(left, y, U'\u2502', wall);
+
+  const int right = v.w() - left - 1;
+  if (right > 0) {
+    draw_pane(v.sub(Rect{left + 1, 0, right, v.h()}), panes_[1], active_ == 1);
+  }
+}
+
+void Files::draw_pane(View v, const Pane& pn, bool focused) {
   const int w = v.w();
   const int h = v.h();
   // Garde DÉFENSIVE, non discriminable : la `View` clippe déjà tout ce
@@ -836,9 +909,13 @@ void Files::render(View v) {
   // sur les seize couleurs comme sur les 16 millions. Chaque segment se
   // clique -- un chemin qui ne sert qu'à lire oblige à remonter d'un cran à
   // la fois.
+  //
+  // Le panneau qui N'A PAS la main l'écrit en creux : une fenêtre scindée
+  // doit dire où la frappe suivante ira, et la barre de sélection ne suffit
+  // pas -- les deux panneaux en ont une.
   Style path_style;
-  path_style.attrs = attr::Bold;
-  const std::vector<Segment> segs = path_segments(w);
+  path_style.attrs = focused ? attr::Bold : attr::Dim;
+  const std::vector<Segment> segs = path_segments(pn, w);
   if (!segs.empty() && segs.front().x > 0) {
     Style faint;
     faint.attrs = attr::Dim;
@@ -861,29 +938,29 @@ void Files::render(View v) {
   const Columns c = columns(w);
   Style head;
   head.attrs = attr::Underline;
-  const std::string arrow = sort_desc_ ? "v" : "^";
-  v.text(0, 1, elide_right(sort_by_ == SortBy::Name ? "Nom " + arrow : "Nom",
+  const std::string arrow = pn.sort_desc ? "v" : "^";
+  v.text(0, 1, elide_right(pn.sort_by == SortBy::Name ? "Nom " + arrow : "Nom",
                            c.name_w),
          head);
   if (c.size_w > 0) {
     v.text(c.size_x, 1,
-           right_align(sort_by_ == SortBy::Size ? "Taille " + arrow : "Taille",
+           right_align(pn.sort_by == SortBy::Size ? "Taille " + arrow : "Taille",
                        c.size_w),
            head);
   }
   if (c.date_w > 0) {
     v.text(c.date_x, 1,
-           sort_by_ == SortBy::Time ? "Date " + arrow : "Date", head);
+           pn.sort_by == SortBy::Time ? "Date " + arrow : "Date", head);
   }
 
   const int rows = rows_for_list();
   for (int i = 0; i < rows; ++i) {
-    const size_t idx = top_ + static_cast<size_t>(i);
+    const size_t idx = pn.top + static_cast<size_t>(i);
     // `break` plutôt que `continue` : les index ne font que croître, donc
     // les deux donnent le même résultat -- la mutation est équivalente. On
     // s'arrête parce que c'est ce que le code veut dire.
-    if (idx >= visible_.size()) break;
-    const DirEntry& e = visible_[idx];
+    if (idx >= pn.visible.size()) break;
+    const DirEntry& e = pn.visible[idx];
 
     Style st;
     switch (e.kind) {
@@ -900,8 +977,8 @@ void Files::render(View v) {
     // LA MARQUE PRÉCÈDE LE NOM, et elle est en couleur : un compteur en bas
     // dit COMBIEN sont choisis, jamais LESQUELS, et une sélection qu'on ne
     // peut pas relire ne se corrige pas.
-    const bool chosen = marked_.count(e.name) != 0;
-    if (idx == sel_) {
+    const bool chosen = pn.marked.count(e.name) != 0;
+    if (idx == pn.sel) {
       // La ligne ENTIÈRE porte l'inverse vidéo, pas seulement le nom : une
       // barre de sélection qui s'arrête au dernier caractère se lit comme
       // un mot surligné, pas comme une ligne choisie.
@@ -949,28 +1026,28 @@ void Files::render(View v) {
     status_style.fg = Color::indexed(1);
     // COMBIEN, PAS SEULEMENT « quoi ». « supprimer ? » sur une sélection de
     // trente fichiers ne dit pas ce qu'on s'apprête à perdre.
-    bottom = marked_.empty()
+    bottom = pn.marked.empty()
                  ? "supprimer " +
-                       (visible_.empty() ? std::string() : visible_[sel_].name) +
+                       (pn.visible.empty() ? std::string() : pn.visible[pn.sel].name) +
                        " ? (o/n)"
-                 : "supprimer " + std::to_string(marked_.size()) +
+                 : "supprimer " + std::to_string(pn.marked.size()) +
                        " elements ? (o/n)";
-  } else if (!status_.empty()) {
+  } else if (!pn.status.empty()) {
     status_style.fg = Color::indexed(1);
-    bottom = status_;
-  } else if (!filter_.empty()) {
+    bottom = pn.status;
+  } else if (!pn.filter.empty()) {
     status_style.attrs = attr::Bold;
-    bottom = "filtre: " + filter_;
-  } else if (!marked_.empty()) {
+    bottom = "filtre: " + pn.filter;
+  } else if (!pn.marked.empty()) {
     // COMBIEN, ET COMBIEN ÇA PÈSE. Une sélection qu'on ne voit pas est une
     // sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.
     uint64_t bytes = 0;
-    for (const DirEntry& e : listing_.entries) {
-      if (marked_.count(e.name) != 0) bytes += e.size;
+    for (const DirEntry& e : pn.listing.entries) {
+      if (pn.marked.count(e.name) != 0) bytes += e.size;
     }
     status_style.attrs = attr::Bold;
     status_style.fg = Color::indexed(3);
-    bottom = std::to_string(marked_.size()) + " selectionnes, " +
+    bottom = std::to_string(pn.marked.size()) + " selectionnes, " +
              human_size(bytes);
   }
   if (!bottom.empty()) v.text(0, h - 1, elide_right(bottom, w), status_style);

@@ -47,7 +47,7 @@ tâche.
 - [x] Tâche 3 — les colonnes : nom, taille, date ; en-tête cliquable qui trie et inverse, flèche de sens, chiffres calés à droite, colonnes qui cèdent la place avant les noms. 14 cas, 14 mutations, toutes mordues.
 - [x] Tâche 4 — l'historique et le fil d'Ariane : Alt+flèches, tout déplacement passe par go_to(), segments cliquables, élision par la gauche. 8 cas, 14 mutations, 12 mordues, 1 invalide, 1 équivalence déclarée.
 - [x] Tâche 5 — créer : F7 un dossier, Maj+F7 un fichier vide, le neuf sous le curseur, jamais d'écrasement, ni de nom qui sort du répertoire. 9 cas, 11 mutations, 10 mordues, 1 invalide.
-- [ ] Tâche 6 — la vue scindée
+- [x] Tâche 6 — la vue scindée : F3 ouvre et referme, Tab change de panneau, chacun a son chemin, sa sélection, son historique et son tri ; le clic donne la main au panneau visé, en ses propres coordonnées. 13 cas, 12 mutations, 11 mordues, 1 invalide.
 - [ ] Tâche 7 — le presse-papiers
 - [ ] Tâche 8 — les raccourcis
 - [ ] Tâche 9 — la sonde

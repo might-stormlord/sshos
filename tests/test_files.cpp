@@ -2039,3 +2039,230 @@ TEST(files_never_truncates_an_existing_file_when_creating) {
   CHECK_EQ(st.st_size, off_t{7});
   CHECK(!f.status_for_tests().empty());
 }
+
+// -------------------------------------------------------- la vue scindee
+
+// `F3` SCINDE, et rescinde referme. C'est LA fonction de Dolphin : deux
+// répertoires côte à côte, et le geste de copie qui va de l'un à l'autre
+// devient évident.
+TEST(files_splits_and_unsplits_on_f3) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  REQUIRE(!f.split_for_tests());
+
+  f.on_key(key(Key::F3));
+  CHECK(f.split_for_tests());
+
+  f.on_key(key(Key::F3));
+  CHECK(!f.split_for_tests());
+}
+
+// LE SECOND PANNEAU S'OUVRE OÙ L'ON EST, pas à la racine : on scinde pour
+// comparer ou pour copier, et repartir de « / » ferait refaire tout le
+// chemin.
+TEST(files_opens_the_second_pane_where_the_first_one_is) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root() + "/sous");
+  f.on_resize(Size{80, 12});
+
+  f.on_key(key(Key::F3));
+
+  CHECK_EQ(f.pane_for_tests(1).listing.path, t.root() + "/sous");
+}
+
+// `Tab` PASSE D'UN PANNEAU À L'AUTRE, et rien d'autre ne change.
+TEST(files_moves_between_panes_with_tab) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  REQUIRE_EQ(f.active_pane_for_tests(), size_t{0});
+
+  f.on_key(key(Key::Tab));
+  CHECK_EQ(f.active_pane_for_tests(), size_t{1});
+
+  f.on_key(key(Key::Tab));
+  CHECK_EQ(f.active_pane_for_tests(), size_t{0});
+}
+
+// `Tab` NE FAIT RIEN SANS SCISSION : changer de panneau quand il n'y en a
+// qu'un enverrait les frappes suivantes dans un panneau invisible.
+TEST(files_ignores_tab_when_there_is_only_one_pane) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+
+  f.on_key(key(Key::Tab));
+
+  CHECK_EQ(f.active_pane_for_tests(), size_t{0});
+}
+
+// LES DEUX PANNEAUX SONT INDÉPENDANTS : naviguer dans l'un ne bouge pas
+// l'autre. C'est tout l'intérêt de la vue scindée.
+TEST(files_keeps_each_pane_to_itself) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  f.on_key(key(Key::Tab));
+
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+
+  CHECK_EQ(f.pane_for_tests(1).listing.path, t.root() + "/sous");
+  CHECK_EQ(f.pane_for_tests(0).listing.path, t.root());
+}
+
+// LES DEUX SE VOIENT EN MÊME TEMPS, séparés par une cloison.
+TEST(files_paints_both_panes_side_by_side) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("gauche-et-droite");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+
+  const std::string row = painted_row(f, 80, 12, 3);
+  // Le même nom apparaît DEUX fois : une par panneau.
+  const size_t first = row.find("gauche-et-droite");
+  REQUIRE(first != std::string::npos);
+  CHECK(row.find("gauche-et-droite", first + 1) != std::string::npos);
+}
+
+// CLIQUER DANS UN PANNEAU LUI DONNE LA MAIN. Sans cela, il faudrait viser
+// à la souris puis appuyer sur `Tab` pour que la frappe suivante y aille.
+TEST(files_gives_the_focus_to_the_pane_that_is_clicked) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  REQUIRE_EQ(f.active_pane_for_tests(), size_t{0});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 60, 3, 0});
+
+  CHECK_EQ(f.active_pane_for_tests(), size_t{1});
+}
+
+// REFERMER LA SCISSION DEPUIS LE PANNEAU DE DROITE GARDE CE QU'ON
+// REGARDAIT. Retomber sur le répertoire de gauche perdrait le travail de
+// navigation qu'on venait de faire à droite.
+TEST(files_keeps_the_pane_it_was_in_when_the_split_closes) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  f.on_key(key(Key::Tab));
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  REQUIRE_EQ(f.path_for_tests(), t.root() + "/sous");
+
+  f.on_key(key(Key::F3));
+
+  CHECK(!f.split_for_tests());
+  CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
+  CHECK_EQ(f.active_pane_for_tests(), size_t{0});
+}
+
+// LE PANNEAU DE GAUCHE S'ARRÊTE À LA CLOISON. Peint sur toute la largeur,
+// il écrit sous celui de droite, et ce qu'on lit à droite est un mélange
+// des deux répertoires.
+TEST(files_stops_the_left_pane_at_the_wall) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a-nom-tres-long-qui-deborderait-largement");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+
+  // La cloison est à `pane_width()` ; à 80 colonnes, elle tombe en 39.
+  CHECK_EQ(cell_at(f, 80, 12, 39, 3).ch, U'│');
+  // Et la première cellule de droite appartient au second panneau : c'est
+  // le début de son nom, pas la suite de celui de gauche.
+  CHECK_EQ(cell_at(f, 80, 12, 40, 3).ch, U'a');
+
+  // SURTOUT, le panneau de gauche calcule ses colonnes sur SA largeur :
+  // peint sur toute la fenêtre, il pose sa taille et sa date au-delà de la
+  // cloison, où le panneau de droite les recouvre -- et il n'en montre
+  // alors plus aucune.
+  const std::string row = painted_row(f, 80, 12, 3);
+  CHECK(row.substr(0, 39).find(" o") != std::string::npos);
+}
+
+// LE CLIC DE DROITE PARLE DE LA VUE DE DROITE. Garder les coordonnées de
+// la fenêtre ferait viser une colonne qui n'existe pas dans ce panneau --
+// et donc trier sur la mauvaise en-tête, ou rater la ligne visée.
+TEST(files_reads_a_click_in_the_right_pane_in_its_own_coordinates) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+
+  // La deuxième ligne de liste du panneau de droite : à 40 + 2 cellules du
+  // bord, c'est-à-dire tout au début de sa colonne des noms.
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 42, 3, 0});
+
+  REQUIRE_EQ(f.active_pane_for_tests(), size_t{1});
+  CHECK_EQ(selected_name(f), std::string("a"));
+
+  // Et l'en-tête aussi : c'est là que la colonne visée dépend de `x`. En
+  // coordonnées de fenêtre, le clic tomberait au-delà de la colonne des
+  // dates du panneau, et trierait par date au lieu de par taille.
+  const std::string head = painted_row(f, 80, 12, 1);
+  const size_t taille = head.find("Taille", 40);
+  REQUIRE(taille != std::string::npos);
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(taille), 1, 0});
+  CHECK(f.sort_by_for_tests() == sshos::SortBy::Size);
+}
+
+// LA CLOISON N'APPARTIENT À PERSONNE. La donner au panneau de gauche
+// ferait basculer la main d'un clic qui ne visait ni l'un ni l'autre.
+TEST(files_ignores_a_click_on_the_wall) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  const std::string before = selected_name(f);
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 39, 3, 0});
+
+  CHECK_EQ(f.active_pane_for_tests(), size_t{0});
+  // ET RIEN N'A BOUGÉ DEDANS : donner la cloison au panneau de gauche
+  // ferait choisir une ligne d'un clic qui ne visait ni l'un ni l'autre.
+  CHECK_EQ(selected_name(f), before);
+}
+
+// SCINDER NE RECOPIE PAS LA SÉLECTION. Le second panneau s'ouvre au même
+// endroit, mais ce qu'on avait marqué à gauche n'a pas été marqué à
+// droite : une copie porterait alors sur des fichiers qu'on n'a jamais
+// choisis dans ce panneau-là.
+TEST(files_opens_the_second_pane_without_the_marks_of_the_first) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE(!f.marked_for_tests().empty());
+
+  f.on_key(key(Key::F3));
+
+  CHECK(!f.pane_for_tests(0).marked.empty());
+  CHECK(f.pane_for_tests(1).marked.empty());
+}

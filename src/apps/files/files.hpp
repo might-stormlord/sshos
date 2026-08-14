@@ -39,21 +39,50 @@ class Files : public App {
   // repasser par une question détruit tôt ou tard par erreur.
   enum class Mode { Normal, Renaming, Confirming, Creating };
 
+  // UN PANNEAU : son répertoire, sa liste, son filtre, sa sélection, son
+  // historique, son tri. Deux panneaux sont deux vues INDÉPENDANTES du
+  // disque -- c'est tout l'intérêt de la vue scindée, et le partage du
+  // moindre de ces champs le ruinerait.
+  //
+  // Ce qui reste hors d'ici est ce qui appartient à la FENÊTRE : le mode de
+  // saisie, les fichiers cachés, la taille. Un renommage en cours n'a pas
+  // de raison d'être par panneau, puisqu'on ne peut taper que dans un seul.
+  struct Pane {
+    DirListing listing;
+    std::vector<DirEntry> visible;
+    std::string filter;
+    std::string status;
+    std::set<std::string> marked;
+    std::vector<std::string> back;
+    std::vector<std::string> forward;
+    size_t sel = 0;
+    size_t top = 0;
+    SortBy sort_by = SortBy::Name;
+    bool sort_desc = false;
+  };
+
   // --- pour les tests ---
   // La navigation n'a aucun effet observable hors de son dessin : ces
   // accès permettent de la vérifier sans lire une grille de caractères.
   // Aucun code de production ne doit s'en servir.
-  const std::string& path_for_tests() const { return listing_.path; }
-  const std::vector<DirEntry>& visible_for_tests() const { return visible_; }
-  size_t selected_for_tests() const { return sel_; }
-  size_t top_for_tests() const { return top_; }
-  const std::string& status_for_tests() const { return status_; }
-  const std::string& filter_for_tests() const { return filter_; }
+  const std::string& path_for_tests() const { return pane().listing.path; }
+  const std::vector<DirEntry>& visible_for_tests() const {
+    return pane().visible;
+  }
+  size_t selected_for_tests() const { return pane().sel; }
+  size_t top_for_tests() const { return pane().top; }
+  const std::string& status_for_tests() const { return pane().status; }
+  const std::string& filter_for_tests() const { return pane().filter; }
   Mode mode_for_tests() const { return mode_; }
-  SortBy sort_by_for_tests() const { return sort_by_; }
-  bool sort_desc_for_tests() const { return sort_desc_; }
+  bool split_for_tests() const { return split_; }
+  size_t active_pane_for_tests() const { return active_; }
+  const Pane& pane_for_tests(size_t i) const { return panes_[i]; }
+  SortBy sort_by_for_tests() const { return pane().sort_by; }
+  bool sort_desc_for_tests() const { return pane().sort_desc; }
   const std::string& edit_for_tests() const { return edit_; }
-  const std::set<std::string>& marked_for_tests() const { return marked_; }
+  const std::set<std::string>& marked_for_tests() const {
+    return pane().marked;
+  }
 
  private:
   // Relit le répertoire courant et refait la liste visible. LE SEUL
@@ -68,6 +97,15 @@ class Files : public App {
   void settle();
   // Le nombre de lignes que la liste peut montrer : la fenêtre moins la
   // barre de chemin et la ligne d'état.
+  Pane& pane() { return panes_[active_]; }
+  const Pane& pane() const { return panes_[active_]; }
+  Pane& other() { return panes_[1 - active_]; }
+  // La largeur d'un panneau : toute la fenêtre, ou sa moitié moins la
+  // cloison qui les sépare.
+  int pane_width() const;
+  // Dessine UN panneau dans sa vue.  dit lequel a la main : sans
+  // cette marque, une fenetre scindee ne dit pas ou la frappe ira.
+  void draw_pane(View v, const Pane& pane, bool focused);
   int rows_for_list() const;
   // La géométrie des colonnes, UN SEUL calcul partagé par le dessin et par
   // le clic sur l'en-tête. Une largeur nulle veut dire « cette colonne a
@@ -108,7 +146,7 @@ class Files : public App {
     int w = 0;
     std::string path;
   };
-  std::vector<Segment> path_segments(int w) const;
+  std::vector<Segment> path_segments(const Pane& pn, int w) const;
   // Le nom sélectionné, ou une chaîne vide si la sélection ne désigne rien
   // qu'on ait le droit de toucher -- `..` en particulier.
   std::string touchable_selection() const;
@@ -131,25 +169,20 @@ class Files : public App {
   // elle évite d'avoir à marquer un fichier pour agir sur lui.
   std::vector<std::string> targets() const;
 
-  DirListing listing_;
-  std::vector<DirEntry> visible_;
-  std::string filter_;
-  std::string status_;
-  size_t sel_ = 0;
-  size_t top_ = 0;
+  // DEUX PANNEAUX, toujours construits ; le second ne se voit que scindé.
+  // Les garder tous deux vivants évite d'avoir à recharger le disque à
+  // chaque bascule de `F3`.
+  Pane panes_[2];
+  size_t active_ = 0;
+  bool split_ = false;
   bool show_hidden_ = false;
   // D'OÙ L'ON VIENT, et ce qu'on vient de défaire. Une nouvelle descente
   // efface la seconde : garder une branche qu'on vient d'abandonner ferait
   // avancer `Alt+droite` vers un dossier sans rapport avec là où l'on est.
-  std::vector<std::string> back_;
-  std::vector<std::string> forward_;
-  SortBy sort_by_ = SortBy::Name;
-  bool sort_desc_ = false;
   // LES NOMS, PAS LES RANGS. Le filtre et le tri renumérotent la liste sous
   // les pieds de la sélection ; un rang marqué désignerait alors un autre
   // fichier. Vidé à chaque changement de répertoire : les noms d'avant
   // auraient des homonymes ici, et l'action porterait sur eux.
-  std::set<std::string> marked_;
   Mode mode_ = Mode::Normal;
   // Le nom en cours de saisie pendant un renommage.
   std::string edit_;
