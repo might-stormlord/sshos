@@ -149,7 +149,10 @@ class Session : public ChildSink {
   // l'horloge du demon ne suffit pas : c'est la SESSION qui decide s'il y
   // a quelque chose a recomposer, et sans ce mot elle repondrait « rien de
   // neuf » a chaque reveil.
-  void mark_refresh_due() { dirty_ = true; }
+  // La minuterie a echu : les applications qui l'avaient demandee font
+  // leur travail periodique, PUIS on repeint. C'est le seul endroit ou une
+  // application peut toucher au disque sans que ce soit pendant un rendu.
+  void mark_refresh_due();
 
   // Le test de collision d'une fenetre, par le MEME chemin que le clic.
   // Le suffixe dit ce qu'il est : aucun code de production ne l'appelle,

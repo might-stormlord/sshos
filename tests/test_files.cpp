@@ -2266,3 +2266,179 @@ TEST(files_opens_the_second_pane_without_the_marks_of_the_first) {
   CHECK(!f.pane_for_tests(0).marked.empty());
   CHECK(f.pane_for_tests(1).marked.empty());
 }
+
+// ------------------------------------------------------ le presse-papiers
+
+// `Ctrl+C` PUIS `Ctrl+V` COPIE, et la destination par défaut est l'AUTRE
+// panneau : c'est tout ce pour quoi on scinde.
+TEST(files_copies_the_selection_into_the_other_pane) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.dir("ailleurs");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  f.on_key(key(Key::Tab));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("ailleurs"));
+  f.on_key(key(Key::Enter));
+  f.on_key(key(Key::Tab));  // retour à gauche
+
+  f.on_key(key(Key::End));
+  REQUIRE_EQ(selected_name(f), std::string("a"));
+  f.on_key(KeyEvent{Key::Char, U'c', mod::Ctrl});
+  f.on_key(key(Key::Tab));
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+  // Le travail avance par tranches : on le pousse jusqu'au bout.
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  struct stat st {};
+  CHECK_EQ(::lstat((t.root() + "/ailleurs/a").c_str(), &st), 0);
+  CHECK(exists(t.root() + "/a"));
+  ::unlink((t.root() + "/ailleurs/a").c_str());
+}
+
+// `Ctrl+X` DÉPLACE : l'original s'en va.
+TEST(files_moves_what_it_cut) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.dir("ailleurs");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::End));
+  REQUIRE_EQ(selected_name(f), std::string("a"));
+
+  f.on_key(KeyEvent{Key::Char, U'x', mod::Ctrl});
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("ailleurs"));
+  f.on_key(key(Key::Enter));
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK(!exists(t.root() + "/a"));
+  CHECK(exists(t.root() + "/ailleurs/a"));
+  ::unlink((t.root() + "/ailleurs/a").c_str());
+}
+
+// LE PRESSE-PAPIERS RETIENT DES CHEMINS ABSOLUS. Retenir des noms ferait
+// coller depuis le mauvais répertoire dès qu'on aurait navigué entre les
+// deux gestes -- c'est-à-dire toujours.
+TEST(files_remembers_where_the_files_were) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("depart");
+  t.file("depart/a");
+  t.dir("arrivee");
+  Files f(t.root() + "/depart");
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::End));
+  f.on_key(KeyEvent{Key::Char, U'c', mod::Ctrl});
+
+  f.on_key(key(Key::Backspace));
+  // Remonter repose le curseur sur le dossier quitté : on repart du haut.
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("arrivee"));
+  f.on_key(key(Key::Enter));
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK(exists(t.root() + "/arrivee/a"));
+  ::unlink((t.root() + "/arrivee/a").c_str());
+}
+
+// COLLER SANS RIEN AVOIR PRIS NE FAIT RIEN, et le dit : une touche sans
+// effet et sans explication passe pour une panne.
+TEST(files_says_the_clipboard_is_empty) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+
+  CHECK(!f.copy_active_for_tests());
+  CHECK(!f.status_for_tests().empty());
+}
+
+// L'APPLICATION SE RÉVEILLE TANT QU'ELLE COPIE, et pas une seconde de
+// plus. Un rafraîchissement permanent coûterait une trame par intervalle
+// sur un bureau qui ne change pas.
+TEST(files_asks_to_be_woken_only_while_it_copies) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.dir("ailleurs");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  CHECK(f.refresh_ms() < 0);
+
+  f.on_key(key(Key::End));
+  f.on_key(KeyEvent{Key::Char, U'c', mod::Ctrl});
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+
+  CHECK(f.refresh_ms() > 0);
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+  CHECK(f.refresh_ms() < 0);
+  ::unlink((t.root() + "/ailleurs/a").c_str());
+}
+
+// LA LIGNE D'ÉTAT DIT CE QUI SE PASSE. Une copie de deux minutes sans rien
+// à l'écran passe pour un blocage, et l'utilisateur tue la fenêtre.
+TEST(files_shows_what_it_is_copying) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string big = t.file("le-gros");
+  {
+    const int fd = ::open(big.c_str(), O_WRONLY | O_CLOEXEC);
+    REQUIRE(fd >= 0);
+    // PLUS GROS QU'UNE TRANCHE : sinon la copie finit au premier réveil et
+    // il n'y a plus rien à montrer quand on regarde.
+    const size_t n = 1536 * 1024;
+    REQUIRE_EQ(::write(fd, std::string(n, 'x').data(), n),
+               static_cast<ssize_t>(n));
+    ::close(fd);
+  }
+  t.dir("ailleurs");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::End));
+  f.on_key(KeyEvent{Key::Char, U'c', mod::Ctrl});
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+  f.on_tick_for_tests();
+
+  const std::string screen = painted(f, 80, 12);
+  CHECK(screen.find("le-gros") != std::string::npos);
+  ::unlink((t.root() + "/ailleurs/le-gros").c_str());
+}
+
+// LA LISTE SE RELIT QUAND LA COPIE FINIT : sans cela, ce qu'on vient de
+// coller n'apparaît qu'au prochain changement de répertoire.
+TEST(files_reloads_when_the_copy_is_done) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.dir("ailleurs");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::End));
+  f.on_key(KeyEvent{Key::Char, U'c', mod::Ctrl});
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  const size_t before = f.visible_for_tests().size();
+  f.on_key(KeyEvent{Key::Char, U'v', mod::Ctrl});
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK_EQ(f.visible_for_tests().size(), before + 1);
+  ::unlink((t.root() + "/ailleurs/a").c_str());
+}

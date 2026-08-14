@@ -4134,3 +4134,45 @@ TEST(session_drops_the_offer_when_the_windows_are_tiled) {
 
   CHECK(!sess.assist_for_tests().is_open());
 }
+
+// UNE FENÊTRE RÉDUITE TRAVAILLE QUAND MÊME. La règle d'avant l'excluait de
+// l'horloge pour éviter qu'un moniteur réduit ne force un repeint par
+// seconde ; mais une application ne demande pas d'horloge pour DESSINER,
+// elle la demande pour TRAVAILLER -- et une copie de fichiers qui s'arrête
+// parce qu'on a réduit sa fenêtre serait un piège.
+namespace {
+
+class Busy : public sshos::App {
+ public:
+  void render(sshos::View) override {}
+  int refresh_ms() const override { return 10; }
+  void on_refresh() override { ++ticks; }
+  int ticks = 0;
+};
+
+std::unique_ptr<sshos::App> make_busy() { return std::make_unique<Busy>(); }
+
+}  // namespace
+
+TEST(session_keeps_waking_a_minimized_window_that_asked_for_it) {
+  Session::set_seed_factory_for_tests(&make_busy);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+    REQUIRE_EQ(sess.refresh_delay_ms(), 10);
+
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'-', 0}});
+    sess.render(s);
+
+    CHECK_EQ(sess.refresh_delay_ms(), 10);
+    // Et le réveil atteint bien l'application.
+    sess.mark_refresh_due();
+    CHECK(static_cast<Busy*>(sess.windows_for_tests()[0]->app.get())->ticks > 0);
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}

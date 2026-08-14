@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/app.hpp"
+#include "apps/files/copy.hpp"
 #include "apps/files/dir.hpp"
 
 namespace sshos {
@@ -32,6 +33,11 @@ class Files : public App {
   void on_resize(Size s) override;
   bool wants_cursor(Pos& out) const override;
   Size min_size() const override { return {24, 6}; }
+  // On ne demande à être réveillé QUE pendant une copie : un
+  // rafraîchissement permanent coûterait une trame par intervalle sur un
+  // bureau qui ne change pas.
+  int refresh_ms() const override;
+  void on_refresh() override;
 
   // Ce que l'application est en train de faire. Le renommage et la
   // suppression sont des ÉTATS, pas des raccourcis : la suppression est le
@@ -77,6 +83,8 @@ class Files : public App {
   bool split_for_tests() const { return split_; }
   size_t active_pane_for_tests() const { return active_; }
   const Pane& pane_for_tests(size_t i) const { return panes_[i]; }
+  bool copy_active_for_tests() const { return job_.active(); }
+  void on_tick_for_tests() { on_refresh(); }
   SortBy sort_by_for_tests() const { return pane().sort_by; }
   bool sort_desc_for_tests() const { return pane().sort_desc; }
   const std::string& edit_for_tests() const { return edit_; }
@@ -155,6 +163,9 @@ class Files : public App {
   // qui ne sait que détruire oblige à sortir dans un terminal pour la
   // moitié du travail.
   void commit_create();
+  // Met la sélection au presse-papiers. `cut` dit si le coller déplacera.
+  void take_clipboard(bool cut);
+  void paste_clipboard();
   void commit_delete();
 
   // Le nom sous la sélection, ou vide si elle ne désigne rien de marquable
@@ -190,6 +201,12 @@ class Files : public App {
   // touches éloignées pour deux choses aussi proches se retiendraient mal ;
   // c'est le même geste, et `Maj` en change la sorte.
   bool creating_dir_ = true;
+  // DES CHEMINS ABSOLUS, pas des noms : retenir des noms ferait coller
+  // depuis le mauvais répertoire dès qu'on aurait navigué entre les deux
+  // gestes -- c'est-à-dire toujours.
+  std::vector<std::string> clipboard_;
+  bool clipboard_cut_ = false;
+  CopyJob job_;
   Size size_{40, 12};
   Host* host_ = nullptr;
 };

@@ -498,14 +498,26 @@ void Session::close_window(Window& w) {
   wm_.close(w.id);
 }
 
+void Session::mark_refresh_due() {
+  dirty_ = true;
+  for (const auto& w : wm_.stack()) {
+    if (w == nullptr || w->app == nullptr) continue;
+    if (w->app->refresh_ms() >= 0) w->app->on_refresh();
+  }
+}
+
 int Session::refresh_delay_ms() const {
   // Le fond d'écran porte le moniteur : il se rafraîchit une fois par
   // seconde, comme lui, et tant qu'un client regarde.
   int best = 1000;
   for (const auto& w : wm_.stack()) {
     if (w == nullptr || w->app == nullptr) continue;
-    // La fenetre MINIMISEE ne compte pas : c'est toute la regle.
-    if (w->mode == WinMode::Minimized) continue;
+    // La fenetre MINIMISEE compte QUAND MEME si elle demande à être
+    // réveillée. La règle d'avant l'excluait pour éviter qu'un moniteur
+    // réduit ne force un repeint par seconde ; mais une application ne
+    // demande pas d'horloge pour dessiner, elle la demande pour TRAVAILLER
+    // -- et une copie de fichiers qui s'arrête parce qu'on a réduit sa
+    // fenêtre serait un piège.
     const int want = w->app->refresh_ms();
     if (want < 0) continue;
     if (best < 0 || want < best) best = want;

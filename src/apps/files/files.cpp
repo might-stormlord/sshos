@@ -528,6 +528,65 @@ void Files::commit_create() {
   settle();
 }
 
+void Files::take_clipboard(bool cut) {
+  const std::vector<std::string> names = targets();
+  if (names.empty()) return;
+  clipboard_.clear();
+  for (const std::string& n : names) {
+    clipboard_.push_back(join_path(pane().listing.path, n));
+  }
+  clipboard_cut_ = cut;
+  pane().status = std::to_string(clipboard_.size()) +
+                  (cut ? " a deplacer" : " a copier");
+}
+
+void Files::paste_clipboard() {
+  if (job_.active()) return;
+  if (clipboard_.empty()) {
+    // Une touche sans effet ET sans explication passe pour une panne.
+    pane().status = "rien a coller";
+    return;
+  }
+  job_.start(clipboard_, pane().listing.path,
+             clipboard_cut_ ? CopyKind::Move : CopyKind::Copy);
+  // Un déplacement se consomme : recoller après coup chercherait des
+  // fichiers qui ne sont plus là.
+  if (clipboard_cut_) clipboard_.clear();
+}
+
+int Files::refresh_ms() const {
+  // ASSEZ SOUVENT POUR QUE ÇA AVANCE, assez rare pour que le reste du
+  // bureau garde la main : dix millisecondes par tranche d'un mégaoctet
+  // plafonnent la copie autour de cent mégaoctets par seconde, ce qui est
+  // l'ordre de grandeur d'un disque, et laissent 99 % du temps aux autres
+  // fenêtres.
+  return job_.active() ? 10 : -1;
+}
+
+void Files::on_refresh() {
+  if (!job_.active()) return;
+  const bool more = job_.step(1024 * 1024);
+  if (more) return;
+
+  // FINI : on relit, sinon ce qu'on vient de coller n'apparaîtrait qu'au
+  // prochain changement de répertoire. Les deux panneaux, parce qu'un
+  // déplacement a vidé la source autant qu'il a rempli la cible.
+  const std::string kept = job_.error();
+  const int failed = job_.failed();
+  const int done = job_.done();
+  job_.cancel();
+  for (Pane& p : panes_) {
+    const DirListing probe = read_dir(p.listing.path, show_hidden_);
+    if (probe.error.empty()) p.listing = probe;
+  }
+  refilter();
+  pane().status =
+      failed > 0
+          ? std::to_string(failed) + " sur " + std::to_string(done + failed) +
+                " ont echoue : " + kept
+          : std::string();
+}
+
 void Files::commit_delete() {
   const std::vector<std::string> victims = targets();
   mode_ = Mode::Normal;
@@ -609,6 +668,25 @@ void Files::on_key(const KeyEvent& k) {
   }
 
   const size_t rows = static_cast<size_t>(rows_for_list());
+
+  // LE PRESSE-PAPIERS. `Ctrl+C` prend, `Ctrl+X` prend pour déplacer,
+  // `Ctrl+V` pose ici -- c'est-à-dire dans le panneau qui a la main, donc
+  // dans l'AUTRE quand on vient de scinder. C'est tout ce pour quoi on
+  // scinde.
+  if (k.key == Key::Char && (k.mods & mod::Ctrl) != 0) {
+    if (k.ch == U'c' || k.ch == U'C') {
+      take_clipboard(false);
+      return;
+    }
+    if (k.ch == U'x' || k.ch == U'X') {
+      take_clipboard(true);
+      return;
+    }
+    if (k.ch == U'v' || k.ch == U'V') {
+      paste_clipboard();
+      return;
+    }
+  }
 
   // `Ctrl+A` BASCULE : tout, puis rien. Un terminal ne sait pas distinguer
   // `Ctrl+Maj+A` de `Ctrl+A` -- la combinaison de Dolphin est intapable ici
@@ -1038,6 +1116,14 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
   } else if (!pn.filter.empty()) {
     status_style.attrs = attr::Bold;
     bottom = "filtre: " + pn.filter;
+  } else if (job_.active()) {
+    // CE QUI SE PASSE, ET SUR QUOI. Une copie de deux minutes sans rien à
+    // l'écran passe pour un blocage, et l'utilisateur tue la fenêtre.
+    status_style.attrs = attr::Bold;
+    status_style.fg = Color::indexed(4);
+    bottom = std::string(job_.kind() == CopyKind::Move ? "deplacement" : "copie") +
+             " : " + job_.current() + " (" + std::to_string(job_.done()) +
+             " faits)";
   } else if (!pn.marked.empty()) {
     // COMBIEN, ET COMBIEN ÇA PÈSE. Une sélection qu'on ne voit pas est une
     // sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.

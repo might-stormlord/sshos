@@ -110,6 +110,13 @@ class App {
   // pour une fenetre que personne ne regarde.
   virtual int refresh_ms() const { return -1; }
 
+  // LE TRAVAIL PÉRIODIQUE, hors du rendu. `render()` ne doit toucher ni au
+  // disque ni au réseau -- c'est la règle qui garde le démon vivant -- donc
+  // une application qui a quelque chose à faire régulièrement le fait ICI.
+  // Appelée quand la minuterie du démon échoit, jamais pendant une
+  // composition.
+  virtual void on_refresh() {}
+
   virtual CloseCheck can_close() const { return CloseCheck::allow(); }
 };
 
