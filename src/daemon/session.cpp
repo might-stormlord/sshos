@@ -879,6 +879,37 @@ void Session::on_input(const InputEvent& e) {
       dirty_ = true;
     }
 
+    // L'ANCRAGE, SANS ACCORD. `Ctrl+fleche` est le geste des bureaux
+    // modernes, et le faire passer par le leader le rendait inutilisable :
+    // trois touches pour un geste qu'on repete.
+    //
+    // CE QUE CA COUTE, et c'est assume : `Ctrl+gauche` et `Ctrl+droite`
+    // deplacent par MOT dans readline, donc dans tout shell. Le bureau les
+    // prend a l'invite. Les fleches nues et `Maj+fleche` lui restent, comme
+    // tout le reste du clavier.
+    if (k->key == Key::Left || k->key == Key::Right || k->key == Key::Up ||
+        k->key == Key::Down) {
+      if ((k->mods & 0x07) == mod::Ctrl) {
+        // Un accord en cours est annule : on vient de faire autre chose.
+        leader_.reset();
+        switch (k->key) {
+          case Key::Left:
+            snap_focused(SnapDir::Left);
+            break;
+          case Key::Right:
+            snap_focused(SnapDir::Right);
+            break;
+          case Key::Up:
+            snap_focused(SnapDir::Up);
+            break;
+          default:
+            snap_focused(SnapDir::Down);
+            break;
+        }
+        return;
+      }
+    }
+
     const LeaderResult lr = leader_.feed(*k);
     if (lr.action.has_value()) {
       do_action(*lr.action);

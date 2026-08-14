@@ -3689,8 +3689,7 @@ TEST(session_snaps_the_focused_window_to_a_half) {
   Surface s(60, 20);
   sess.render(s);
 
-  sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  // SANS ACCORD : `Ctrl+fleche` suffit.
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Left, 0, sshos::mod::Ctrl}});
   sess.render(s);
@@ -3709,8 +3708,6 @@ TEST(session_snaps_to_the_right_half_too) {
   sess.render(s);
 
   sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Right, 0, sshos::mod::Ctrl}});
   sess.render(s);
 
@@ -3728,8 +3725,6 @@ TEST(session_snaps_to_a_half_height_on_the_vertical_arrows) {
   Surface s(60, 20);
   sess.render(s);
 
-  sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Up, 0, sshos::mod::Ctrl}});
   sess.render(s);

@@ -70,8 +70,12 @@ void Help::draw(View v, const Theme& th, Border b,
   const int x = rect_.x + 2;
   const int head_room = std::max(0, rect_.x + rect_.w - 1 - x);
   v.text(x, rect_.y + 1,
-         elide_to_cells(leader_label + " puis :", head_room,
-                        utf8 ? "…" : "~"),
+         // L'ANCRAGE se dit ICI et non dans le tableau : celui-ci
+         // documente ce que l'accord permet, et `Ctrl+fleche` s'en passe.
+         // L'y mettre ferait mentir l'en-tete « puis : » -- et deux gardes
+         // de la suite le refusent, a juste titre.
+         elide_to_cells(leader_label + " puis :   (Ctrl+fleches : ancrer)",
+                        head_room, utf8 ? "…" : "~"),
          head);
 
   // Ce qui ne tient pas est coupé plutôt que débordé : sur un terminal trop
