@@ -44,7 +44,7 @@ tâche.
 
 - [x] Tâche 1 — le modèle s'enrichit : mtime lu dans la même passe, tri par nom/taille/date, croissant ou décroissant, ordre total sous tous les critères. 9 cas, 7 mutations, toutes mordues.
 - [x] Tâche 2 — la sélection multiple : Espace marque et descend, Ctrl+A bascule tout/rien, Maj+flèches étend, Ctrl/Maj+clic, ligne d'état qui compte et pèse, suppression groupée avec une seule question. 15 cas, 15 mutations, toutes mordues.
-- [ ] Tâche 3 — les colonnes
+- [x] Tâche 3 — les colonnes : nom, taille, date ; en-tête cliquable qui trie et inverse, flèche de sens, chiffres calés à droite, colonnes qui cèdent la place avant les noms. 14 cas, 14 mutations, toutes mordues.
 - [ ] Tâche 4 — l'historique et le fil d'Ariane
 - [ ] Tâche 5 — créer
 - [ ] Tâche 6 — la vue scindée

@@ -50,6 +50,8 @@ class Files : public App {
   const std::string& status_for_tests() const { return status_; }
   const std::string& filter_for_tests() const { return filter_; }
   Mode mode_for_tests() const { return mode_; }
+  SortBy sort_by_for_tests() const { return sort_by_; }
+  bool sort_desc_for_tests() const { return sort_desc_; }
   const std::string& edit_for_tests() const { return edit_; }
   const std::set<std::string>& marked_for_tests() const { return marked_; }
 
@@ -67,6 +69,21 @@ class Files : public App {
   // Le nombre de lignes que la liste peut montrer : la fenêtre moins la
   // barre de chemin et la ligne d'état.
   int rows_for_list() const;
+  // La géométrie des colonnes, UN SEUL calcul partagé par le dessin et par
+  // le clic sur l'en-tête. Une largeur nulle veut dire « cette colonne a
+  // cédé la place » : sur une fenêtre étroite, les chiffres partent AVANT
+  // les noms -- un nom coupé à trois lettres ne sert à rien, une taille
+  // absente se retrouve ailleurs.
+  struct Columns {
+    int name_w = 0;
+    int size_x = 0;
+    int size_w = 0;
+    int date_x = 0;
+    int date_w = 0;
+  };
+  Columns columns(int w) const;
+  // Trie par cette colonne, ou inverse le sens si c'est déjà la sienne.
+  void sort_on(SortBy by);
   void activate();
   void go_up();
   // Le nom sélectionné, ou une chaîne vide si la sélection ne désigne rien
@@ -94,6 +111,8 @@ class Files : public App {
   size_t sel_ = 0;
   size_t top_ = 0;
   bool show_hidden_ = false;
+  SortBy sort_by_ = SortBy::Name;
+  bool sort_desc_ = false;
   // LES NOMS, PAS LES RANGS. Le filtre et le tri renumérotent la liste sous
   // les pieds de la sélection ; un rang marqué désignerait alors un autre
   // fichier. Vidé à chaque changement de répertoire : les noms d'avant

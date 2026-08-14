@@ -358,7 +358,7 @@ TEST(files_selects_the_row_that_was_clicked) {
 
   Files f(t.root());
   f.on_resize(Size{40, 12});
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 2, 0});  // deuxième ligne
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 3, 0});  // deuxième ligne de liste
   CHECK_EQ(selected_name(f), std::string("a"));
 }
 
@@ -371,10 +371,10 @@ TEST(files_opens_the_row_that_was_clicked_twice) {
 
   Files f(t.root());
   f.on_resize(Size{40, 12});
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 2, 0});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 3, 0});
   REQUIRE_EQ(selected_name(f), std::string("sous"));
 
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 2, 0});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 3, 0});
   CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
 }
 
@@ -424,7 +424,7 @@ TEST(files_gives_the_list_the_window_minus_two_lines) {
   for (int i = 0; i < 20; ++i) t.file("f" + std::to_string(i));
 
   Files f(t.root());
-  f.on_resize(Size{40, 6});  // 6 - 2 = 4 lignes de liste
+  f.on_resize(Size{40, 7});  // 7 - 3 = 4 lignes de liste
   f.on_key(key(Key::End));
 
   CHECK_EQ(f.top_for_tests(), f.visible_for_tests().size() - 4);
@@ -567,7 +567,7 @@ TEST(files_reads_a_click_through_the_scroll_offset) {
   REQUIRE(top > size_t{0});
 
   // Première ligne de la liste : c'est l'entrée numéro `top`.
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 1, 0});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 2, 0});
   CHECK_EQ(f.selected_for_tests(), top);
 }
 
@@ -671,13 +671,14 @@ TEST(files_marks_the_selection_with_reverse_video) {
 
   Files f(t.root());
   f.on_resize(Size{40, 8});
-  // Ligne 1 = première entrée = « .. », sélectionnée au départ.
-  CHECK_EQ(cell_at(f, 40, 8, 0, 1).attrs & sshos::attr::Reverse,
+  // Ligne 2 = première entrée = « .. », sélectionnée au départ ; la 0 est
+  // le chemin et la 1 l'en-tête des colonnes.
+  CHECK_EQ(cell_at(f, 40, 8, 0, 2).attrs & sshos::attr::Reverse,
            sshos::attr::Reverse);
-  CHECK_EQ(cell_at(f, 40, 8, 0, 2).attrs & sshos::attr::Reverse, 0);
+  CHECK_EQ(cell_at(f, 40, 8, 0, 3).attrs & sshos::attr::Reverse, 0);
 
   f.on_key(key(Key::Down));
-  CHECK_EQ(cell_at(f, 40, 8, 0, 2).attrs & sshos::attr::Reverse,
+  CHECK_EQ(cell_at(f, 40, 8, 0, 3).attrs & sshos::attr::Reverse,
            sshos::attr::Reverse);
 }
 
@@ -694,8 +695,8 @@ TEST(files_gives_directories_a_colour_of_their_own) {
   f.on_key(key(Key::Down));  // la sélection quitte « .. »
   f.on_key(key(Key::Down));  // ... et quitte « beta »
 
-  const sshos::Cell dir_cell = cell_at(f, 40, 8, 0, 2);   // beta
-  const sshos::Cell file_cell = cell_at(f, 40, 8, 0, 3);  // alpha
+  const sshos::Cell dir_cell = cell_at(f, 40, 8, 0, 3);   // beta
+  const sshos::Cell file_cell = cell_at(f, 40, 8, 0, 4);  // alpha
   CHECK(!(dir_cell.fg == file_cell.fg));
 }
 
@@ -737,7 +738,7 @@ TEST(files_elides_a_long_name_without_splitting_a_wide_character) {
 
   Files f(t.root());
   f.on_resize(Size{12, 8});
-  const std::string row = painted_row(f, 12, 8, 2);
+  const std::string row = painted_row(f, 12, 8, 3);
   // Rien ne doit dépasser, et aucune moitié ne doit rester seule : la
   // surface refuse d'écrire hors clip, donc c'est la cohérence de la
   // ligne qui le dit.
@@ -774,8 +775,10 @@ TEST(files_paints_the_page_the_scroll_offset_points_at) {
   const size_t top = f.top_for_tests();
   REQUIRE(top > size_t{0});
 
-  const std::string first = painted_row(f, 40, 6, 1);
-  CHECK_EQ(first, f.visible_for_tests()[top].name);
+  // Le nom seul : la colonne des tailles est trop large pour 40 cellules
+  // avec la date, mais elle tient -- on compare donc le début de ligne.
+  const std::string first = painted_row(f, 40, 6, 2);
+  CHECK_EQ(first.rfind(f.visible_for_tests()[top].name, 0), size_t{0});
 }
 
 // La barre de sélection couvre la LIGNE ENTIÈRE : arrêtée au dernier
@@ -789,7 +792,7 @@ TEST(files_paints_the_selection_bar_across_the_whole_row) {
   Files f(t.root());
   f.on_resize(Size{40, 8});
   // Bien au-delà du nom « .. », qui fait deux colonnes.
-  CHECK_EQ(cell_at(f, 40, 8, 30, 1).attrs & sshos::attr::Reverse,
+  CHECK_EQ(cell_at(f, 40, 8, 30, 2).attrs & sshos::attr::Reverse,
            sshos::attr::Reverse);
 }
 
@@ -811,8 +814,8 @@ TEST(files_gives_links_a_colour_of_their_own) {
   int y_dir = -1;
   int y_link = -1;
   for (size_t i = 0; i < v.size(); ++i) {
-    if (v[i].name == "vrai") y_dir = 1 + static_cast<int>(i);
-    if (v[i].name == "lien") y_link = 1 + static_cast<int>(i);
+    if (v[i].name == "vrai") y_dir = 2 + static_cast<int>(i);
+    if (v[i].name == "lien") y_link = 2 + static_cast<int>(i);
   }
   REQUIRE(y_dir > 0);
   REQUIRE(y_link > 0);
@@ -830,7 +833,7 @@ TEST(files_elides_a_long_name_from_the_right) {
 
   Files f(t.root());
   f.on_resize(Size{14, 8});
-  const std::string row = painted_row(f, 14, 8, 2);
+  const std::string row = painted_row(f, 14, 8, 3);
   CHECK_EQ(row.rfind("rapport", 0), size_t{0});
 }
 
@@ -1288,11 +1291,11 @@ TEST(files_toggles_one_entry_with_a_ctrl_click) {
   Files f(d.root());
   f.on_resize(Size{40, 10});
 
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 2, mod::Ctrl});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 3, mod::Ctrl});
   CHECK_EQ(f.marked_for_tests().size(), size_t{1});
   CHECK_EQ(f.path_for_tests(), d.root());  // rien n'a été ouvert
 
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 2, mod::Ctrl});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 3, mod::Ctrl});
   CHECK(f.marked_for_tests().empty());
 }
 
@@ -1308,7 +1311,7 @@ TEST(files_takes_a_whole_range_with_a_shift_click) {
   f.on_resize(Size{40, 10});
   f.on_key(KeyEvent{Key::Down, 0, 0});  // sur « a », ligne 2 de l'écran
 
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 4, mod::Shift});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 5, mod::Shift});
 
   CHECK_EQ(f.marked_for_tests().size(), size_t{3});
 }
@@ -1467,4 +1470,269 @@ TEST(files_keeps_deleting_after_one_of_them_refuses) {
   CHECK(exists(t.root() + "/a-plein"));
   CHECK(!exists(t.root() + "/b-simple"));
   CHECK(f.status_for_tests().find("1 sur 2") != std::string::npos);
+}
+
+// ------------------------------------------------------------ les colonnes
+
+// TROIS COLONNES : nom, taille, date. Un gestionnaire qui ne montre que des
+// noms oblige à sortir dans un terminal pour savoir lequel est le gros ou
+// lequel est le récent.
+TEST(files_shows_a_name_a_size_and_a_date) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string p = t.file("gros");
+  const int fd = ::open(p.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, std::string(4096, 'x').data(), 4096), ssize_t{4096});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  const std::string screen = painted(f, 60, 10);
+  CHECK(screen.find("gros") != std::string::npos);
+  CHECK(screen.find("4.0 Ko") != std::string::npos);
+}
+
+// L'EN-TÊTE NOMME LES COLONNES, et il est la seule chose qui dise sur quoi
+// la liste est triée.
+TEST(files_names_its_columns_in_a_header) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  const std::string row = painted_row(f, 60, 10, 1);
+  CHECK(row.find("Nom") != std::string::npos);
+  CHECK(row.find("Taille") != std::string::npos);
+  CHECK(row.find("Date") != std::string::npos);
+}
+
+// CLIQUER L'EN-TÊTE TRIE, et recliquer la même colonne INVERSE. C'est le
+// geste de tous les gestionnaires, et il n'a pas d'équivalent au clavier
+// qui se devine.
+TEST(files_sorts_when_its_header_is_clicked_and_reverses_on_the_second) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  const int taille_x = static_cast<int>(painted_row(f, 60, 10, 1).find("Taille"));
+  REQUIRE(taille_x > 0);
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+  CHECK(f.sort_by_for_tests() == sshos::SortBy::Size);
+  CHECK(!f.sort_desc_for_tests());
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+  CHECK(f.sort_by_for_tests() == sshos::SortBy::Size);
+  CHECK(f.sort_desc_for_tests());
+}
+
+// LE SENS SE VOIT. Sans marque, on ne sait pas si le plus gros est en haut
+// ou en bas sans lire deux lignes et comparer.
+TEST(files_shows_which_way_it_sorts) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  const std::string up = painted_row(f, 60, 10, 1);
+  const int nom_x = static_cast<int>(up.find("Nom"));
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, nom_x, 1, 0});
+  const std::string down = painted_row(f, 60, 10, 1);
+  CHECK(up != down);
+}
+
+// CHANGER DE TRI NE PERD PAS LA LIGNE CHOISIE. Elle change de rang, pas
+// d'identité : la retrouver ailleurs dans la liste est le minimum.
+TEST(files_keeps_the_selected_name_across_a_sort) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string p = t.file("petit");
+  t.file("zzz-gros");
+  const int fd = ::open((t.root() + "/zzz-gros").c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+  (void)p;
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::End));
+  const std::string before = selected_name(f);
+  REQUIRE_EQ(before, std::string("zzz-gros"));
+
+  const int taille_x = static_cast<int>(painted_row(f, 60, 10, 1).find("Taille"));
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+
+  CHECK_EQ(selected_name(f), before);
+}
+
+// UNE FENÊTRE ÉTROITE GARDE LES NOMS. Les colonnes chiffrées cèdent la
+// place avant lui : un nom coupé à trois lettres ne sert à rien, une taille
+// absente se retrouve ailleurs.
+TEST(files_drops_its_columns_before_it_squeezes_the_names) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("un-nom-de-fichier-assez-long");
+  Files f(t.root());
+  f.on_resize(Size{26, 10});
+
+  const std::string screen = painted(f, 26, 10);
+  // Le nom garde la part du lion ; la date, elle, a cédé la place.
+  CHECK(screen.find("un-nom-de-fi") != std::string::npos);
+  CHECK(screen.find("Date") == std::string::npos);
+}
+
+// CHANGER DE COLONNE REPART DANS LE SENS CROISSANT. Personne n'attend
+// qu'un tri par nom hérite du sens qu'on venait de donner aux tailles.
+TEST(files_starts_a_new_column_ascending) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  const std::string head = painted_row(f, 60, 10, 1);
+  const int taille_x = static_cast<int>(head.find("Taille"));
+  const int nom_x = static_cast<int>(head.find("Nom"));
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+  REQUIRE(f.sort_desc_for_tests());
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, nom_x, 1, 0});
+  CHECK(f.sort_by_for_tests() == sshos::SortBy::Name);
+  CHECK(!f.sort_desc_for_tests());
+}
+
+// LE TRI CHANGE VRAIMENT L'ORDRE. L'état interne peut dire « par taille »
+// pendant que la liste reste rangée par nom : c'est ce que la liste montre
+// qui compte.
+TEST(files_really_reorders_when_it_sorts) {
+  Tree t;
+  REQUIRE(t.valid());
+  // Par nom : gros, petit. Par taille croissante : petit, gros.
+  const std::string big = t.file("gros");
+  t.file("petit");
+  const int fd = ::open(big.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  REQUIRE_EQ(names(f), std::string("..|gros|petit"));
+
+  const int taille_x = static_cast<int>(painted_row(f, 60, 10, 1).find("Taille"));
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+
+  CHECK_EQ(names(f), std::string("..|petit|gros"));
+}
+
+// LA LIGNE CHOISIE SUIT SON NOM D'UN TRI À L'AUTRE, même quand elle change
+// de rang. Retomber sur le rang d'avant désignerait un autre fichier.
+TEST(files_follows_the_selected_name_when_its_rank_changes) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string big = t.file("aaa-gros");
+  t.file("zzz-petit");
+  const int fd = ::open(big.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("aaa-gros"));
+
+  const int taille_x = static_cast<int>(painted_row(f, 60, 10, 1).find("Taille"));
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, taille_x, 1, 0});
+
+  // « aaa-gros » est passé du premier rang au dernier : la sélection l'a
+  // suivi au lieu de rester où elle était.
+  CHECK_EQ(selected_name(f), std::string("aaa-gros"));
+  CHECK_EQ(f.selected_for_tests(), size_t{2});
+}
+
+// LE NOM S'ARRÊTE AVANT LA COLONNE DES TAILLES. Sans ce recul, un nom long
+// écrit par-dessus les chiffres et rend les deux illisibles.
+TEST(files_stops_a_long_name_before_the_size_column) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string p = t.file("un-nom-vraiment-tres-tres-long-pour-la-place");
+  const int fd = ::open(p.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{40, 10});
+  const std::string row = painted_row(f, 40, 10, 3);
+  CHECK(row.find("10 o") != std::string::npos);
+  // Le nom est COUPÉ, et la gouttière avant les chiffres reste blanche :
+  // sans ce recul il court sous les colonnes, et ce qu'on lit au milieu du
+  // nom est un morceau de taille.
+  CHECK(row.find("\xe2\x80\xa6") != std::string::npos);
+  CHECK_EQ(cell_at(f, 40, 10, 19, 3).ch, U' ');
+}
+
+// UN DOSSIER N'A PAS DE TAILLE QUI VEUILLE DIRE QUELQUE CHOSE : celle de
+// son inode ne dit rien de ce qu'il contient, et l'afficher ferait croire
+// le contraire.
+TEST(files_leaves_the_size_of_a_directory_blank) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("dossier");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  const std::string row = painted_row(f, 60, 10, 3);
+  CHECK(row.find("dossier") != std::string::npos);
+  CHECK(row.find(" o ") == std::string::npos);
+  CHECK(row.find("Ko") == std::string::npos);
+}
+
+// LES CHIFFRES SONT CALÉS À DROITE. Ils se comparent à l'œil quand leurs
+// unités sont alignées, jamais quand leurs premiers chiffres le sont.
+TEST(files_lines_up_its_sizes_on_the_right) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string a = t.file("aaa");
+  const std::string b = t.file("bbb");
+  int fd = ::open(a.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "1", 1), ssize_t{1});
+  ::close(fd);
+  fd = ::open(b.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, std::string(4096, 'x').data(), 4096), ssize_t{4096});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  const std::string r1 = painted_row(f, 60, 10, 3);
+  const std::string r2 = painted_row(f, 60, 10, 4);
+  // Les deux lignes finissent par une date de même longueur : les tailles
+  // se terminent donc à la même colonne si elles sont calées à droite.
+  CHECK_EQ(r1.find("1 o") + 3, r2.find("4.0 Ko") + 6);
+}
+
+// LE CURSEUR SUIT LA LIGNE CHOISIE, en dessous de l'en-tête.
+TEST(files_puts_its_cursor_on_the_chosen_row_below_the_header) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{40, 10});
+
+  sshos::Pos p{};
+  REQUIRE(f.wants_cursor(p));
+  CHECK_EQ(p.y, 2);
+  f.on_key(key(Key::Down));
+  REQUIRE(f.wants_cursor(p));
+  CHECK_EQ(p.y, 3);
 }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <cerrno>
 #include <cstring>
 #include <vector>
@@ -90,6 +91,36 @@ std::string human_size(uint64_t bytes) {
   return buf;
 }
 
+// La date, telle qu'on la lit dans une colonne de dix cellules. Le format
+// est ISO à l'envers -- JJ/MM/AAAA -- parce que c'est celui que lit
+// l'utilisateur, et sans heure : elle coûterait cinq cellules de plus sur
+// une fenêtre qui n'en a pas tant, et le jour suffit à retrouver un
+// fichier neuf fois sur dix.
+//
+// `localtime` lit le fuseau du DÉMON, pas celui du client. C'est la même
+// limite que l'horloge du panneau, notée au §7.2 du dossier de reprise, et
+// elle se corrigera au même endroit : quand le message d'accueil portera le
+// fuseau du client.
+std::string human_date(uint64_t mtime) {
+  if (mtime == 0) return {};
+  const time_t t = static_cast<time_t>(mtime);
+  struct tm tmv {};
+  if (::localtime_r(&t, &tmv) == nullptr) return {};
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%02d/%02d/%04d", tmv.tm_mday, tmv.tm_mon + 1,
+                tmv.tm_year + 1900);
+  return buf;
+}
+
+// Un texte calé à DROITE dans `width` cellules. Les chiffres se comparent
+// à l'œil quand leurs unités sont alignées, jamais quand leurs premières
+// décimales le sont.
+std::string right_align(const std::string& s, int width) {
+  const int pad = width - display_width(s);
+  if (pad <= 0) return s;
+  return std::string(static_cast<size_t>(pad), ' ') + s;
+}
+
 std::string elide_right(const std::string& s, int width) {
   if (width <= 0) return {};
   if (display_width(s) <= width) return s;
@@ -133,10 +164,48 @@ void Files::on_resize(Size s) {
 }
 
 int Files::rows_for_list() const {
-  // La barre de chemin en haut, la ligne d'état en bas. Une fenêtre trop
-  // petite pour les deux montre au moins une ligne de liste : rendre zéro
-  // ferait disparaître le contenu au lieu de le serrer.
-  return std::max(1, size_.h - 2);
+  // La barre de chemin et l'en-tête des colonnes en haut, la ligne d'état
+  // en bas. Une fenêtre trop petite pour les trois montre au moins une
+  // ligne de liste : rendre zéro ferait disparaître le contenu au lieu de
+  // le serrer.
+  return std::max(1, size_.h - 3);
+}
+
+Files::Columns Files::columns(int w) const {
+  Columns c;
+  // « 1023.9 Ko » tient en neuf cellules, « JJ/MM/AAAA » en dix.
+  constexpr int kSizeW = 9;
+  constexpr int kDateW = 10;
+  // En dessous, un nom n'est plus lisible : c'est le seuil au-dessous
+  // duquel une colonne chiffrée cède la place plutôt que de le manger.
+  constexpr int kNameMin = 12;
+
+  c.name_w = w;
+  if (w >= kNameMin + 1 + kSizeW + 1 + kDateW) {
+    c.date_w = kDateW;
+    c.date_x = w - kDateW;
+    c.size_w = kSizeW;
+    c.size_x = c.date_x - 1 - kSizeW;
+    c.name_w = c.size_x - 1;
+  } else if (w >= kNameMin + 1 + kSizeW) {
+    c.size_w = kSizeW;
+    c.size_x = w - kSizeW;
+    c.name_w = c.size_x - 1;
+  }
+  return c;
+}
+
+void Files::sort_on(SortBy by) {
+  // Recliquer la même colonne INVERSE ; en choisir une autre repart dans
+  // le sens croissant -- personne n'attend qu'un tri par date hérite du
+  // sens qu'on avait donné aux tailles.
+  if (sort_by_ == by) {
+    sort_desc_ = !sort_desc_;
+  } else {
+    sort_by_ = by;
+    sort_desc_ = false;
+  }
+  refilter();
 }
 
 void Files::reload() {
@@ -150,7 +219,23 @@ void Files::reload() {
 }
 
 void Files::refilter() {
+  // LA LIGNE CHOISIE SURVIT AU TRI. Elle change de rang, pas d'identité :
+  // la retrouver ailleurs dans la liste est le minimum qu'on attende d'un
+  // clic sur un en-tête.
+  const std::string kept =
+      sel_ < visible_.size() ? visible_[sel_].name : std::string();
+
   visible_ = filter_entries(listing_.entries, filter_);
+  sort_entries(visible_, sort_by_, sort_desc_);
+
+  if (!kept.empty()) {
+    for (size_t i = 0; i < visible_.size(); ++i) {
+      if (visible_[i].name == kept) {
+        sel_ = i;
+        break;
+      }
+    }
+  }
   settle();
 }
 
@@ -545,8 +630,23 @@ void Files::on_mouse(const MouseEvent& m) {
   }
   if (m.action != MouseAction::Press) return;
 
-  // La première ligne est la barre de chemin ; la liste commence en 1.
-  const int row = m.y - 1;
+  // LA LIGNE 1 EST L'EN-TÊTE, et cliquer une colonne trie dessus. C'est le
+  // geste de tous les gestionnaires, et il n'a aucun équivalent au clavier
+  // qui se devine.
+  if (m.y == 1) {
+    const Columns c = columns(size_.w);
+    if (c.date_w > 0 && m.x >= c.date_x) {
+      sort_on(SortBy::Time);
+    } else if (c.size_w > 0 && m.x >= c.size_x) {
+      sort_on(SortBy::Size);
+    } else {
+      sort_on(SortBy::Name);
+    }
+    return;
+  }
+
+  // La barre de chemin, puis l'en-tête : la liste commence en 2.
+  const int row = m.y - 2;
   if (row < 0 || static_cast<size_t>(row) >= rows) return;
   const size_t hit = top_ + static_cast<size_t>(row);
   if (hit >= visible_.size()) return;
@@ -580,7 +680,7 @@ void Files::on_mouse(const MouseEvent& m) {
 
 bool Files::wants_cursor(Pos& out) const {
   if (visible_.empty()) return false;
-  out = Pos{0, 1 + static_cast<int>(sel_ - top_)};
+  out = Pos{0, 2 + static_cast<int>(sel_ - top_)};
   return true;
 }
 
@@ -598,6 +698,26 @@ void Files::render(View v) {
   Style path_style;
   path_style.attrs = attr::Bold;
   v.text(0, 0, elide_left(listing_.path, w), path_style);
+
+  // L'EN-TÊTE : il nomme les colonnes, et il est la seule chose qui dise
+  // sur quoi la liste est triée. La flèche marque celle qui porte le tri.
+  const Columns c = columns(w);
+  Style head;
+  head.attrs = attr::Underline;
+  const std::string arrow = sort_desc_ ? "v" : "^";
+  v.text(0, 1, elide_right(sort_by_ == SortBy::Name ? "Nom " + arrow : "Nom",
+                           c.name_w),
+         head);
+  if (c.size_w > 0) {
+    v.text(c.size_x, 1,
+           right_align(sort_by_ == SortBy::Size ? "Taille " + arrow : "Taille",
+                       c.size_w),
+           head);
+  }
+  if (c.date_w > 0) {
+    v.text(c.date_x, 1,
+           sort_by_ == SortBy::Time ? "Date " + arrow : "Date", head);
+  }
 
   const int rows = rows_for_list();
   for (int i = 0; i < rows; ++i) {
@@ -619,7 +739,7 @@ void Files::render(View v) {
       default:
         break;
     }
-    const int y = 1 + i;
+    const int y = 2 + i;
     // LA MARQUE PRÉCÈDE LE NOM, et elle est en couleur : un compteur en bas
     // dit COMBIEN sont choisis, jamais LESQUELS, et une sélection qu'on ne
     // peut pas relire ne se corrige pas.
@@ -636,9 +756,18 @@ void Files::render(View v) {
       mark.fg = Color::indexed(3);
       mark.attrs |= attr::Bold;
       v.text(0, y, "*", mark);
-      v.text(1, y, elide_right(e.name, w - 1), st);
+      v.text(1, y, elide_right(e.name, c.name_w - 1), st);
     } else {
-      v.text(0, y, elide_right(e.name, w), st);
+      v.text(0, y, elide_right(e.name, c.name_w), st);
+    }
+    // Un répertoire n'a pas de taille qui veuille dire quelque chose : celle
+    // de son inode ne dit rien de ce qu'il contient, et l'afficher ferait
+    // croire le contraire.
+    if (c.size_w > 0 && e.kind != EntryKind::Dir && e.name != "..") {
+      v.text(c.size_x, y, right_align(human_size(e.size), c.size_w), st);
+    }
+    if (c.date_w > 0 && e.name != "..") {
+      v.text(c.date_x, y, human_date(e.mtime), st);
     }
   }
 
