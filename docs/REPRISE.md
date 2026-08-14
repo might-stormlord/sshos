@@ -4,7 +4,7 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 13 août 2026, branche `m1-noyau`, **964 tests au vert**
+> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1006 tests au vert**
 > en `Release` comme sous ASan/UBSan.
 > **Les six jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'eau par l'utilisateur. Le §3 ci-dessous donne la position exacte.
@@ -121,7 +121,13 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | Le moniteur devient un widget | L'application disparaît ; le fond d'écran porte quatre sections encadrées (CPU, mémoire, réseau, charge, processus), jauges vertes/jaunes/rouges, signature « SSH OS » centrée | `444bac6`, `3919486`, `1600142` |
 | Ouvrir deux fois la même application | Le menu et le **clic droit** sur la barre des tâches ouvrent une **nouvelle instance** ; le clic gauche garde le rappel | `a0924ec` |
 | Ancrage façon Windows | `Ctrl+flèche` ancre la fenêtre active sur une moitié d'écran, **sans passer par l'accord** — trois touches pour un geste qu'on répète était inutilisable | `1d5e3ff`, `7987cc6` |
-| Onglets du terminal | Chaque onglet a son PTY, sa grille, son historique et ses modes. Barre cliquable toujours visible (`+` pour ouvrir, `×` pour fermer, **re-cliquer l'onglet actif le renomme**), et `Alt+t` / `Alt+w` / `Alt+flèches` / `F2` au clavier | `80eda0d`, `d818249` |
+| Onglets du terminal | Chaque onglet a son PTY, sa grille, son historique et ses modes. Barre cliquable toujours visible (`+` pour ouvrir, `×` pour fermer, **re-cliquer l'onglet actif le renomme**), et `Alt+t` / `Alt+w` / `Alt+flèches` / `F2` au clavier | `80eda0d`, `d818249`, `3daa305` |
+| Le cadre nomme l'onglet | `Terminal (build)` plutôt que `build` tout court | `f872c25` |
+| Barre des tâches lisible | Le libellé s'étire dans la place libre ; huit cellules restent le **plancher**, pas la mesure | `a4ed85b` |
+| **Le caret** | `App::wants_cursor()` n'avait **aucun appelant** : le démon passait `std::nullopt` à chaque trame, et aucun champ de saisie du bureau n'avait de curseur | `41eb781` |
+| **Fermer emporte le groupe** | `~Pty` ne fermait que le maître : un shell qui refuse SIGHUP survivait pour toute la vie du démon | `41eb781` |
+| **Assistance à l'ancrage** | Ancrer laisse une moitié vide ; le bureau y propose les autres fenêtres, un clic en amarre une | `b888ec5` |
+| L'aide dit les gestes directs | Section « Sans accord : » — `Ctrl+Q`, `Ctrl+flèches`, les onglets, `F2` | `2121e43` |
 
 **Ce que l'ancrage coûte, et c'est assumé :** `Ctrl+gauche` et `Ctrl+droite`
 déplacent par mot dans `readline`, donc dans tout shell. Le bureau les prend à
@@ -130,6 +136,24 @@ l'invite ; les flèches nues et `Maj+flèche` lui restent.
 **Ce que la barre d'onglets coûte, et c'est assumé :** une ligne de grille, même à
 un seul onglet. Elle porte le `+`, qui est la **seule voie à la souris** vers un
 second onglet — et l'utilisateur pilote à la souris.
+
+**Ce que la fermeture d'une fenêtre emporte, et c'est mesuré** (`src/pty/pty.cpp`,
+en face de `Pty::shutdown()`) :
+
+| | fermer le maître seul | + SIGKILL au groupe |
+|---|---|---|
+| shell ordinaire | mort | mort |
+| tâche de fond | partie | partie |
+| **`trap '' HUP`** | **vivant, pour toujours** | mort |
+| enfant `setsid` | vivant | vivant |
+
+`setsid` reste la porte de sortie — c'est ce que font `nohup` et `disown`, et
+c'est la seule façon de faire survivre un travail à sa fenêtre.
+
+**L'aide entière tient dans un 80×24, et c'est cette contrainte qui a décidé de
+sa mise en page.** Une ligne vide de séparation en plus, ou une ligne de
+raccourci de plus, et la dernière ligne tombe hors du cadre — c'est-à-dire celle
+des gestes qu'on ne peut découvrir autrement.
 
 **Ce que le widget de fond coûte :** le bureau n'est plus à 0 jiffie au repos. Il
 se rafraîchit une fois par seconde, mesuré à **12 jiffies / 3 s**, et cette valeur
@@ -397,28 +421,37 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 **Les six jalons sont livrés et la v1 est complète.** Le travail se fait désormais
 à la demande, un geste à la fois.
 
-**Ce qui reste ouvert, et qui a été explicitement remis à plus tard :**
+**Ce qui reste ouvert :**
 
-1. **L'assistance à l'ancrage.** Une fois une fenêtre ancrée sur une moitié,
-   proposer les autres dans la moitié libre et en amarrer une au clic.
-   `snap_opposite()` existe dans `src/wm/tile.cpp` et **est testée**, mais
-   n'a toujours aucun appelant — c'est exactement le défaut décrit au point 1
-   ci-dessous, laissé là sciemment et à surveiller.
-2. **Un vrai menu contextuel** sur le clic droit de la barre des tâches : il agit
+1. **Un vrai menu contextuel** sur le clic droit de la barre des tâches : il agit
    aujourd'hui directement (nouvelle instance), sans rien proposer.
-3. **Le semis de points du fond d'écran.** Il fonctionnait, mais rendait chaque
+2. **Le semis de points du fond d'écran.** Il fonctionnait, mais rendait chaque
    repeint complet **27 % plus gros** (mesuré), ce qui faisait basculer
    `daemon_dirty_overflow_closes_the_connection` du rejet *Dirty* au rejet
    *Clean*. Retiré ; le commentaire qui dit pourquoi est resté à l'endroit où il
    se rebrancherait.
+3. **Rétention mémoire par connexion** (~41 Mio) et **le fuseau horaire du
+   démon plutôt que celui du client** : §7.2, inchangés depuis le jalon 1.
+
+**Soldé le 14 août 2026 :** l'assistance à l'ancrage (elle donne enfin un
+appelant à `snap_opposite()`), le caret, le SIGKILL au groupe à la fermeture, la
+documentation des gestes sans accord, et trois méthodes sans lecteur.
 
 Ce que les six jalons ont appris, et qui vaut pour la suite :
 
 1. **Une méthode née sans appelant ne se signale qu'en faisant tourner le vrai
-   logiciel.** Trois fois : `Decoder::failed()` au jalon 1, la garde `A2`, et
-   `InputParser::timeout()` — dont l'absence rendait `vim` inutilisable, trouvée
-   par une sonde bout-en-bout et non par 732 tests. Toute fin de jalon doit
-   inclure une sonde qui lance de VRAIS programmes.
+   logiciel — ou en la cherchant exprès.** **Sept fois** à ce jour :
+   `Decoder::failed()`, la garde `A2`, `InputParser::timeout()` (qui rendait
+   `vim` inutilisable), `App::refresh_ms()`, `App::wants_cursor()` (aucun caret
+   nulle part dans le bureau), `Pty::kill_now()` et `snap_opposite()`.
+
+   **Le balayage systématique marche et coûte deux minutes** : lister les
+   fonctions déclarées dans `src/**.hpp`, compter leurs appels dans
+   `src/**.cpp` moins leur propre définition. 72 noms sur 393 le 14 août 2026,
+   dont les trois derniers défauts ci-dessus. Deux pièges : les accesseurs
+   `*_for_tests` sont des faux positifs légitimes — d'où le suffixe, à mettre
+   systématiquement — et un `head -N` sur les résultats du `grep` fait passer
+   une méthode appelée pour une orpheline.
 2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
    tâches du jalon 3 ont débordé de leur périmètre annoncé, toujours pour cette
    raison. Le prévoir en écrivant le plan du jalon 4.
