@@ -4,7 +4,7 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1010 tests au vert**
+> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1104 tests au vert**
 > en `Release` comme sous ASan/UBSan.
 > **Les six jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'eau par l'utilisateur. Le §3 ci-dessous donne la position exacte.
@@ -107,6 +107,7 @@ Source : `docs/superpowers/specs/2026-08-10-ssh-os-design.md` §15.
 | **4** | Gestionnaire de fichiers | Naviguer, renommer, supprimer | ✅ **livré** |
 | **5** | Moniteur système | Processus, CPU, mémoire, réseau | ✅ **livré** |
 | **6** | Éditeur | Ouvrir, modifier, enregistrer | ✅ **livré** |
+| **7** | Le gestionnaire de fichiers, façon Dolphin | Vue scindée, sélection multiple, copier/coller sans bloquer, colonnes triables, historique, raccourcis | ✅ **livré** |
 
 ### Après la v1 — ce que l'utilisateur a demandé depuis, et qui est livré
 
@@ -421,6 +422,34 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 **Les six jalons sont livrés et la v1 est complète.** Le travail se fait désormais
 à la demande, un geste à la fois.
+
+### Le jalon 7 — ce qu'il change, et la contrainte qui l'a décidé
+
+Plan : `docs/superpowers/plans/2026-08-14-ssh-os-m7-dolphin.md`. Neuf tâches,
+120 mutations.
+
+| Geste | Ce qu'il fait |
+|---|---|
+| `F3` | Scinde en deux panneaux indépendants ; `Tab` passe de l'un à l'autre |
+| `F9` | Le liseré des raccourcis — Racine, Maison, Temporaire, Etc |
+| `Espace`, `Ctrl+A`, `Maj+flèches`, `Ctrl`/`Maj`+clic | La sélection multiple |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copier, couper, coller — destination : le panneau qui a la main |
+| `F7` / `Maj+F7` | Un dossier, un fichier vide |
+| `Alt+←` / `Alt+→` | L'historique ; le fil d'Ariane se clique aussi |
+| Clic sur l'en-tête | Trie par nom, taille ou date ; recliquer inverse |
+
+**LA CONTRAINTE QUI DÉCIDE DE TOUT :** le démon est mono-thread. Copier deux
+gigaoctets d'un `read`/`write` en boucle gèlerait toutes les fenêtres et tous
+les clients pendant la copie. `CopyJob` avance donc **par tranches d'un
+mégaoctet**, une par réveil, et l'arborescence est parcourue **paresseusement**
+— un `readdir()` quand on y arrive, jamais un parcours complet avant de
+commencer. Mesuré à la sonde : **39 ms** de temps de réponse du bureau pendant
+la copie de 6 Mo.
+
+`App` gagne `on_refresh()` au passage : le travail périodique **hors du rendu**,
+puisque `render()` ne doit toucher ni au disque ni au réseau. Et une fenêtre
+réduite qui a demandé l'horloge la garde — une application ne la demande pas
+pour dessiner, elle la demande pour travailler.
 
 **Ce qui reste ouvert :**
 
