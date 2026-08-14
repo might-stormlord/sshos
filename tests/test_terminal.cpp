@@ -46,7 +46,8 @@ struct FakeHost : Host {
     ++watches;
     return next_token++;
   }
-  void unwatch(uint64_t) override {}
+  std::vector<uint64_t> unwatched;
+  void unwatch(uint64_t t) override { unwatched.push_back(t); }
   void watch_child(pid_t p) override { children.push_back(p); }
 };
 
@@ -1025,4 +1026,164 @@ TEST(terminal_reaps_the_child_of_a_closed_tab) {
     nap_ms(10);
   }
   CHECK(::kill(doomed, 0) != 0);
+}
+
+// --------------------------------- les onglets, seconde passe (mutations)
+
+// UNE RÉPONSE APPARTIENT À L'ONGLET QUI A POSÉ LA QUESTION. `CSI 6 n`
+// arrive pendant qu'on parse le flux d'un onglet de fond : envoyer sa
+// réponse sur le maître de l'onglet regardé ferait apparaître « ;1R » au
+// milieu de l'invite d'à côté.
+TEST(terminal_answers_the_tab_that_asked_not_the_one_on_screen) {
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
+  REQUIRE_EQ(t.active_tab_for_tests(), size_t{0});
+
+  t.feed_tab_for_tests(1, "\033[6n");
+
+  CHECK_EQ(t.take_written_for_tests(size_t{0}), std::string());
+  CHECK_EQ(t.take_written_for_tests(size_t{1}), std::string("\033[1;1R"));
+}
+
+// LE JALON EST REPRIS après la lecture : sans cela, la frappe suivante --
+// qui n'appartient à aucun flux -- partirait au dernier onglet lu au lieu
+// de celui qu'on regarde.
+TEST(terminal_types_into_the_tab_on_screen_after_reading_another) {
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
+  t.feed_tab_for_tests(1, "rien");
+
+  t.on_key(KeyEvent{Key::Char, U'x', 0});
+
+  CHECK_EQ(t.take_written_for_tests(size_t{0}), std::string("x"));
+  CHECK_EQ(t.take_written_for_tests(size_t{1}), std::string());
+}
+
+// CHAQUE ONGLET A SA CROIX. Sans l'avance d'une colonne après l'avoir
+// posée, la case suivante la recouvre : la barre n'en montre plus qu'une,
+// et le premier onglet devient infermable.
+TEST(terminal_gives_every_tab_its_own_cross) {
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+
+  const std::vector<int> crosses = t.cross_columns_for_tests();
+  REQUIRE_EQ(crosses.size(), size_t{2});
+  Surface s(40, 5);
+  t.render(View(s, Rect{0, 0, 40, 5}));
+  for (int x : crosses) CHECK_EQ(s.at(x, 0).ch, U'×');
+}
+
+// LES CASES SE PARTAGENT LA LARGEUR. Sans ce partage, le premier onglet
+// prend tout ce qu'il veut et les suivants tombent hors de la barre : on
+// ne peut plus ni les voir ni les cliquer.
+TEST(terminal_shares_the_bar_between_all_its_tabs) {
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.feed_for_tests("\033]2;un-titre-tres-long-de-shell\033\\");
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.feed_for_tests("\033]2;un-autre-titre-tres-long\033\\");
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.feed_for_tests("\033]2;un-troisieme-titre-tres-long\033\\");
+
+  const std::string row = bar(t, 40);
+  CHECK(row.find("1:") != std::string::npos);
+  CHECK(row.find("2:") != std::string::npos);
+  CHECK(row.find("3:") != std::string::npos);
+  CHECK(sshos::text_cells(row) <= 40);
+}
+
+// L'ONGLET FERMÉ SORT DE L'EPOLL. Son descripteur part avec lui : le
+// laisser surveillé ferait réveiller le démon sur un maître mort, en
+// boucle et pour rien.
+TEST(terminal_unwatches_the_master_of_a_closed_tab) {
+  FakeHost host;
+  Terminal t({"/bin/sh", "-c", "read ignore"});
+  t.on_resize(Size{40, 6});
+  t.attach(host);
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  const uint64_t second = host.next_token - 1;
+  REQUIRE(host.unwatched.empty());
+
+  t.on_key(KeyEvent{Key::Char, U'w', mod::Alt});
+
+  REQUIRE_EQ(host.unwatched.size(), size_t{1});
+  CHECK_EQ(host.unwatched[0], second);
+}
+
+// SEUL L'ONGLET REGARDÉ NOMME LA FENÊTRE : un `make` qui pose son titre
+// dans un onglet de fond n'a pas à renommer ce qu'on a sous les yeux.
+TEST(terminal_lets_no_background_tab_retitle_the_window) {
+  FakeHost host;
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.attach(host);
+  t.feed_for_tests("\033]2;devant\033\\");
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
+  REQUIRE_EQ(host.title, std::string("devant"));
+
+  t.feed_tab_for_tests(1, "\033]2;derriere\033\\");
+
+  CHECK_EQ(host.title, std::string("devant"));
+  // Le nom l'attend quand même dans la barre.
+  CHECK_EQ(t.tab_label_for_tests(1), std::string("derriere"));
+}
+
+// Le retour arrière retire un CARACTÈRE, pas un octet : couper une
+// séquence UTF-8 en deux laisserait un demi-caractère dans le nom, et la
+// grille rendrait un U+FFFD à sa place.
+TEST(terminal_backspaces_a_whole_character_in_a_name) {
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.on_key(KeyEvent{Key::F2, 0, 0});
+  t.on_key(KeyEvent{Key::Char, U'e', 0});
+  t.on_key(KeyEvent{Key::Char, U'é', 0});
+  t.on_key(KeyEvent{Key::Backspace, 0, 0});
+  t.on_key(KeyEvent{Key::Enter, 0, 0});
+
+  CHECK_EQ(t.tab_label_for_tests(0), std::string("e"));
+}
+
+// Un geste d'onglet ne laisse RIEN passer, dans aucun onglet : `Alt+t`
+// transpose deux mots dans readline, et le laisser filer en plus d'ouvrir
+// un onglet ferait les deux.
+TEST(terminal_leaks_no_tab_gesture_into_any_tab) {
+  Terminal t;
+  t.on_resize(Size{30, 5});
+
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  t.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+  t.on_key(KeyEvent{Key::Right, 0, mod::Alt});
+
+  CHECK_EQ(t.take_written_for_tests(size_t{0}), std::string());
+  CHECK_EQ(t.take_written_for_tests(size_t{1}), std::string());
+}
+
+// N'IMPORTE QUEL onglet vivant retient la fenêtre. Ne regarder que celui
+// qu'on voit tuerait un `make` en cours dans un onglet de fond sans jamais
+// poser la question.
+TEST(terminal_asks_before_closing_a_live_tab_left_behind) {
+  FakeHost host;
+  Terminal t({"/bin/sh", "-c", "read ignore"});
+  t.on_resize(Size{40, 6});
+  t.attach(host);
+
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  REQUIRE_EQ(t.active_tab_for_tests(), size_t{1});
+  const pid_t front = t.pid_for_tests();
+  REQUIRE(front > 0);
+
+  // Ctrl+D ferme l'entrée du `read` : l'onglet REGARDÉ meurt, celui de
+  // derrière reste bien vivant.
+  t.on_key(KeyEvent{Key::Char, U'd', mod::Ctrl});
+  REQUIRE(wait_until_zombie(front, 3000));
+  t.on_child_exit(0);
+
+  const sshos::CloseCheck c = t.can_close();
+  CHECK(!c.allowed);
 }

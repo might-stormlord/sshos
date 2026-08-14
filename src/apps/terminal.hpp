@@ -99,6 +99,13 @@ class Terminal : public App, public ParserSink {
   // permettent de le nourrir d'octets comme s'ils en venaient, et de lire
   // ce qu'il en a fait. Aucun code de production ne doit s'en servir.
   void feed_for_tests(std::string_view bytes);
+  // Nourrit un onglet PRECIS, en posant le meme jalon que `on_io` : c'est
+  // la seule facon de distinguer l'onglet d'ou viennent les octets de celui
+  // qu'on regarde.
+  void feed_tab_for_tests(size_t i, std::string_view bytes);
+  std::string take_written_for_tests(size_t i);
+  // Les colonnes des croix de fermeture, dans l'ordre de la barre.
+  std::vector<int> cross_columns_for_tests() const;
   const Screen& screen_for_tests() const { return active().screen; }
   const Scrollback& scrollback_for_tests() const { return active().history; }
   const Modes& modes_for_tests() const { return active().modes; }

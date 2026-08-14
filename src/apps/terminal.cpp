@@ -178,13 +178,16 @@ bool Terminal::open_tab() {
   tabs_.push_back(std::make_unique<Tab>(*this));
   Tab& t = *tabs_.back();
   t.screen.set_scrollback(&t.history);
-  t.screen.resize(std::max(1, size_.w), std::max(1, size_.h - kBarRows));
   if (host_ != nullptr && !open_tab_into(t)) {
     // Le shell n'a pas démarré : on reste sur celui qui marche plutôt que
     // de poser un onglet mort au premier plan.
     tabs_.pop_back();
     return false;
   }
+  // `relayout()` est la SEULE source de la géométrie : les `spec.rows` du
+  // spawn ci-dessus ne sont qu'une valeur de départ, et c'est elle qui les
+  // corrige -- la mutation qui les fausse est donc équivalente.
+  relayout();
   // Le nouvel onglet passe DEVANT : on ne l'ouvre pas pour continuer à
   // regarder l'ancien.
   active_ = tabs_.size() - 1;
@@ -319,7 +322,12 @@ bool Terminal::open_tab_into(Tab& t) {
 
 void Terminal::to_guest(std::string_view bytes) {
   if (bytes.empty()) return;
-  Tab& t = active();
+  // `target()`, PAS `active()`. Une réponse à `CSI 6 n` ou à `CSI c` part
+  // pendant qu'on parse, et elle appartient à l'onglet qui a POSÉ la
+  // question : l'envoyer sur le maître de l'onglet regardé ferait apparaître
+  // « ;1R » au milieu de l'invite d'à côté. Hors lecture -- une frappe, un
+  // clic -- `target()` rend l'onglet actif, qui est bien le destinataire.
+  Tab& t = target();
   if (t.pty.master() < 0) {
     // Pas de PTY : en test, ou après la fermeture du maître. On retient au
     // lieu de perdre -- c'est ce qui rend l'encodage vérifiable sans
@@ -337,7 +345,31 @@ std::string Terminal::take_written_for_tests() {
 }
 
 void Terminal::feed_for_tests(std::string_view bytes) {
-  active().parser.feed(bytes);
+  feed_tab_for_tests(active_, bytes);
+}
+
+void Terminal::feed_tab_for_tests(size_t i, std::string_view bytes) {
+  if (i >= tabs_.size()) return;
+  // On reproduit ce que fait `on_io` : poser l'onglet nourri, parser, le
+  // reprendre. Sans ce jalonnement, aucun cas ne pourrait distinguer
+  // l'onglet d'où viennent les octets de celui qu'on regarde.
+  feeding_ = tabs_[i].get();
+  tabs_[i]->parser.feed(bytes);
+  feeding_ = nullptr;
+}
+
+std::string Terminal::take_written_for_tests(size_t i) {
+  std::string out;
+  if (i < tabs_.size()) out.swap(tabs_[i]->pending);
+  return out;
+}
+
+std::vector<int> Terminal::cross_columns_for_tests() const {
+  std::vector<int> out;
+  for (const Slot& s : bar_slots()) {
+    if (s.kind == SlotKind::Close) out.push_back(s.x);
+  }
+  return out;
 }
 
 IoStatus Terminal::on_io(uint64_t token, uint32_t events) {
@@ -594,11 +626,9 @@ CloseCheck Terminal::can_close() const {
 }
 
 void Terminal::draw_bar(View v) const {
-  // La barre est REPEINTE EN ENTIER : ce qui reste d'un nom plus long à la
-  // trame d'avant traînerait sinon derrière le nom d'aujourd'hui.
-  Style blank;
-  v.fill(Rect{0, 0, v.w(), kBarRows}, blank);
-
+  // AUCUN EFFACEMENT ICI. `draw_decor` remplit tout le cadre avant que
+  // l'application ne peigne : la barre part donc d'une ligne propre, et lui
+  // imposer un fond de plus la détacherait du cadre dont elle fait partie.
   for (const Slot& s : bar_slots()) {
     Style st;
     switch (s.kind) {
@@ -630,6 +660,10 @@ void Terminal::render(View v) {
 
   const int vw = v.w();
   const int top = kBarRows;
+  // La barre est déjà peinte : ce qui reste est la hauteur de la grille.
+  // Retrancher `top` ne fait qu'éviter un tour de boucle -- la `View` clippe
+  // déjà ce qui dépasse et la grille s'arrête d'elle-même à sa dernière
+  // ligne, ce qui rend ÉQUIVALENTE la mutation qui garde `v.h()`.
   const int vh = v.h() - top;
   const Tab& t = active();
   if (!t.spawn_error.empty()) {
