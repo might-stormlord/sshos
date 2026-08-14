@@ -4,13 +4,15 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 13 août 2026, branche `m1-noyau`, **733 tests au vert**.
-> **Les jalons 1, 2 et 3 sont livrés.** Le §3 ci-dessous donne la position exacte.
+> **Dernière mise à jour :** 13 août 2026, branche `m1-noyau`, **964 tests au vert**
+> en `Release` comme sous ASan/UBSan.
+> **Les six jalons sont livrés**, et le travail qui a suivi est demandé au fil de
+> l'eau par l'utilisateur. Le §3 ci-dessous donne la position exacte.
 >
 > ⚠️ Les §4 à §9 (contraintes, harnais, décisions, pièges d'environnement) ont été
 > écrits au jalon 1 et restent **entièrement valides** — ils ne parlent pas
 > d'avancement. Le §6, en revanche, ne décrit que le contenu du jalon 1 : pour les
-> jalons 2 et 3, la source de vérité est leur plan respectif dans
+> jalons 2 à 6, la source de vérité est leur plan respectif dans
 > `docs/superpowers/plans/`, dont les cases cochées portent le commit, le nombre de
 > tests et le nombre de mutations de chaque tâche.
 
@@ -102,9 +104,36 @@ Source : `docs/superpowers/specs/2026-08-10-ssh-os-design.md` §15.
 | **1** | Rendu, diff, protocole, client, démon | Une boîte colorée à l'écran, à travers SSH | ✅ **livré** |
 | **2** | WM, panneau, menu, application factice | Tout le geste testable sans PTY | ✅ **livré** |
 | **3** | Terminal | *Le projet devient utilisable pour de vrai* | ✅ **livré** |
-| 4 | Gestionnaire de fichiers | | ⬜ **à faire, plan non écrit** |
-| 5 | Moniteur système | | ⬜ |
-| 6 | Éditeur | | ⬜ |
+| **4** | Gestionnaire de fichiers | Naviguer, renommer, supprimer | ✅ **livré** |
+| **5** | Moniteur système | Processus, CPU, mémoire, réseau | ✅ **livré** |
+| **6** | Éditeur | Ouvrir, modifier, enregistrer | ✅ **livré** |
+
+### Après la v1 — ce que l'utilisateur a demandé depuis, et qui est livré
+
+Ces travaux ne figurent dans aucun plan : ils sont venus un par un, en réaction à
+l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
+
+| Demande | Ce qui a été fait | Commit |
+|---|---|---|
+| Retirer `Bloc` et `Battement` | Ils deviennent des doublures de test (`tests/fake_apps.hpp`) ; le catalogue ne les propose plus. La session amorce désormais par une **fabrique** injectable (`set_seed_factory_for_tests`) | `f119b26` |
+| Repositionnement intelligent | Entrée de menu « ranger les fenêtres » : grille en colonnes, reste aux premières (`src/wm/tile.cpp`) | `8b7cebd` |
+| Deux sorties qu'on ne confond plus | `Ctrl+Q` détache (la session survit) ; « Fermer la session » détruit, **avec confirmation** | `8b7cebd` |
+| Le moniteur devient un widget | L'application disparaît ; le fond d'écran porte quatre sections encadrées (CPU, mémoire, réseau, charge, processus), jauges vertes/jaunes/rouges, signature « SSH OS » centrée | `444bac6`, `3919486`, `1600142` |
+| Ouvrir deux fois la même application | Le menu et le **clic droit** sur la barre des tâches ouvrent une **nouvelle instance** ; le clic gauche garde le rappel | `a0924ec` |
+| Ancrage façon Windows | `Ctrl+flèche` ancre la fenêtre active sur une moitié d'écran, **sans passer par l'accord** — trois touches pour un geste qu'on répète était inutilisable | `1d5e3ff`, `7987cc6` |
+| Onglets du terminal | Chaque onglet a son PTY, sa grille, son historique et ses modes. Barre cliquable toujours visible (`+` pour ouvrir, `×` pour fermer, **re-cliquer l'onglet actif le renomme**), et `Alt+t` / `Alt+w` / `Alt+flèches` / `F2` au clavier | `80eda0d`, `d818249` |
+
+**Ce que l'ancrage coûte, et c'est assumé :** `Ctrl+gauche` et `Ctrl+droite`
+déplacent par mot dans `readline`, donc dans tout shell. Le bureau les prend à
+l'invite ; les flèches nues et `Maj+flèche` lui restent.
+
+**Ce que la barre d'onglets coûte, et c'est assumé :** une ligne de grille, même à
+un seul onglet. Elle porte le `+`, qui est la **seule voie à la souris** vers un
+second onglet — et l'utilisateur pilote à la souris.
+
+**Ce que le widget de fond coûte :** le bureau n'est plus à 0 jiffie au repos. Il
+se rafraîchit une fois par seconde, mesuré à **12 jiffies / 3 s**, et cette valeur
+est la même à zéro, un ou deux terminaux ouverts (sonde du 13 août 2026).
 
 Le jalon 3 tient sa promesse, et elle a été vérifiée à la main : `vim`, `htop`,
 `less` et un `tmux` imbriqué tournent dans une fenêtre, une compilation survit à
@@ -365,10 +394,25 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 10. Prochaine étape
 
-**Écrire le plan du jalon 4 : le gestionnaire de fichiers.** Les jalons 1 à 3 sont
-livrés ; il n'y a plus aucune dette ouverte sur eux.
+**Les six jalons sont livrés et la v1 est complète.** Le travail se fait désormais
+à la demande, un geste à la fois.
 
-Ce que les trois premiers jalons ont appris, et qui vaut pour la suite :
+**Ce qui reste ouvert, et qui a été explicitement remis à plus tard :**
+
+1. **L'assistance à l'ancrage.** Une fois une fenêtre ancrée sur une moitié,
+   proposer les autres dans la moitié libre et en amarrer une au clic.
+   `snap_opposite()` existe dans `src/wm/tile.cpp` et **est testée**, mais
+   n'a toujours aucun appelant — c'est exactement le défaut décrit au point 1
+   ci-dessous, laissé là sciemment et à surveiller.
+2. **Un vrai menu contextuel** sur le clic droit de la barre des tâches : il agit
+   aujourd'hui directement (nouvelle instance), sans rien proposer.
+3. **Le semis de points du fond d'écran.** Il fonctionnait, mais rendait chaque
+   repeint complet **27 % plus gros** (mesuré), ce qui faisait basculer
+   `daemon_dirty_overflow_closes_the_connection` du rejet *Dirty* au rejet
+   *Clean*. Retiré ; le commentaire qui dit pourquoi est resté à l'endroit où il
+   se rebrancherait.
+
+Ce que les six jalons ont appris, et qui vaut pour la suite :
 
 1. **Une méthode née sans appelant ne se signale qu'en faisant tourner le vrai
    logiciel.** Trois fois : `Decoder::failed()` au jalon 1, la garde `A2`, et
@@ -381,4 +425,10 @@ Ce que les trois premiers jalons ont appris, et qui vaut pour la suite :
 3. **Une mutation survivante est presque toujours un trou de test, pas une
    équivalence.** Sur 246 mutations jouées au jalon 3, 2 seulement étaient
    réellement équivalentes ; les autres ont chacune montré un cas que les tests
-   n'atteignaient pas.
+   n'atteignaient pas. La campagne des onglets (43 mutations, août 2026) a même
+   fait mieux qu'un trou de test : elle a montré un **défaut de production** que
+   964 cas laissaient passer — la réponse à un `CSI 6 n` reçu d'un onglet de fond
+   partait sur le maître de l'onglet regardé.
+4. **Le code écrit avant ses tests se paie, et c'est chiffré.** La seule tâche du
+   jalon 4 écrite code d'abord a laissé **14 survivantes sur 33** au premier tour,
+   contre 8/23, 7/23 et 4/26 pour les trois autres, écrites en TDD.
