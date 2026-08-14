@@ -1187,3 +1187,40 @@ TEST(terminal_asks_before_closing_a_live_tab_left_behind) {
   const sshos::CloseCheck c = t.can_close();
   CHECK(!c.allowed);
 }
+
+// LE JALON DE LECTURE EST REPRIS. `on_io` pose l'onglet nourri avant de
+// parser ; s'il ne le reprenait pas, la frappe suivante -- qui n'appartient
+// à aucun flux -- partirait au dernier onglet LU au lieu de celui qu'on
+// regarde, et l'invite ne répondrait plus à personne.
+TEST(terminal_types_into_the_tab_on_screen_after_a_real_read) {
+  FakeHost host;
+  Terminal t({"/bin/sh", "-c", "read x; printf 'REPONSE-%s' \"$x\"; read y"});
+  t.on_resize(Size{40, 6});
+  t.attach(host);
+  const uint64_t first = host.next_token - 1;
+
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  const uint64_t second = host.next_token - 1;
+  REQUIRE(second != first);
+
+  // On draine le maître du SECOND onglet : c'est cette lecture qui pose le
+  // jalon.
+  for (int i = 0; i < 30; ++i) {
+    t.on_io(second, 0);
+    nap_ms(10);
+  }
+
+  // Puis on revient sur le premier et on tape : la réponse doit venir de LUI.
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
+  REQUIRE_EQ(t.active_tab_for_tests(), size_t{0});
+  t.on_key(KeyEvent{Key::Char, U'z', 0});
+  t.on_key(KeyEvent{Key::Enter, 0, 0});
+
+  bool seen = false;
+  for (int waited = 0; waited < 3000 && !seen; waited += 10) {
+    t.on_io(first, 0);
+    nap_ms(10);
+    seen = painted(t, 40, 5).find("REPONSE-z") != std::string::npos;
+  }
+  CHECK(seen);
+}

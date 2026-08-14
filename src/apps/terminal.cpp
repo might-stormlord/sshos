@@ -876,6 +876,12 @@ void Terminal::osc(std::string_view data) {
   // SEUL L'ONGLET REGARDÉ NOMME LA FENÊTRE. Un `make` qui pose son titre
   // dans un onglet de fond n'a pas à renommer ce qu'on a sous les yeux ;
   // son nom l'attend dans la barre.
+  //
+  // La garde est ÉQUIVALENTE en l'état, et le reste par intention :
+  // `retitle()` nomme toujours la fenêtre d'après l'onglet actif, donc
+  // l'appeler pour un onglet de fond réécrirait le même titre. Elle dit ce
+  // que le code veut, et elle porterait pour de bon le jour où `retitle()`
+  // prendrait un onglet en argument.
   if (&t == &active()) retitle();
 }
 
