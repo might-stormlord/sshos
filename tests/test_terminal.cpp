@@ -476,7 +476,7 @@ TEST(terminal_takes_its_title_from_osc_two_when_attached) {
   t.attach(host);
 
   t.feed_for_tests("\033]2;mon titre\033\\");
-  CHECK_EQ(host.title, std::string("mon titre"));
+  CHECK_EQ(host.title, std::string("Terminal (mon titre)"));
 }
 
 // ------------------------------------------- dix trous montrés par les mutations
@@ -590,13 +590,13 @@ TEST(terminal_only_takes_its_title_from_osc_zero_and_two) {
   t.attach(host);
 
   t.feed_for_tests("\033]2;le bon\033\\");
-  REQUIRE_EQ(host.title, std::string("le bon"));
+  REQUIRE_EQ(host.title, std::string("Terminal (le bon)"));
 
   t.feed_for_tests("\033]4;1;rgb:00/00/00\033\\");
-  CHECK_EQ(host.title, std::string("le bon"));
+  CHECK_EQ(host.title, std::string("Terminal (le bon)"));
 
   t.feed_for_tests("\033]0;aussi bon\033\\");
-  CHECK_EQ(host.title, std::string("aussi bon"));
+  CHECK_EQ(host.title, std::string("Terminal (aussi bon)"));
 }
 
 // --------------------------------------------------------------- onglets
@@ -792,14 +792,14 @@ TEST(terminal_retitles_the_window_when_the_tab_changes) {
   t.on_resize(Size{30, 4});
   t.attach(host);
   t.feed_for_tests("\033]2;premier\033\\");
-  REQUIRE_EQ(host.title, std::string("premier"));
+  REQUIRE_EQ(host.title, std::string("Terminal (premier)"));
 
   t.on_mouse(MouseEvent{MouseAction::Press, 0, 29, 0, 0});
   t.feed_for_tests("\033]2;second\033\\");
-  REQUIRE_EQ(host.title, std::string("second"));
+  REQUIRE_EQ(host.title, std::string("Terminal (second)"));
 
   t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
-  CHECK_EQ(host.title, std::string("premier"));
+  CHECK_EQ(host.title, std::string("Terminal (premier)"));
 }
 
 // FERMER LE DERNIER ONGLET FERME LA FENÊTRE : un terminal sans terminal
@@ -1125,11 +1125,11 @@ TEST(terminal_lets_no_background_tab_retitle_the_window) {
   t.feed_for_tests("\033]2;devant\033\\");
   t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
   t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
-  REQUIRE_EQ(host.title, std::string("devant"));
+  REQUIRE_EQ(host.title, std::string("Terminal (devant)"));
 
   t.feed_tab_for_tests(1, "\033]2;derriere\033\\");
 
-  CHECK_EQ(host.title, std::string("devant"));
+  CHECK_EQ(host.title, std::string("Terminal (devant)"));
   // Le nom l'attend quand même dans la barre.
   CHECK_EQ(t.tab_label_for_tests(1), std::string("derriere"));
 }
@@ -1273,5 +1273,27 @@ TEST(terminal_commits_a_rename_when_the_user_clicks_into_the_grid) {
   CHECK_EQ(t.tab_label_for_tests(0), std::string("build"));
   // ET LE CADRE SUIT : c'est lui qui disait encore le titre du shell
   // pendant toute la saisie.
-  CHECK_EQ(host.title, std::string("build"));
+  CHECK_EQ(host.title, std::string("Terminal (build)"));
+}
+
+// LE CADRE DIT L'APPLICATION, PUIS L'ONGLET. « Terminal » seul ne
+// distinguait pas deux fenêtres ; le seul nom de l'onglet ne disait plus
+// quelle application c'était, et un onglet renommé « build » donnait une
+// fenêtre nommée « build » comme n'importe quelle autre.
+TEST(terminal_names_its_window_after_the_app_then_the_tab) {
+  FakeHost host;
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.attach(host);
+
+  // Rien à dire encore : pas de parenthèse vide ni de numéro pour rien.
+  CHECK_EQ(host.title, std::string("Terminal"));
+
+  t.feed_for_tests("\033]2;~/dev\033\\");
+  CHECK_EQ(host.title, std::string("Terminal (~/dev)"));
+
+  t.on_key(KeyEvent{Key::F2, 0, 0});
+  type(t, "build");
+  t.on_key(KeyEvent{Key::Enter, 0, 0});
+  CHECK_EQ(host.title, std::string("Terminal (build)"));
 }

@@ -240,13 +240,16 @@ void Terminal::close_tab(size_t i) {
 void Terminal::retitle() {
   if (host_ == nullptr) return;
   const Tab& t = active();
-  if (!t.custom_title.empty()) {
-    host_->set_title(t.custom_title);
-  } else if (!t.guest_title.empty()) {
-    host_->set_title(t.guest_title);
-  } else {
-    host_->set_title("Terminal");
-  }
+  // L'APPLICATION D'ABORD, L'ONGLET ENTRE PARENTHÈSES. Le seul nom de
+  // l'onglet ne disait plus de quelle application il s'agissait : une
+  // fenêtre nommée « build » ressemblait à n'importe quelle autre, et le
+  // titre du shell -- que la barre d'onglets affiche déjà -- occupait tout
+  // le cadre.
+  const std::string& name =
+      t.custom_title.empty() ? t.guest_title : t.custom_title;
+  // Sans nom, « Terminal » tout court : ni parenthèse vide, ni numéro
+  // d'onglet pour ne rien dire de plus que la barre.
+  host_->set_title(name.empty() ? "Terminal" : "Terminal (" + name + ")");
 }
 
 void Terminal::begin_rename() {
