@@ -695,7 +695,7 @@ int run_daemon(std::string_view socket_name) {
       // (la bascule souris), et ils doivent être posés avant tout dessin qui
       // en dépend. Le client recopie FrameMsg::ansi verbatim.
       const std::string oob = session.take_out_of_band();
-      const std::string ansi = oob + client->differ->frame(screen, std::nullopt);
+      const std::string ansi = oob + client->differ->frame(screen, session.cursor());
       if (!ansi.empty()) client->out.push(encode(Msg{FrameMsg{ansi}}));
       clock.note_render(now);
 

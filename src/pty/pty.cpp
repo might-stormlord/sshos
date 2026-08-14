@@ -38,7 +38,7 @@ std::vector<char*> flatten(const std::vector<std::string>& v,
 
 }  // namespace
 
-Pty::~Pty() { close_master(); }
+Pty::~Pty() { shutdown(); }
 
 std::string Pty::spawn(const PtySpawn& s) {
   const int master = ::posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
@@ -203,6 +203,40 @@ void Pty::hangup() {
 void Pty::kill_now() {
   if (pid_ <= 0 || exited_) return;
   ::kill(-pid_, SIGKILL);
+}
+
+// MESURÉ, sur quatre scénarios, à la destruction d'un `Pty` (13 août 2026).
+// L'état est relu dans `/proc` : `kill(pid, 0)` réussit sur un zombie et
+// ferait passer un shell mort pour un survivant.
+//
+//                     fermer le maître seul   + SIGKILL au groupe
+//   shell ordinaire         mort                    mort
+//   tâche de fond           partie                  partie
+//   `trap '' HUP`           VIVANT, pour toujours   mort
+//   enfant `setsid`         vivant                  vivant
+//
+// Trois choses en découlent, et chacune est un cas de `test_pty.cpp` :
+//
+// 1. `close_master()` SUFFIT au cas ordinaire : le noyau envoie SIGHUP au
+//    groupe au premier plan du terminal quand le dernier maître se ferme.
+// 2. IL NE SUFFIT PAS à qui refuse le raccrochage. Un tel shell survivait à
+//    la fermeture de sa fenêtre -- sans pseudo-terminal, sans fenêtre,
+//    injoignable -- pour toute la vie du démon, qui se compte en semaines
+//    puisque la session survit à la déconnexion. C'est ce que SIGKILL clôt.
+// 3. UN ENFANT QUI A QUITTÉ LA SESSION SURVIT, et c'est voulu : `nohup`,
+//    `setsid` et `disown` sortent du groupe, et rien de ce qu'on envoie au
+//    groupe ne les atteint. C'est la seule porte de sortie, et l'ôter
+//    empêcherait de faire survivre un travail à sa fenêtre.
+//
+// `hangup()` en tête N'A CHANGÉ AUCUNE des quatre lignes -- ni seul, ni
+// devant le SIGKILL. Il est gardé, et c'est une garde NON DISCRIMINABLE
+// déclarée comme telle : SIGHUP est le signal qui dit « le terminal est
+// parti », un programme correct y répond, et le lui refuser pour n'envoyer
+// que SIGKILL serait brutal sans être plus sûr.
+void Pty::shutdown() {
+  hangup();
+  close_master();
+  kill_now();
 }
 
 bool Pty::try_reap() {

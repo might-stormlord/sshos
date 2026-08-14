@@ -968,6 +968,10 @@ void Session::draw_empty_hint(View v, const Rect& work) const {
 void Session::render(Surface& out) {
   watchdog();
 
+  // Le caret se REDÉCIDE à chaque trame : le garder d'une composition à
+  // l'autre le laisserait sur une fenêtre qu'on vient de fermer.
+  cursor_.reset();
+
   View v = out.root();
   Style desk;
   desk.bg = theme_.desktop_bg;
@@ -990,9 +994,9 @@ void Session::render(Surface& out) {
 
   // Une application qui a demandé sa propre fermeture est servie ici, en
   // tête de composition : elle passe par le MÊME chemin qu'un clic sur
-  // [×], donc par can_close() et, s'il le faut, par le dialogue. Aucune
-  // application du catalogue n'appelle encore Host::request_close(), mais
-  // sans cette consommation le drapeau serait en écriture seule.
+  // [×], donc par can_close() et, s'il le faut, par le dialogue. Le
+  // Terminal s'en sert deux fois : quand son processus est mort et qu'on
+  // demande à fermer, et quand `Alt+w` ferme le dernier onglet.
   for (const auto& up : wm_.stack()) {
     if (!up->close_requested) continue;
     up->close_requested = false;
@@ -1062,6 +1066,23 @@ void Session::render(Surface& out) {
 
     draw_decor(v, w, w.id == focused, theme_, border());
     w.app->render(v.sub(cr));
+
+    // LE CARET, et seulement celui de la fenêtre qui a la main : deux
+    // applications qui en veulent un n'en placeraient qu'un seul, et ce
+    // serait celle du dessous. L'application parle des coordonnées de SA
+    // vue ; on les ramène à l'écran ici, au seul endroit qui connaisse les
+    // deux.
+    Pos want{};
+    if (w.id == focused && w.app->wants_cursor(want)) {
+      const Pos at{cr.x + want.x, cr.y + want.y};
+      // Une application qui vise hors de sa vue ne pose PAS son caret chez
+      // sa voisine : on le laisse tomber plutôt que de le rabattre sur un
+      // bord où il ne veut pas être.
+      if (at.x >= cr.x && at.x < cr.x + cr.w && at.y >= cr.y &&
+          at.y < cr.y + cr.h) {
+        cursor_ = at;
+      }
+    }
   }
 
   // Le contour élastique du redimensionnement, par-dessus toute la pile :
@@ -1094,6 +1115,12 @@ void Session::render(Surface& out) {
   if (front == nullptr || front->mode != WinMode::Fullscreen) {
     panel_.draw(v, theme_, clock_.text(), clock_.date());
   }
+
+  // TOUT CE QUI RECOUVRE PREND LE CARET AVEC LE RESTE. Le laisser
+  // clignoter dans l'application ferait croire qu'on peut encore y taper,
+  // alors que la frappe suivante ira au menu, à l'aide ou à la question
+  // posée.
+  if (menu_.is_open() || help_.is_open() || modal_.is_open()) cursor_.reset();
 
   // Le menu passe en dernier : il recouvre le panneau qui l'a ouvert.
   menu_.layout(out.w(), out.h());

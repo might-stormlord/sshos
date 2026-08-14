@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <chrono>
 #include <string_view>
 #include <variant>
@@ -45,6 +46,14 @@ class Session : public ChildSink {
   void resize(int, int);
   void on_input(const InputEvent& e);
   void render(Surface& out);
+
+  // OU LE CARET DOIT SE POSER, en coordonnees d'ECRAN, apres la derniere
+  // composition. Vide quand personne n'en veut : le demon le passe tel quel
+  // a Differ::frame(), qui cache alors le curseur. C'est le seul chemin par
+  // lequel App::wants_cursor() atteint le client -- il n'en avait aucun
+  // jusqu'au 13 aout 2026, et aucun champ de saisie du bureau n'avait de
+  // caret.
+  std::optional<Pos> cursor() const { return cursor_; }
   bool wants_quit() const { return quit_; }
 
   // Ouvre une application du catalogue. Rend 0 si l'identifiant est inconnu
@@ -283,6 +292,10 @@ class Session : public ChildSink {
   // fenêtre demande de connaître la zone, et on_mouse() ne voit aucune
   // Surface.
   Rect last_work_{0, 0, 80, 23};
+  // Rempli par render(), lu par le demon juste apres. Vide veut dire
+  // « personne n'en veut » : c'est l'etat de tout ecran ou aucune saisie
+  // n'attend de frappe.
+  std::optional<Pos> cursor_;
 };
 
 }  // namespace sshos

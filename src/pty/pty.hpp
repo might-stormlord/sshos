@@ -57,6 +57,14 @@ class Pty {
   void hangup();
   void kill_now();
 
+  // LA FERMETURE, EN UN SEUL ENDROIT. Le destructeur l'appelle, et tout
+  // code qui se débarrasse d'un pseudo-terminal avant l'heure doit
+  // l'appeler aussi : deux politiques de fermeture finissent toujours par
+  // diverger, et celle qui oublie laisse un processus injoignable derrière
+  // elle. Ce qu'elle fait, et ce que chaque étape a coûté, est mesuré en
+  // face de sa définition.
+  void shutdown();
+
   // Récolte sans bloquer. Rend true la fois où l'enfant est effectivement
   // récolté, false ensuite : l'appelant peut donc boucler dessus sans
   // tenir de compte.

@@ -158,10 +158,10 @@ std::vector<Terminal::Slot> Terminal::bar_slots() const {
 }
 
 Terminal::~Terminal() {
-  // SIGHUP au GROUPE, puis SIGKILL : un shell a des petits-enfants, et ne
-  // prévenir que lui laisserait la compilation tourner. `Pty` fait les deux
-  // dans son propre destructeur ; ceci ne fait que retirer la surveillance
-  // avant que le descripteur ne parte, comme partout ailleurs.
+  // `Pty::shutdown()`, appelée par son destructeur, emporte le groupe de
+  // chaque onglet : SIGHUP, fermeture du maître, SIGKILL. Ceci ne fait que
+  // retirer la surveillance avant que le descripteur ne parte, comme
+  // partout ailleurs.
   for (const auto& t : tabs_) {
     if (host_ != nullptr && t->watching) host_->unwatch(t->token);
   }
@@ -224,10 +224,9 @@ void Terminal::close_tab(size_t i) {
 
   if (host_ != nullptr && dying->watching) host_->unwatch(dying->token);
   dying->watching = false;
-  // SIGHUP au GROUPE puis fermeture du maître : le premier prévient les
-  // petits-enfants, le second fait rendre EIO à ceux qui l'auraient ignoré.
-  dying->pty.hangup();
-  dying->pty.close_master();
+  // La MÊME fermeture que celle d'une fenêtre : elle vit dans `Pty` pour
+  // qu'un onglet fermé et une fenêtre fermée ne puissent pas diverger.
+  dying->pty.shutdown();
   // Récoltable tout de suite ? Sinon il attend en antichambre le SIGCHLD
   // qui vient.
   if (dying->pty.pid() > 0 && !dying->pty.try_reap()) {

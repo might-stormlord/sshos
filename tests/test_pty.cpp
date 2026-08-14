@@ -1,10 +1,12 @@
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <string>
 #include <vector>
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -356,4 +358,138 @@ TEST(pty_hangs_up_the_whole_process_group) {
   }
   p.kill_now();
   reaped_within(p, 2000);
+}
+
+
+// L'état d'un processus tel que le noyau le voit : `R`/`S` vivant, `Z`
+// zombie non récolté, `.` parti pour de bon. `kill(pid, 0)` ne suffit pas
+// -- il réussit sur un zombie, et ferait passer un shell bel et bien mort
+// pour un shell qui a survécu.
+char proc_state(pid_t pid) {
+  const std::string path = "/proc/" + std::to_string(pid) + "/stat";
+  FILE* f = ::fopen(path.c_str(), "re");
+  if (f == nullptr) return '.';
+  char buf[512] = {0};
+  const size_t n = ::fread(buf, 1, sizeof buf - 1, f);
+  ::fclose(f);
+  const std::string line(buf, n);
+  const size_t close = line.rfind(')');
+  if (close == std::string::npos || close + 2 >= line.size()) return '?';
+  return line[close + 2];
+}
+
+bool gone_or_dead(pid_t pid, int deadline_ms = kDeadlineMs) {
+  for (int waited = 0; waited < deadline_ms; waited += 10) {
+    const char st = proc_state(pid);
+    if (st == '.' || st == 'Z') return true;
+    nap_ms(10);
+  }
+  return false;
+}
+
+// FERMER LA FENÊTRE EMPORTE LE SHELL. Mesuré : la fermeture du maître
+// suffit dans ce cas -- le noyau envoie SIGHUP au groupe au premier plan du
+// terminal -- et le cas est là pour que ça reste vrai.
+TEST(pty_destructor_takes_an_ordinary_shell_with_it) {
+  pid_t shell = 0;
+  {
+    Pty p;
+    REQUIRE_EQ(p.spawn(shell_running("printf 'pret\\n'; sleep 30")),
+               std::string());
+    shell = p.pid();
+    REQUIRE(read_until(p, "pret").find("pret") != std::string::npos);
+  }
+  CHECK(gone_or_dead(shell));
+}
+
+// ET IL EMPORTE AUSSI CELUI QUI A REFUSÉ LE RACCROCHAGE. Un `trap '' HUP`
+// ignore le SIGHUP du noyau comme le nôtre : mesuré, un tel shell survivait
+// à la fermeture de sa fenêtre et tournait pour TOUTE la vie du démon --
+// sans pseudo-terminal, sans fenêtre, sans aucun moyen de le revoir. La
+// session survit à la déconnexion par construction : cette vie-là se compte
+// en semaines.
+TEST(pty_destructor_takes_a_shell_that_refused_the_hangup) {
+  pid_t shell = 0;
+  {
+    Pty p;
+    REQUIRE_EQ(
+        p.spawn(shell_running("trap '' HUP; printf 'pret\\n'; sleep 30")),
+        std::string());
+    shell = p.pid();
+    REQUIRE(read_until(p, "pret").find("pret") != std::string::npos);
+  }
+  CHECK(gone_or_dead(shell));
+}
+
+// MAIS PAS CELUI QUI A QUITTÉ LA SESSION. `setsid` -- ce que font `nohup` et
+// `disown` -- sort l'enfant du groupe, et rien de ce qu'on envoie au groupe
+// ne l'atteint plus. C'est la porte de sortie, et elle est VOULUE : sans
+// elle, il n'y aurait aucun moyen de faire survivre un travail à sa fenêtre.
+TEST(pty_destructor_leaves_a_child_that_left_the_session) {
+  pid_t escaped = 0;
+  {
+    Pty p;
+    REQUIRE_EQ(p.spawn(shell_running(
+                   "setsid sleep 30 & printf '%d\\n' \"$!\"; sleep 30")),
+               std::string());
+    const std::string out = read_until(p, "\n", 2000);
+    escaped = static_cast<pid_t>(std::atoi(out.c_str()));
+    REQUIRE(escaped > 0);
+  }
+  nap_ms(300);
+  const char st = proc_state(escaped);
+  ::kill(escaped, SIGKILL);  // on ne laisse rien tourner derriere un cas
+  CHECK(st != '.');
+}
+
+// LE MAÎTRE EST REFERMÉ. SIGKILL emporte le shell, donc aucun cas de
+// comportement ne verrait la différence -- mais le descripteur, lui, reste
+// ouvert. Une session qui ouvre et ferme des fenêtres pendant des semaines
+// finirait à court de descripteurs, et le démon ne pourrait plus accepter
+// un seul client.
+TEST(pty_destructor_gives_the_master_descriptor_back) {
+  const auto open_fds = []() {
+    int n = 0;
+    DIR* d = ::opendir("/proc/self/fd");
+    if (d == nullptr) return -1;
+    while (::readdir(d) != nullptr) ++n;
+    ::closedir(d);
+    return n;
+  };
+
+  // Un premier tour à part : il paie les allocations et les tampons que la
+  // bibliothèque garde, et que le compte suivant prendrait pour une fuite.
+  {
+    Pty warm;
+    REQUIRE_EQ(warm.spawn(shell_running("sleep 30")), std::string());
+  }
+  const int before = open_fds();
+  REQUIRE(before > 0);
+
+  for (int i = 0; i < 8; ++i) {
+    Pty p;
+    REQUIRE_EQ(p.spawn(shell_running("sleep 30")), std::string());
+  }
+
+  CHECK_EQ(open_fds(), before);
+}
+
+// LE SIGKILL PART AU GROUPE, pas au seul enfant. Un `trap '' HUP` se
+// transmet à ses enfants -- SIG_IGN survit au fork comme à l'exec -- donc
+// une tâche de fond lancée sous ce shell ignore le raccrochage tout autant.
+// Ne tuer que le shell la laisserait tourner, orpheline, sans terminal.
+TEST(pty_destructor_takes_the_whole_group_of_a_shell_that_refused_the_hangup) {
+  pid_t background = 0;
+  {
+    Pty p;
+    REQUIRE_EQ(p.spawn(shell_running("trap '' HUP; sleep 30 & "
+                                     "printf '%d\\n' \"$!\"; sleep 30")),
+               std::string());
+    const std::string out = read_until(p, "\n", 2000);
+    background = static_cast<pid_t>(std::atoi(out.c_str()));
+    REQUIRE(background > 0);
+  }
+  const bool dead = gone_or_dead(background, 2000);
+  if (!dead) ::kill(background, SIGKILL);  // rien ne traîne derrière un echec
+  CHECK(dead);
 }

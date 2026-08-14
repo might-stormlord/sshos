@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include "fake_apps.hpp"
 #include "client/client.hpp"
 #include "common/fd.hpp"
 #include "common/net.hpp"
@@ -3754,4 +3755,184 @@ TEST(session_leaves_the_plain_and_shifted_arrows_alone) {
 
   CHECK_EQ(w->display_rect.w, before.w);  // deplacee, pas ancree
   CHECK(w->display_rect.x != before.x);
+}
+
+// ------------------------------------------------------------- le curseur
+
+// LE CURSEUR DE L'APPLICATION ARRIVE JUSQU'À L'ÉCRAN. Les quatre
+// applications répondent à `wants_cursor()` depuis toujours, `Differ::frame`
+// sait le poser -- et personne, entre les deux, ne le demandait : le démon
+// passait `std::nullopt` à chaque trame. Mesuré à la sonde : six `?25l`
+// envoyés, zéro `?25h`. Aucun champ de saisie du bureau n'avait de caret.
+TEST(session_hands_the_focused_app_cursor_to_the_screen) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 40, 12);
+  Surface s(40, 12);
+  sess.render(s);
+
+  const auto& wins = sess.windows_for_tests();
+  REQUIRE_EQ(wins.size(), size_t{1});
+  const sshos::Rect cr = sshos::client_rect(wins[0]->display_rect);
+  sshos::Pos want{};
+  REQUIRE(wins[0]->app->wants_cursor(want));
+
+  const std::optional<sshos::Pos> got = sess.cursor();
+  REQUIRE(got.has_value());
+  // Coordonnées de l'ÉCRAN : l'application parle de sa vue, et lui laisser
+  // poser le caret chez sa voisine serait pire que pas de caret du tout.
+  CHECK_EQ(got->x, cr.x + want.x);
+  CHECK_EQ(got->y, cr.y + want.y);
+}
+
+// UNE FENÊTRE DE FOND N'A PAS LE CARET. Deux applications qui en veulent un
+// n'en placeraient qu'un seul, et ce serait celle du dessous.
+TEST(session_gives_the_cursor_to_the_focused_window_only) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 40, 12);
+  Surface s(40, 12);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("terminal") != 0);
+  sess.render(s);
+
+  const auto& wins = sess.windows_for_tests();
+  REQUIRE_EQ(wins.size(), size_t{2});
+  const sshos::Window* front = nullptr;
+  for (const auto& w : wins) {
+    if (w->id == sess.focused_for_tests()) front = w.get();
+  }
+  REQUIRE(front != nullptr);
+  const sshos::Rect cr = sshos::client_rect(front->display_rect);
+
+  const std::optional<sshos::Pos> got = sess.cursor();
+  REQUIRE(got.has_value());
+  CHECK(got->x >= cr.x);
+  CHECK(got->x < cr.x + cr.w);
+  CHECK(got->y >= cr.y);
+  CHECK(got->y < cr.y + cr.h);
+}
+
+// LE MENU PREND LE CARET AVEC LE RESTE. Le laisser clignoter dans
+// l'application ferait croire qu'on peut encore y taper, alors que tout va
+// au menu ouvert par-dessus.
+TEST(session_hides_the_cursor_while_the_menu_is_open) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 40, 12);
+  Surface s(40, 12);
+  sess.render(s);
+  REQUIRE(sess.cursor().has_value());
+
+  // Le menu, par l'accord habituel : lui aussi capture tout.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  sess.render(s);
+  CHECK(!sess.cursor().has_value());
+}
+
+// UNE FENÊTRE RÉDUITE N'A PAS DE CARET : elle n'est nulle part à l'écran, et
+// son curseur se poserait sur ce qui a pris sa place.
+TEST(session_shows_no_cursor_when_the_only_window_is_minimized) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 40, 12);
+  Surface s(40, 12);
+  sess.render(s);
+  const auto& wins = sess.windows_for_tests();
+  REQUIRE_EQ(wins.size(), size_t{1});
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'-', 0}});
+  sess.render(s);
+  REQUIRE(wins[0]->mode == sshos::WinMode::Minimized);
+  CHECK(!sess.cursor().has_value());
+}
+
+// LE CARET TRAVERSE LE FIL. Le démon passait `std::nullopt` à chaque
+// trame : les quatre applications répondaient à `wants_cursor()`, `Differ`
+// savait poser le caret, et rien ne les reliait -- mesuré à la sonde, six
+// `?25l` envoyés pour zéro `?25h`. Ce cas monte le chemin en entier, du
+// vrai démon au client, parce que c'est le seul endroit où le trou était.
+TEST(daemon_shows_the_cursor_of_the_focused_application) {
+  const std::string name = unique_name() + "-caret";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Fd client = connect_retry(name);
+  REQUIRE(client.valid());
+  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{make_hello(80, 24)})));
+
+  sshos::Decoder dec;
+  auto welcome = recv_one(client.get(), dec, 3000);
+  REQUIRE(welcome.has_value());
+  REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
+
+  // `\033[?25h` : le curseur RENDU VISIBLE. Une trame sans caret le laisse
+  // caché par le `?25l` de tête et ne le rallume jamais.
+  CHECK(wait_for_frame_containing(client.get(), dec, "\033[?25h", "ssh_os",
+                                  3000));
+}
+
+// UNE FENÊTRE RÉDUITE N'A PAS LE CARET, MÊME QUAND ELLE A LA MAIN. Elle
+// n'est nulle part à l'écran ; le laisser à celle de derrière poserait un
+// caret dans une fenêtre où la frappe suivante n'ira pas.
+TEST(session_shows_no_cursor_when_the_focused_window_is_minimized) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("terminal") != 0);
+  sess.render(s);
+  REQUIRE_EQ(sess.windows_for_tests().size(), size_t{2});
+  REQUIRE(sess.cursor().has_value());
+
+  // La fenêtre qui a la main se réduit : l'autre reste visible derrière.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'-', 0}});
+  sess.render(s);
+
+  CHECK(!sess.cursor().has_value());
+}
+
+namespace {
+
+// Une application qui vise HORS de sa vue. Aucune vraie ne le fait, et
+// c'est justement pourquoi la garde a besoin de celle-ci : un caret posé
+// chez la voisine est un défaut qu'on ne verrait qu'à l'écran, sur une
+// fenêtre qui n'a même pas la main.
+class CursorRunaway : public sshos::App {
+ public:
+  void render(sshos::View) override {}
+  bool wants_cursor(sshos::Pos& out) const override {
+    out = sshos::Pos{9999, 9999};
+    return true;
+  }
+};
+
+std::unique_ptr<sshos::App> make_runaway() {
+  return std::make_unique<CursorRunaway>();
+}
+std::unique_ptr<sshos::App> make_plain_double() {
+  return std::make_unique<sshos::Bloc>();
+}
+
+}  // namespace
+
+// UN CARET HORS DE SA VUE N'EST PAS POSÉ. On le laisse tomber plutôt que de
+// le rabattre sur un bord : une application qui vise à côté ne veut pas de
+// caret sur le bord, et l'y mettre serait un mensonge de plus.
+TEST(session_drops_a_cursor_an_app_puts_outside_its_own_view) {
+  Session::set_seed_factory_for_tests(&make_runaway);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+    CHECK(!sess.cursor().has_value());
+  }
+  // La fabrique est GLOBALE : la rendre est aussi obligatoire que la
+  // restauration d'un fichier muté, sinon tous les cas suivants ouvrent une
+  // application qui ne dessine rien.
+  Session::set_seed_factory_for_tests(&make_plain_double);
 }
