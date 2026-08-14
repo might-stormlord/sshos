@@ -1315,3 +1315,56 @@ TEST(terminal_says_a_signal_killed_the_process_not_a_code) {
   CHECK(screen.find("signal 11") != std::string::npos);
   CHECK(screen.find("code 11") == std::string::npos);
 }
+
+// ------------------------------------------- les taquets de tabulation
+
+// `ESC H` (HTS) POSE UN TAQUET là où est le curseur. `Screen` sait le faire
+// depuis toujours -- avec ses trois méthodes et leurs cas -- mais rien ne
+// les appelait : le dispatcher ne traitait ni `ESC H` ni `CSI g`. Un
+// programme qui posait ses propres taquets récupérait silencieusement ceux
+// par défaut, toutes les huit colonnes.
+TEST(terminal_sets_a_tab_stop_where_the_guest_asks) {
+  Terminal t;
+  t.on_resize(Size{40, 4});
+  // Un taquet en colonne 3, puis retour au début et tabulation.
+  t.feed_for_tests("\033[4G\033H\rX\tY");
+
+  const std::string screen = painted(t, 40, 3);
+  CHECK_EQ(screen.find('Y'), size_t{3});
+}
+
+// `CSI g` (TBC 0) RETIRE le taquet sous le curseur. Sans lui, une
+// application qui veut resserrer ses colonnes ne peut qu'en ajouter.
+TEST(terminal_clears_the_tab_stop_under_the_cursor) {
+  Terminal t;
+  t.on_resize(Size{40, 4});
+  // Le taquet par défaut de la colonne 8 s'en va : la tabulation suivante
+  // saute jusqu'au suivant, en 16.
+  t.feed_for_tests("\033[9G\033[g\rX\tY");
+
+  const std::string screen = painted(t, 40, 3);
+  CHECK_EQ(screen.find('Y'), size_t{16});
+}
+
+// `CSI 3 g` LES RETIRE TOUS. Une tabulation ne trouve alors plus rien
+// devant elle et s'arrête à la dernière colonne, sans repartir à la ligne.
+TEST(terminal_clears_every_tab_stop) {
+  Terminal t;
+  t.on_resize(Size{40, 4});
+  t.feed_for_tests("\033[3g\rX\tY");
+
+  const std::string screen = painted(t, 40, 3);
+  CHECK_EQ(screen.find('Y'), size_t{39});
+}
+
+// Un paramètre que la norme ne définit pas ne doit RIEN faire -- surtout
+// pas tout effacer. `CSI 1 g` n'existe pas ; le prendre pour `CSI 3 g`
+// coûterait tous les taquets à qui se trompe d'un chiffre.
+TEST(terminal_ignores_a_tab_clear_it_does_not_know) {
+  Terminal t;
+  t.on_resize(Size{40, 4});
+  t.feed_for_tests("\033[1g\rX\tY");
+
+  const std::string screen = painted(t, 40, 3);
+  CHECK_EQ(screen.find('Y'), size_t{8});
+}

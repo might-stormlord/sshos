@@ -848,6 +848,17 @@ void Terminal::csi(const Params& params, std::string_view intermediates,
                                   param_or(params, 1, target().screen.rows()) - 1);
       }
       break;
+    case 'g':
+      // TBC. `0` -- le défaut -- retire le taquet sous le curseur, `3` les
+      // retire tous. LE RESTE NE FAIT RIEN : la norme ne définit aucune
+      // autre valeur, et prendre `CSI 1 g` pour `CSI 3 g` coûterait tous
+      // ses taquets à qui se trompe d'un chiffre.
+      if (param_or(params, 0, 0) == 0) {
+        target().screen.clear_tab();
+      } else if (param_or(params, 0, 0) == 3) {
+        target().screen.clear_all_tabs();
+      }
+      break;
     case 'm': {
       Style pen = target().screen.pen();
       apply_sgr(params, pen);
@@ -883,6 +894,10 @@ void Terminal::esc(std::string_view intermediates, uint8_t final_byte) {
       break;
     case 'E':
       target().screen.next_line();
+      break;
+    case 'H':
+      // HTS : un taquet de tabulation là où est le curseur.
+      target().screen.set_tab();
       break;
     default:
       break;
