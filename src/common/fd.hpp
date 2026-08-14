@@ -44,6 +44,18 @@ class Fd {
 };
 
 void set_nonblock(int fd);
+// AUCUN APPELANT EN PRODUCTION, et c'est voulu : chaque descripteur du
+// projet naît déjà CLOEXEC, en un seul appel système -- `O_CLOEXEC`,
+// `SOCK_CLOEXEC`, `SFD_CLOEXEC`, `EPOLL_CLOEXEC`, `TFD_CLOEXEC`, et
+// `accept4()` pour les connexions entrantes. C'est le motif SÛR : le poser
+// après coup laisse une fenêtre pendant laquelle un `fork()` concurrent
+// hériterait du descripteur. Les deux seuls sites sans CLOEXEC le sont
+// exprès -- l'esclave du pseudo-terminal et le `/dev/null` du démon sont
+// justement faits pour être hérités.
+//
+// La fonction reste, testée, pour le jour où un site ne pourra pas faire
+// autrement. Ce commentaire existe pour qu'un balayage des méthodes sans
+// appelant ne la reprenne pas pour un branchement oublié.
 void set_cloexec(int fd);
 
 }  // namespace sshos

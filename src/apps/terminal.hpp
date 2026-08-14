@@ -140,9 +140,11 @@ class Terminal : public App, public ParserSink {
   // Redonne a chaque onglet la taille de sa grille -- la barre en mange une
   // ligne, et l'onglet qu'on ne regarde pas doit la perdre aussi.
   void relayout();
-  // Le nom affiche d'un onglet : le sien s'il a ete renomme, sinon celui
-  // que l'invite a pose, sinon son numero.
-  std::string display_label(size_t i) const;
+  // Le nom d'un onglet : le sien s'il a ete renomme, sinon celui que
+  // l'invite a pose, VIDE si ni l'un ni l'autre. Un SEUL endroit decide de
+  // cette priorite -- la barre et le cadre de la fenetre la lisent tous
+  // deux, et deux copies finiraient par diverger.
+  const std::string& tab_name(size_t i) const;
   // Renomme la FENETRE d'apres l'onglet regarde. Le cadre doit dire ce
   // qu'on regarde, pas ce qu'on regardait.
   void retitle();

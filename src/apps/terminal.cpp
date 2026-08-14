@@ -87,19 +87,20 @@ Terminal::Tab& Terminal::target() {
   return feeding_ != nullptr ? *feeding_ : active();
 }
 
-std::string Terminal::display_label(size_t i) const {
+const std::string& Terminal::tab_name(size_t i) const {
   const Tab& t = *tabs_[i];
   // Le nom CHOISI gagne toujours. Un `bash` repose son titre à chaque
   // invite : sans cette priorité, un onglet renommé reprendrait son nom
-  // d'origine à la première commande.
-  if (!t.custom_title.empty()) return t.custom_title;
-  if (!t.guest_title.empty()) return t.guest_title;
-  return std::to_string(i + 1);
+  // d'origine à la première commande. Vide veut dire « aucun des deux »,
+  // et c'est à l'appelant de décider ce qu'il montre alors -- la barre y
+  // met le numéro seul, le cadre de la fenêtre n'y met rien.
+  return t.custom_title.empty() ? t.guest_title : t.custom_title;
 }
 
 std::string Terminal::tab_label_for_tests(size_t i) const {
   if (i >= tabs_.size()) return {};
-  return display_label(i);
+  const std::string& name = tab_name(i);
+  return name.empty() ? std::to_string(i + 1) : name;
 }
 
 std::vector<Terminal::Slot> Terminal::bar_slots() const {
@@ -128,11 +129,7 @@ std::vector<Terminal::Slot> Terminal::bar_slots() const {
     // fenêtre, deux lignes plus haut, affiche déjà : la barre passait pour
     // une redite au lieu de dire où l'on est.
     const std::string num = std::to_string(i + 1);
-    const Tab& tab = *tabs_[static_cast<size_t>(i)];
-    const std::string raw =
-        editing ? edit_
-                : (tab.custom_title.empty() ? tab.guest_title
-                                            : tab.custom_title);
+    const std::string& raw = editing ? edit_ : tab_name(static_cast<size_t>(i));
     const std::string body =
         raw.empty() ? num
                     : num + ":" +
@@ -238,14 +235,12 @@ void Terminal::close_tab(size_t i) {
 
 void Terminal::retitle() {
   if (host_ == nullptr) return;
-  const Tab& t = active();
   // L'APPLICATION D'ABORD, L'ONGLET ENTRE PARENTHÈSES. Le seul nom de
   // l'onglet ne disait plus de quelle application il s'agissait : une
   // fenêtre nommée « build » ressemblait à n'importe quelle autre, et le
   // titre du shell -- que la barre d'onglets affiche déjà -- occupait tout
   // le cadre.
-  const std::string& name =
-      t.custom_title.empty() ? t.guest_title : t.custom_title;
+  const std::string& name = tab_name(active_);
   // Sans nom, « Terminal » tout court : ni parenthèse vide, ni numéro
   // d'onglet pour ne rien dire de plus que la barre.
   host_->set_title(name.empty() ? "Terminal" : "Terminal (" + name + ")");
