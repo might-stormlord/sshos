@@ -4,7 +4,7 @@
 > conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1006 tests au vert**
+> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1010 tests au vert**
 > en `Release` comme sous ASan/UBSan.
 > **Les six jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'eau par l'utilisateur. Le §3 ci-dessous donne la position exacte.
@@ -128,6 +128,7 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | **Fermer emporte le groupe** | `~Pty` ne fermait que le maître : un shell qui refuse SIGHUP survivait pour toute la vie du démon | `41eb781` |
 | **Assistance à l'ancrage** | Ancrer laisse une moitié vide ; le bureau y propose les autres fenêtres, un clic en amarre une | `b888ec5` |
 | L'aide dit les gestes directs | Section « Sans accord : » — `Ctrl+Q`, `Ctrl+flèches`, les onglets, `F2` | `2121e43` |
+| Hygiène du balayage | Un signal n'est plus annoncé comme un code de sortie ; `hit_window_at` délègue au chemin du clic ; **HTS et TBC** branchés (`tabs -4` marche) | `7f8de71`, `0a32551`, `222cd7c` |
 
 **Ce que l'ancrage coûte, et c'est assumé :** `Ctrl+gauche` et `Ctrl+droite`
 déplacent par mot dans `readline`, donc dans tout shell. Le bureau les prend à
@@ -446,12 +447,23 @@ Ce que les six jalons ont appris, et qui vaut pour la suite :
    nulle part dans le bureau), `Pty::kill_now()` et `snap_opposite()`.
 
    **Le balayage systématique marche et coûte deux minutes** : lister les
-   fonctions déclarées dans `src/**.hpp`, compter leurs appels dans
-   `src/**.cpp` moins leur propre définition. 72 noms sur 393 le 14 août 2026,
-   dont les trois derniers défauts ci-dessus. Deux pièges : les accesseurs
-   `*_for_tests` sont des faux positifs légitimes — d'où le suffixe, à mettre
-   systématiquement — et un `head -N` sur les résultats du `grep` fait passer
-   une méthode appelée pour une orpheline.
+   fonctions déclarées dans `src/**.hpp`, compter leurs appels dans **tout**
+   `src/`. Il a sorti `App::wants_cursor()`, `Pty::kill_now()`,
+   `snap_opposite()`, la famille `set_tab()`/`clear_tab()`/`clear_all_tabs()`
+   — d'où `ESC H` et `CSI g` n'étaient pas traités, et `tabs -4` ne faisait
+   rien — puis `display_label()`, dupliquée sans qu'on s'en aperçoive.
+
+   **Trois pièges du script, tous rencontrés :** ne lire que les `.cpp` rate
+   les appels faits depuis les définitions en ligne des `.hpp` ; une borne
+   `[^\w:]` devant le nom exclut tout appel qualifié `Classe::methode()` et
+   fait passer la moitié du projet pour orpheline ; un `head -N` sur le
+   `grep` de vérification fait passer une méthode appelée pour une orpheline.
+   Les accesseurs `*_for_tests` sont des faux positifs légitimes — d'où le
+   suffixe, à mettre systématiquement.
+
+   Après la passe : **14 candidates sur 263**, toutes vérifiées à la main,
+   toutes légitimes (API de test, ou `set_cloexec()` dont le commentaire dit
+   maintenant pourquoi personne ne l'appelle).
 2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
    tâches du jalon 3 ont débordé de leur périmètre annoncé, toujours pour cette
    raison. Le prévoir en écrivant le plan du jalon 4.
