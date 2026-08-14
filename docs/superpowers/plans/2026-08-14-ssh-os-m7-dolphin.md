@@ -50,4 +50,45 @@ tâche.
 - [x] Tâche 6 — la vue scindée : F3 ouvre et referme, Tab change de panneau, chacun a son chemin, sa sélection, son historique et son tri ; le clic donne la main au panneau visé, en ses propres coordonnées. 13 cas, 12 mutations, 11 mordues, 1 invalide.
 - [x] Tâche 7 — le presse-papiers : Ctrl+C/X/V, copie PAR TRANCHES dans la boucle d'événements, arborescence parcourue paresseusement, rename() quand c'est possible, jamais d'écrasement. 21 cas, 19 mutations, toutes mordues.
 - [x] Tâche 8 — les raccourcis : F9 ouvre et referme un liseré cliquable (Racine, Maison, Temporaire, Etc) ; il décale les panneaux, il ne les recouvre pas. 8 cas, 9 mutations, toutes mordues.
-- [ ] Tâche 9 — la sonde
+- [x] Tâche 9 — la sonde
+
+## La sonde du 14 août 2026
+
+Vrai démon, vrai client sous pty, vrais fichiers dans `/tmp/sonde-dolphin`
+(un binaire de 6 Mo et un fichier de 7 octets).
+
+- [x] `F9` : le liseré s'ouvre, et cliquer **Temporaire** va dans `/tmp`
+- [x] filtrer au clavier puis `Entrée` ouvre le résultat
+- [x] `F3` : deux panneaux côte à côte, chacun son chemin, ses colonnes
+- [x] `Tab` change de panneau ; chacun descend de son côté
+- [x] `Ctrl+clic` marque deux fichiers, la ligne d'état dit « 2 sélectionnés »
+- [x] `Ctrl+C` puis `Tab` puis `Ctrl+V` : la copie s'annonce et se fait
+- [x] les 6 Mo arrivent, taille pour taille, et l'original reste
+- [x] **relancée sur une cible déjà pleine, la copie REFUSE** (`O_EXCL`) et
+      le dit : « 2 sur 2 ont echoue »
+
+**Le chiffre qui compte : 39 ms.** C'est le temps de réponse du bureau
+mesuré **pendant** la copie des 6 Mo — délai jusqu'au premier octet d'un
+repeint complet demandé au clavier. La copie par tranches tient sa
+promesse : le démon mono-thread ne se fige pas.
+
+---
+
+## Bilan du jalon
+
+**9 tâches sur 9, 1104 cas verts** en `Release` comme sous ASan/UBSan.
+**120 mutations** jouées sur les huit tâches de code, toutes mordues sauf
+deux invalides et une équivalence déclarée sur place.
+
+**Deux défauts que seule la sonde a vus**, et aucun test ne les avait :
+
+1. Après un filtre, le curseur restait sur `..` — qui survit toujours au
+   filtre. Chercher un dossier puis appuyer sur `Entrée` **remontait d'un
+   cran** au lieu de l'ouvrir. C'est le geste le plus naturel du monde, et
+   il faisait exactement le contraire de ce qu'on demandait.
+2. `F3` s'encode `\033OR` (SS3), pas `\033[13~` : la première sonde
+   croyait scinder et ne scindait rien.
+
+**Et un que seule la campagne a vu :** la pile de copie traitait les
+fichiers dans l'ordre **inverse** de la sélection, alors que son propre
+commentaire prétendait le contraire.

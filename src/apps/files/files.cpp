@@ -248,6 +248,15 @@ void Files::refilter() {
       }
     }
   }
+
+  // FILTRER DÉPLACE LE CURSEUR SUR LE PREMIER RÉSULTAT. `..` survit
+  // toujours au filtre -- c'est la sortie, pas un résultat de recherche --
+  // et le curseur y restait : chercher un dossier puis valider REMONTAIT
+  // d'un cran au lieu de l'ouvrir. Trouvé à la sonde, pas par un cas.
+  if (!pane().filter.empty() && pane().sel < pane().visible.size() &&
+      pane().visible[pane().sel].name == ".." && pane().visible.size() > 1) {
+    pane().sel = 1;
+  }
   settle();
 }
 

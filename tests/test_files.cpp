@@ -2585,3 +2585,37 @@ TEST(files_reads_the_right_pane_correctly_beside_the_places_strip) {
   CHECK_EQ(f.active_pane_for_tests(), size_t{1});
   CHECK(f.sort_by_for_tests() == sshos::SortBy::Size);
 }
+
+// FILTRER PUIS `ENTRÉE` OUVRE LE RÉSULTAT, pas le répertoire parent. Le
+// curseur restait sur `..` -- qui survit toujours au filtre -- si bien que
+// chercher un dossier puis valider REMONTAIT d'un cran. Défaut trouvé à la
+// sonde, sur un vrai bureau : c'est le geste le plus naturel du monde et
+// il faisait exactement le contraire de ce qu'on demandait.
+TEST(files_puts_the_cursor_on_the_first_match_when_filtering) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("cible");
+  t.dir("autre");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  REQUIRE_EQ(selected_name(f), std::string(".."));
+
+  for (char c : std::string("cible")) f.on_key(ch(static_cast<char32_t>(c)));
+
+  CHECK_EQ(selected_name(f), std::string("cible"));
+  f.on_key(key(Key::Enter));
+  CHECK_EQ(f.path_for_tests(), t.root() + "/cible");
+}
+
+// SANS FILTRE, le curseur reste où il est : c'est le filtre qui déplace,
+// pas la liste. Le remettre en tête à chaque relecture ferait sauter la
+// sélection à chaque copie qui se termine.
+TEST(files_leaves_the_cursor_alone_when_there_is_no_filter) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+
+  CHECK_EQ(selected_name(f), std::string(".."));
+}
