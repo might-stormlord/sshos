@@ -78,7 +78,9 @@ class Terminal : public App, public ParserSink {
   void on_child_exit(int status) override;
   IoStatus on_io(uint64_t token, uint32_t events) override;
   bool wants_cursor(Pos& out) const override;
-  Size min_size() const override { return {20, 5}; }
+  // Une ligne de plus qu'avant : la barre d'onglets la prend, et un
+  // terminal reduit a sa taille minimale doit garder une grille utile.
+  Size min_size() const override { return {20, 6}; }
   CloseCheck can_close() const override;
 
   // --- ParserSink ---
@@ -125,10 +127,36 @@ class Terminal : public App, public ParserSink {
   bool open_tab_into(Tab& t);
   void close_tab(size_t i);
   void select_tab(size_t i);
-  int tab_bar_rows() const;
-  // Redonne a CHAQUE onglet la taille de la grille -- la barre en mange une
-  // ligne, et son apparition rétrécit aussi les onglets qu'on ne voit pas.
+  // Avance de `d` onglets, en BOUCLANT : sans cela, la moitie des onglets
+  // seraient hors d'atteinte d'un seul geste.
+  void cycle_tab(int d);
+  // Redonne a chaque onglet la taille de sa grille -- la barre en mange une
+  // ligne, et l'onglet qu'on ne regarde pas doit la perdre aussi.
   void relayout();
+  // Le nom affiche d'un onglet : le sien s'il a ete renomme, sinon celui
+  // que l'invite a pose, sinon son numero.
+  std::string display_label(size_t i) const;
+  // Renomme la FENETRE d'apres l'onglet regarde. Le cadre doit dire ce
+  // qu'on regarde, pas ce qu'on regardait.
+  void retitle();
+  void begin_rename();
+  void rename_key(const KeyEvent& k);
+
+  // La geometrie de la barre. UN SEUL calcul, partage par le dessin et par
+  // le clic : deux calculs separes finissent toujours par diverger d'une
+  // cellule, et un onglet qu'on ne peut pas cliquer la ou on le voit est
+  // pire qu'une barre absente.
+  enum class SlotKind { Select, Close, New };
+  struct Slot {
+    int x = 0;
+    int w = 0;
+    size_t tab = 0;
+    SlotKind kind = SlotKind::Select;
+    std::string text;
+  };
+  std::vector<Slot> bar_slots() const;
+  void draw_bar(View v) const;
+  void bar_click(int x);
 
   // Applique ce que l'invité a demandé et qui a un effet mécanique sur la
   // grille. Le registre reste la seule source de vérité ; ceci n'en est
@@ -136,6 +164,12 @@ class Terminal : public App, public ParserSink {
   void sync_modes();
 
   std::vector<std::unique_ptr<Tab>> tabs_;
+  // LES ONGLETS FERMES QUI N'ONT PAS ENCORE ETE RECOLTES. Fermer le maitre
+  // tue le shell -- le noyau envoie SIGHUP au groupe -- mais sa depouille
+  // attend un waitpid(), et l'onglet qui la portait n'est plus la pour le
+  // faire. Sans cette antichambre, chaque onglet ferme laisserait un
+  // zombie derriere lui pour toute la vie du demon.
+  std::vector<std::unique_ptr<Tab>> closing_;
   size_t active_ = 0;
   Tab* feeding_ = nullptr;
   Mode mode_ = Mode::Normal;

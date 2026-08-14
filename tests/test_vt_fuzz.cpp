@@ -131,7 +131,9 @@ TEST(fuzz_keeps_the_parser_and_the_grid_sane) {
     const uint64_t seed = 0x5150ULL + static_cast<uint64_t>(round);
     Rng rng(seed);
     Terminal t;
-    t.on_resize(Size{kCols, kRows});
+    // La fenêtre fait une ligne de plus que la grille : la barre
+    // d'onglets du Terminal la prend.
+    t.on_resize(Size{kCols, kRows + 1});
     t.feed_for_tests(generate(rng, kBytesPerRound));
 
     const auto& s = t.screen_for_tests();
@@ -160,11 +162,11 @@ TEST(fuzz_gives_the_same_screen_whatever_the_chunking) {
     const std::string stream = generate(rng, kBytesPerRound);
 
     Terminal whole;
-    whole.on_resize(Size{kCols, kRows});
+    whole.on_resize(Size{kCols, kRows + 1});
     whole.feed_for_tests(stream);
 
     Terminal byte_by_byte;
-    byte_by_byte.on_resize(Size{kCols, kRows});
+    byte_by_byte.on_resize(Size{kCols, kRows + 1});
     for (char c : stream) byte_by_byte.feed_for_tests(std::string_view(&c, 1));
 
     CHECK_EQ(transcript(byte_by_byte), transcript(whole));
@@ -180,11 +182,11 @@ TEST(fuzz_gives_the_same_screen_under_random_chunking) {
     const std::string stream = generate(rng, kBytesPerRound);
 
     Terminal whole;
-    whole.on_resize(Size{kCols, kRows});
+    whole.on_resize(Size{kCols, kRows + 1});
     whole.feed_for_tests(stream);
 
     Terminal chopped;
-    chopped.on_resize(Size{kCols, kRows});
+    chopped.on_resize(Size{kCols, kRows + 1});
     size_t at = 0;
     while (at < stream.size()) {
       const size_t n = std::min<size_t>(stream.size() - at,

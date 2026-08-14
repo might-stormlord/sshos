@@ -7,11 +7,32 @@
 
 #include "input/encode.hpp"
 #include "pty/env.hpp"
+#include "common/utf8.hpp"
 #include "render/surface.hpp"
+#include "render/width.hpp"
 #include "vt/reply.hpp"
 
 namespace sshos {
 namespace {
+
+// LA BARRE D'ONGLETS EST TOUJOURS LÀ, même avec un seul onglet. Elle coûte
+// une ligne de grille, et c'est assumé : elle porte le `+`, qui est la
+// SEULE voie à la souris vers un second onglet. Une barre qui n'
+// apparaîtrait qu'au deuxième onglet demanderait de connaître le raccourci
+// clavier qui donne ce deuxième onglet.
+constexpr int kBarRows = 1;
+
+// Un nom d'onglet plus long que ça n'apporte plus rien : la barre l'élide
+// de toute façon, et le retenir sans borne ferait grossir la session à
+// chaque frappe d'un renommage qu'on n'a pas validé.
+constexpr size_t kMaxName = 64;
+
+// La croix de fermeture. Un « x » ASCII se lit comme une LETTRE au milieu
+// des noms d'onglets -- la sonde a montré « 1:root@dockernx x », où deux
+// des trois « x » de la ligne appartenaient au nom de la machine. Le
+// projet écrit déjà de l'Unicode depuis les applications (l'élision de
+// Fichiers pose un U+2026 sans se demander ce que le client sait lire).
+constexpr char kCross[] = "\u00d7";
 
 // Le premier paramètre d'une séquence, avec son défaut, et jamais moins de
 // 1 : `CSI 0 A` doit monter d'une ligne, pas de zéro.
@@ -66,18 +87,74 @@ Terminal::Tab& Terminal::target() {
   return feeding_ != nullptr ? *feeding_ : active();
 }
 
-int Terminal::tab_bar_rows() const {
-  // UN SEUL onglet n'a pas de barre : elle couterait une ligne de grille
-  // pour ne rien dire. Elle apparait des le second.
-  return tabs_.size() > 1 || mode_ == Mode::Renaming ? 1 : 0;
+std::string Terminal::display_label(size_t i) const {
+  const Tab& t = *tabs_[i];
+  // Le nom CHOISI gagne toujours. Un `bash` repose son titre à chaque
+  // invite : sans cette priorité, un onglet renommé reprendrait son nom
+  // d'origine à la première commande.
+  if (!t.custom_title.empty()) return t.custom_title;
+  if (!t.guest_title.empty()) return t.guest_title;
+  return std::to_string(i + 1);
 }
 
 std::string Terminal::tab_label_for_tests(size_t i) const {
   if (i >= tabs_.size()) return {};
-  const Tab& t = *tabs_[i];
-  if (!t.custom_title.empty()) return t.custom_title;
-  if (!t.guest_title.empty()) return t.guest_title;
-  return std::to_string(i + 1);
+  return display_label(i);
+}
+
+std::vector<Terminal::Slot> Terminal::bar_slots() const {
+  std::vector<Slot> out;
+  const int w = std::max(1, size_.w);
+  const int n = static_cast<int>(tabs_.size());
+  // La dernière colonne porte le `+`, et celle d'avant le sépare du dernier
+  // onglet : ce qui reste se partage entre les onglets.
+  const int avail = std::max(1, w - 2);
+  // UN SEUL ONGLET N'A PAS DE CROIX. La fenêtre a déjà son [×], et une
+  // croix d'onglet qui fermerait la fenêtre entière serait un piège.
+  const bool crosses = n > 1;
+  const int per = std::max(3, avail / n);
+  // « espace nom [croix] espace » : la croix ne coûte que si elle existe.
+  const int name_max = std::max(1, per - (crosses ? 3 : 2));
+
+  int x = 0;
+  for (int i = 0; i < n; ++i) {
+    // PENDANT LE RENOMMAGE, l'onglet montre ce qu'on tape, et sa case
+    // s'élargit avec. La calculer sur l'ancien nom couperait le nouveau au
+    // troisième caractère, et le curseur n'aurait nulle part où aller.
+    const bool editing =
+        mode_ == Mode::Renaming && static_cast<size_t>(i) == active_;
+    // LE NUMÉRO TOUJOURS, le nom ensuite. Sans le numéro, un onglet unique
+    // ne montre que le titre du shell -- que la barre de titre de la
+    // fenêtre, deux lignes plus haut, affiche déjà : la barre passait pour
+    // une redite au lieu de dire où l'on est.
+    const std::string num = std::to_string(i + 1);
+    const Tab& tab = *tabs_[static_cast<size_t>(i)];
+    const std::string raw =
+        editing ? edit_
+                : (tab.custom_title.empty() ? tab.guest_title
+                                            : tab.custom_title);
+    const std::string body =
+        raw.empty() ? num
+                    : num + ":" +
+                          elide_to_cells(raw, std::max(1, name_max -
+                                                              text_cells(num) - 1),
+                                         "\u2026");
+    const std::string text = " " + body + " ";
+    const int cells = text_cells(text) + (crosses ? 1 : 0);
+    // Ce qui ne tient pas n'est PAS dessiné à moitié : un onglet coupé par
+    // le bord se cliquerait là où il n'est plus.
+    if (x + cells > avail) break;
+    out.push_back(Slot{x, text_cells(text), static_cast<size_t>(i),
+                       SlotKind::Select, text});
+    x += text_cells(text);
+    if (crosses) {
+      out.push_back(
+          Slot{x, 1, static_cast<size_t>(i), SlotKind::Close, kCross});
+      x += 1;
+    }
+  }
+  out.push_back(Slot{w - 1, 1, 0, SlotKind::New, "+"});
+  return out;
 }
 
 Terminal::~Terminal() {
@@ -93,21 +170,25 @@ Terminal::~Terminal() {
 void Terminal::attach(Host& host) {
   host_ = &host;
   open_tab_into(active());
-  host.set_title("Terminal");
+  relayout();
+  retitle();
 }
 
 bool Terminal::open_tab() {
   tabs_.push_back(std::make_unique<Tab>(*this));
   Tab& t = *tabs_.back();
   t.screen.set_scrollback(&t.history);
-  t.screen.resize(std::max(1, size_.w), std::max(1, size_.h - 1));
+  t.screen.resize(std::max(1, size_.w), std::max(1, size_.h - kBarRows));
   if (host_ != nullptr && !open_tab_into(t)) {
-    // Le shell n'a pas demarre : on reste sur celui qui marche plutot que
+    // Le shell n'a pas démarré : on reste sur celui qui marche plutôt que
     // de poser un onglet mort au premier plan.
     tabs_.pop_back();
     return false;
   }
+  // Le nouvel onglet passe DEVANT : on ne l'ouvre pas pour continuer à
+  // regarder l'ancien.
   active_ = tabs_.size() - 1;
+  retitle();
   if (host_ != nullptr) host_->invalidate();
   return true;
 }
@@ -115,23 +196,96 @@ bool Terminal::open_tab() {
 void Terminal::select_tab(size_t i) {
   if (i >= tabs_.size()) return;
   active_ = i;
+  retitle();
   if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::cycle_tab(int d) {
+  const int n = static_cast<int>(tabs_.size());
+  const int at = static_cast<int>(active_);
+  select_tab(static_cast<size_t>(((at + d) % n + n) % n));
 }
 
 void Terminal::close_tab(size_t i) {
   if (i >= tabs_.size()) return;
-  Tab& t = *tabs_[i];
-  if (host_ != nullptr && t.watching) host_->unwatch(t.token);
-  tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(i));
-  if (tabs_.empty()) {
-    // LE DERNIER ONGLET FERME LA FENETRE. Une fenetre de terminal sans
-    // terminal dedans n'a rien a montrer.
-    tabs_.push_back(std::make_unique<Tab>(*this));
-    active_ = 0;
+  if (tabs_.size() == 1) {
+    // LE DERNIER ONGLET FERME LA FENÊTRE, et il passe par le [×] habituel :
+    // un `make` en cours doit faire poser la question, ici comme ailleurs.
+    // L'onglet reste debout tant que la réponse n'est pas venue.
     if (host_ != nullptr) host_->request_close();
     return;
   }
+  std::unique_ptr<Tab> dying = std::move(tabs_[i]);
+  tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(i));
   if (active_ >= tabs_.size()) active_ = tabs_.size() - 1;
+
+  if (host_ != nullptr && dying->watching) host_->unwatch(dying->token);
+  dying->watching = false;
+  // SIGHUP au GROUPE puis fermeture du maître : le premier prévient les
+  // petits-enfants, le second fait rendre EIO à ceux qui l'auraient ignoré.
+  dying->pty.hangup();
+  dying->pty.close_master();
+  // Récoltable tout de suite ? Sinon il attend en antichambre le SIGCHLD
+  // qui vient.
+  if (dying->pty.pid() > 0 && !dying->pty.try_reap()) {
+    closing_.push_back(std::move(dying));
+  }
+  retitle();
+  if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::retitle() {
+  if (host_ == nullptr) return;
+  const Tab& t = active();
+  if (!t.custom_title.empty()) {
+    host_->set_title(t.custom_title);
+  } else if (!t.guest_title.empty()) {
+    host_->set_title(t.guest_title);
+  } else {
+    host_->set_title("Terminal");
+  }
+}
+
+void Terminal::begin_rename() {
+  mode_ = Mode::Renaming;
+  // On repart du nom CHOISI, pas du titre de l'invité : le vider est ce qui
+  // rend l'onglet à son titre automatique, et pré-remplir avec ce dernier
+  // obligerait à effacer trente caractères pour y revenir.
+  edit_ = active().custom_title;
+  if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::rename_key(const KeyEvent& k) {
+  switch (k.key) {
+    case Key::Enter:
+      active().custom_title = edit_;
+      mode_ = Mode::Normal;
+      edit_.clear();
+      retitle();
+      break;
+    case Key::Escape:
+      mode_ = Mode::Normal;
+      edit_.clear();
+      break;
+    case Key::Backspace: {
+      // On retire un CARACTÈRE, pas un octet : couper une séquence UTF-8 en
+      // deux laisserait un demi-caractère dans le nom.
+      while (!edit_.empty() &&
+             (static_cast<unsigned char>(edit_.back()) & 0xc0) == 0x80) {
+        edit_.pop_back();
+      }
+      if (!edit_.empty()) edit_.pop_back();
+      break;
+    }
+    case Key::Char:
+      if (edit_.size() < kMaxName) edit_ += encode_utf8(k.ch);
+      break;
+    default:
+      // Tout le reste est AVALÉ : le renommage est un mode, et une flèche
+      // qui partirait à l'invité pendant qu'on tape un nom déplacerait son
+      // curseur à l'aveugle.
+      break;
+  }
   if (host_ != nullptr) host_->invalidate();
 }
 
@@ -148,7 +302,7 @@ bool Terminal::open_tab_into(Tab& t) {
   }
   spec.env = child_env(daemon_env(), EnvDelta{});
   spec.cols = static_cast<unsigned short>(std::max(1, size_.w));
-  spec.rows = static_cast<unsigned short>(std::max(1, size_.h));
+  spec.rows = static_cast<unsigned short>(std::max(1, size_.h - kBarRows));
 
   t.spawn_error = t.pty.spawn(spec);
   if (!t.spawn_error.empty()) return false;
@@ -233,6 +387,14 @@ void Terminal::on_child_exit(int status) {
   // globale au démon, et `waitpid(WNOHANG)` sur un pid encore vivant ne
   // coûte qu'un appel système qui ne fait rien.
   for (const auto& t : tabs_) t->pty.try_reap();
+  // Les onglets fermés attendent ici leur récolte, et partent pour de bon
+  // dès qu'elle a eu lieu.
+  for (auto& t : closing_) t->pty.try_reap();
+  closing_.erase(std::remove_if(closing_.begin(), closing_.end(),
+                                [](const std::unique_ptr<Tab>& t) {
+                                  return t->pty.exited();
+                                }),
+                 closing_.end());
   if (host_ != nullptr) host_->invalidate();
 }
 
@@ -242,7 +404,7 @@ void Terminal::relayout() {
   // dans un onglet de fond qui garderait l'ancienne hauteur peindrait sa
   // dernière ligne sous la fenêtre.
   const int w = std::max(1, size_.w);
-  const int h = std::max(1, size_.h - tab_bar_rows());
+  const int h = std::max(1, size_.h - kBarRows);
   for (const auto& t : tabs_) {
     t->screen.resize(w, h);
     // La taille faisant autorité est celle du PTY : c'est le noyau qui
@@ -258,6 +420,39 @@ void Terminal::on_resize(Size s) {
 }
 
 void Terminal::on_key(const KeyEvent& k) {
+  if (mode_ == Mode::Renaming) {
+    rename_key(k);
+    return;
+  }
+
+  // LES GESTES D'ONGLET D'ABORD, et ils ne descendent JAMAIS à l'invité :
+  // `Alt+t` transpose deux mots dans readline, et le laisser passer en plus
+  // d'ouvrir un onglet ferait les deux. `Alt` plutôt que `Ctrl`, qui
+  // appartient à l'invité tout entier -- et avant la garde de mort ci-
+  // dessous, pour qu'un onglet dont le shell est parti reste utilisable.
+  if ((k.mods & mod::Alt) != 0) {
+    if (k.key == Key::Char && k.ch == U't') {
+      open_tab();
+      return;
+    }
+    if (k.key == Key::Char && k.ch == U'w') {
+      close_tab(active_);
+      return;
+    }
+    if (k.key == Key::Left) {
+      cycle_tab(-1);
+      return;
+    }
+    if (k.key == Key::Right) {
+      cycle_tab(1);
+      return;
+    }
+  }
+  if (k.key == Key::F2) {
+    begin_rename();
+    return;
+  }
+
   Tab& t = active();
   if (t.pty.exited()) {
     // Un terminal mort ne prend plus de frappes : `Entrée` le ferme, tout
@@ -290,7 +485,39 @@ void Terminal::on_key(const KeyEvent& k) {
   to_guest(bytes);
 }
 
+void Terminal::bar_click(int x) {
+  for (const Slot& s : bar_slots()) {
+    if (x < s.x || x >= s.x + s.w) continue;
+    switch (s.kind) {
+      case SlotKind::New:
+        open_tab();
+        return;
+      case SlotKind::Close:
+        close_tab(s.tab);
+        return;
+      case SlotKind::Select:
+        // CLIQUER L'ONGLET DÉJÀ REGARDÉ LE RENOMME. C'est la seule voie au
+        // renommage qui ne demande pas de connaître `F2`, et l'utilisateur
+        // pilote à la souris.
+        if (s.tab == active_) {
+          begin_rename();
+        } else {
+          select_tab(s.tab);
+        }
+        return;
+    }
+  }
+}
+
 void Terminal::on_mouse(const MouseEvent& m) {
+  // LA BARRE EST AU BUREAU, PAS À L'INVITÉ -- et avant la garde de mort
+  // ci-dessous, sans quoi un clic sur `+` dans un onglet dont le shell est
+  // parti fermerait la fenêtre au lieu d'ouvrir un onglet.
+  if (m.y < kBarRows) {
+    if (m.action == MouseAction::Press) bar_click(m.x);
+    return;
+  }
+
   Tab& t = active();
   if (t.pty.exited()) {
     // Un CLIC ferme aussi un terminal mort. Une fonction qui n'a qu'un
@@ -328,17 +555,29 @@ void Terminal::on_mouse(const MouseEvent& m) {
   // Coordonnées LOCALES À LA GRILLE : la barre d'onglets n'existe pas pour
   // l'invité, et lui donner un `y` décalé ferait cliquer `htop` une ligne
   // trop bas.
-  to_guest(encode_mouse_sgr(m, m.x, m.y - tab_bar_rows()));
+  to_guest(encode_mouse_sgr(m, m.x, m.y - kBarRows));
 }
 
 bool Terminal::wants_cursor(Pos& out) const {
+  if (mode_ == Mode::Renaming) {
+    // Pendant un renommage, le curseur est DANS LA BARRE, au bout de ce
+    // qu'on tape : une saisie sans curseur a l'air d'une application figée.
+    for (const Slot& s : bar_slots()) {
+      if (s.kind != SlotKind::Select || s.tab != active_) continue;
+      // LA DERNIÈRE CELLULE DE LA CASE : elle grandit avec ce qu'on tape,
+      // et son blanc de queue est exactement la place du caret.
+      out = Pos{s.x + s.w - 1, 0};
+      return true;
+    }
+    return false;
+  }
   const Tab& t = active();
   if (!t.modes.cursor_visible || t.pty.exited()) return false;
   // Remonté dans l'historique, le curseur n'est pas à l'écran : le montrer
   // ailleurs qu'où il est serait pire que ne pas le montrer.
   if (t.history.offset() != 0) return false;
   const CursorPos c = t.screen.cursor();
-  out = Pos{c.x, c.y + tab_bar_rows()};
+  out = Pos{c.x, c.y + kBarRows};
   return true;
 }
 
@@ -354,9 +593,43 @@ CloseCheck Terminal::can_close() const {
   return CloseCheck::allow();
 }
 
+void Terminal::draw_bar(View v) const {
+  // La barre est REPEINTE EN ENTIER : ce qui reste d'un nom plus long à la
+  // trame d'avant traînerait sinon derrière le nom d'aujourd'hui.
+  Style blank;
+  v.fill(Rect{0, 0, v.w(), kBarRows}, blank);
+
+  for (const Slot& s : bar_slots()) {
+    Style st;
+    switch (s.kind) {
+      case SlotKind::New:
+        st.fg = Color::indexed(2);
+        st.attrs = attr::Bold;
+        break;
+      case SlotKind::Close:
+        st.fg = Color::indexed(1);
+        break;
+      case SlotKind::Select:
+        if (s.tab == active_) {
+          // L'inverse vidéo dit LEQUEL on regarde. Sans elle, la barre dit
+          // combien d'onglets existent, et rien de plus.
+          st.attrs = attr::Reverse;
+          if (mode_ == Mode::Renaming) st.attrs |= attr::Underline;
+          v.fill(Rect{s.x, 0, s.w, kBarRows}, st);
+        } else {
+          st.attrs = attr::Dim;
+        }
+        break;
+    }
+    v.text(s.x, 0, s.text, st);
+  }
+}
+
 void Terminal::render(View v) {
+  draw_bar(v);
+
   const int vw = v.w();
-  const int top = tab_bar_rows();
+  const int top = kBarRows;
   const int vh = v.h() - top;
   const Tab& t = active();
   if (!t.spawn_error.empty()) {
@@ -563,7 +836,13 @@ void Terminal::osc(std::string_view data) {
   if (semi == std::string_view::npos) return;
   const std::string_view id = data.substr(0, semi);
   if (id != "0" && id != "2") return;
-  if (host_ != nullptr) host_->set_title(std::string(data.substr(semi + 1)));
+
+  Tab& t = target();
+  t.guest_title = std::string(data.substr(semi + 1));
+  // SEUL L'ONGLET REGARDÉ NOMME LA FENÊTRE. Un `make` qui pose son titre
+  // dans un onglet de fond n'a pas à renommer ce qu'on a sous les yeux ;
+  // son nom l'attend dans la barre.
+  if (&t == &active()) retitle();
 }
 
 }  // namespace sshos
