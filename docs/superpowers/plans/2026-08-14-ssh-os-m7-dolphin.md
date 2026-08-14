@@ -49,5 +49,5 @@ tâche.
 - [x] Tâche 5 — créer : F7 un dossier, Maj+F7 un fichier vide, le neuf sous le curseur, jamais d'écrasement, ni de nom qui sort du répertoire. 9 cas, 11 mutations, 10 mordues, 1 invalide.
 - [x] Tâche 6 — la vue scindée : F3 ouvre et referme, Tab change de panneau, chacun a son chemin, sa sélection, son historique et son tri ; le clic donne la main au panneau visé, en ses propres coordonnées. 13 cas, 12 mutations, 11 mordues, 1 invalide.
 - [x] Tâche 7 — le presse-papiers : Ctrl+C/X/V, copie PAR TRANCHES dans la boucle d'événements, arborescence parcourue paresseusement, rename() quand c'est possible, jamais d'écrasement. 21 cas, 19 mutations, toutes mordues.
-- [ ] Tâche 8 — les raccourcis
+- [x] Tâche 8 — les raccourcis : F9 ouvre et referme un liseré cliquable (Racine, Maison, Temporaire, Etc) ; il décale les panneaux, il ne les recouvre pas. 8 cas, 9 mutations, toutes mordues.
 - [ ] Tâche 9 — la sonde

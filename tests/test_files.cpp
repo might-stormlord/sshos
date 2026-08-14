@@ -2442,3 +2442,146 @@ TEST(files_reloads_when_the_copy_is_done) {
   CHECK_EQ(f.visible_for_tests().size(), before + 1);
   ::unlink((t.root() + "/ailleurs/a").c_str());
 }
+
+// ------------------------------------------------------- les raccourcis
+
+// UN LISERÉ DE RACCOURCIS, comme le panneau « Emplacements » de Dolphin.
+// Sans lui, revenir chez soi depuis `/usr/share/doc` demande de retaper
+// tout un chemin qu'aucune barre ne propose.
+TEST(files_shows_a_places_strip) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));
+
+  const std::string row = painted_row(f, 80, 12, 2);
+  CHECK(row.find("Racine") != std::string::npos);
+}
+
+// `F9` L'OUVRE ET LE REFERME : sur une fenêtre étroite, huit colonnes de
+// raccourcis se paient sur les noms.
+TEST(files_opens_and_closes_the_places_strip_on_f9) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  REQUIRE(!f.places_for_tests());
+
+  f.on_key(key(Key::F9));
+  CHECK(f.places_for_tests());
+  f.on_key(key(Key::F9));
+  CHECK(!f.places_for_tests());
+}
+
+// CLIQUER UN RACCOURCI Y VA, et le déplacement s'inscrit dans l'historique
+// comme les autres : `Alt+←` doit pouvoir le défaire.
+TEST(files_goes_where_the_place_that_is_clicked_points) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));
+  const std::string row = painted_row(f, 80, 12, 2);
+  const size_t at = row.find("Racine");
+  REQUIRE(at != std::string::npos);
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(at), 2, 0});
+
+  CHECK_EQ(f.path_for_tests(), std::string("/"));
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+  CHECK_EQ(f.path_for_tests(), t.root());
+}
+
+// LE LISERÉ NE MANGE PAS LA LISTE : elle se décale, elle ne disparaît pas.
+TEST(files_keeps_its_list_beside_the_places_strip) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("un-fichier-a-moi");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));
+
+  const std::string screen = painted(f, 80, 12);
+  CHECK(screen.find("un-fichier-a-moi") != std::string::npos);
+  CHECK(screen.find("Racine") != std::string::npos);
+}
+
+// UN CLIC DANS LA LISTE RESTE UN CLIC DANS LA LISTE quand le liseré est
+// là : ses coordonnées ont bougé, et les lire comme avant choisirait la
+// mauvaise ligne.
+TEST(files_still_reads_a_list_click_correctly_beside_the_places) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));
+
+  // La deuxième ligne de liste, deux cellules après le liseré.
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, sshos::kPlacesWidth + 3, 3, 0});
+
+  CHECK_EQ(selected_name(f), std::string("a"));
+}
+
+// LE PANNEAU SE SERRE À CÔTÉ DU LISERÉ. Calculer ses colonnes sur toute la
+// fenêtre les pose au-delà de son bord droit, où la `View` les coupe : la
+// taille et la date disparaissent sans que rien ne le dise.
+TEST(files_narrows_its_pane_beside_the_places_strip) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string p = t.file("a");
+  const int fd = ::open(p.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{50, 12});
+  f.on_key(key(Key::F9));
+
+  const std::string screen = painted(f, 50, 12);
+  CHECK(screen.find("10 o") != std::string::npos);
+}
+
+// LE LISERÉ EST À GAUCHE, ET LA CLOISON N'EST À PERSONNE : un clic dessus
+// ne doit ni suivre un raccourci ni choisir une ligne.
+TEST(files_ignores_a_click_on_the_places_wall) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));
+  const std::string before = selected_name(f);
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, sshos::kPlacesWidth, 3, 0});
+
+  CHECK_EQ(selected_name(f), before);
+  CHECK_EQ(f.path_for_tests(), t.root());
+}
+
+// AVEC LE LISERÉ ET LA SCISSION, le panneau de droite se lit toujours dans
+// SES coordonnées : deux décalages successifs, et une seule erreur suffit
+// à faire trier la mauvaise colonne.
+TEST(files_reads_the_right_pane_correctly_beside_the_places_strip) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{100, 12});
+  f.on_key(key(Key::F9));
+  f.on_key(key(Key::F3));
+
+  const std::string head = painted_row(f, 100, 12, 1);
+  const size_t taille = head.find("Taille", static_cast<size_t>(
+                                                sshos::kPlacesWidth + 40));
+  REQUIRE(taille != std::string::npos);
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(taille), 1, 0});
+
+  CHECK_EQ(f.active_pane_for_tests(), size_t{1});
+  CHECK(f.sort_by_for_tests() == sshos::SortBy::Size);
+}

@@ -1,6 +1,7 @@
 #include "apps/files/files.hpp"
 
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -131,12 +132,47 @@ void Files::on_resize(Size s) {
   settle();
 }
 
+const std::vector<Files::Place>& Files::places() {
+  // Le répertoire personnel vient de `getpwuid()`, PAS de `$HOME` :
+  // l'environnement du démon est un fossile de la première session SSH, et
+  // `$HOME` y est celui de qui l'a lancé -- pas forcément celui qui
+  // regarde.
+  static const std::vector<Place> kPlaces = [] {
+    std::vector<Place> v;
+    v.push_back(Place{"Racine", "/"});
+    const passwd* pw = ::getpwuid(::getuid());
+    if (pw != nullptr && pw->pw_dir != nullptr && pw->pw_dir[0] == '/') {
+      v.push_back(Place{"Maison", pw->pw_dir});
+    }
+    v.push_back(Place{"Temporaire", "/tmp"});
+    v.push_back(Place{"Etc", "/etc"});
+    return v;
+  }();
+  return kPlaces;
+}
+
+void Files::draw_places(View v) const {
+  Style title;
+  title.attrs = attr::Underline;
+  v.text(0, 0, "Raccourcis", title);
+  for (size_t i = 0; i < places().size(); ++i) {
+    Style st;
+    // Celui où l'on est déjà se distingue : sans cela, le liseré ne dit
+    // pas où l'on se trouve dans l'arborescence.
+    if (places()[i].path == pane().listing.path) st.attrs = attr::Bold;
+    st.fg = Color::indexed(4);
+    v.text(0, 2 + static_cast<int>(i),
+           elide_right(places()[i].label, kPlacesWidth), st);
+  }
+}
+
 int Files::pane_width() const {
   // La cloison prend une colonne, et le reste se partage. Le panneau de
   // gauche prend la part impaire : deux panneaux qui se touchent sans
   // colonne perdue valent mieux qu'une symétrie parfaite.
-  if (!split_) return std::max(1, size_.w);
-  return std::max(1, (size_.w - 1) / 2);
+  const int usable = std::max(1, size_.w - (places_ ? kPlacesWidth + 1 : 0));
+  if (!split_) return usable;
+  return std::max(1, (usable - 1) / 2);
 }
 
 int Files::rows_for_list() const {
@@ -775,6 +811,11 @@ void Files::on_key(const KeyEvent& k) {
       mode_ = Mode::Renaming;
       return;
     }
+    case Key::F9:
+      // Sur une fenêtre étroite, douze colonnes de raccourcis se paient sur
+      // les noms : `F9` les retire quand ils gênent.
+      places_ = !places_;
+      return;
     case Key::F3:
       // `F3` SCINDE, et rescinde referme. C'est LA fonction de Dolphin :
       // deux répertoires côte à côte, et le geste de copie qui va de l'un
@@ -859,14 +900,30 @@ void Files::on_mouse(const MouseEvent& m) {
   // cela il faudrait viser à la souris puis appuyer sur `Tab` pour que la
   // frappe suivante y aille.
   MouseEvent e = m;
+  // LE LISERÉ PREND SES CLICS, et décale ceux des panneaux : lire les
+  // coordonnées comme s'il n'était pas là choisirait la mauvaise ligne.
+  if (places_) {
+    if (m.x < kPlacesWidth) {
+      if (m.action == MouseAction::Press) {
+        const int row = m.y - 2;
+        if (row >= 0 && static_cast<size_t>(row) < places().size()) {
+          go_to(places()[static_cast<size_t>(row)].path);
+        }
+      }
+      return;
+    }
+    if (m.x == kPlacesWidth) return;  // la cloison n'appartient à personne
+    e.x = m.x - kPlacesWidth - 1;
+  }
   if (split_) {
     const int left = pane_width();
-    if (m.x > left) {
+    const int x = e.x;
+    if (x > left) {
       active_ = 1;
       // Les coordonnées passent en LOCALES au panneau : tout ce qui suit
       // parle de sa vue, pas de la fenêtre.
-      e.x = m.x - left - 1;
-    } else if (m.x < left) {
+      e.x = x - left - 1;
+    } else if (x < left) {
       active_ = 0;
     } else {
       // La cloison n'appartient à personne.
@@ -954,6 +1011,22 @@ bool Files::wants_cursor(Pos& out) const {
 }
 
 void Files::render(View v) {
+  // LE LISERÉ D'ABORD, et la ou les vues se serrent à sa droite : il
+  // décale, il ne recouvre pas.
+  if (places_) {
+    draw_places(v.sub(Rect{0, 0, kPlacesWidth, v.h()}));
+    Style wall;
+    wall.attrs = attr::Dim;
+    for (int y = 0; y < v.h(); ++y) v.put(kPlacesWidth, y, U'\u2502', wall);
+    const int rest = v.w() - kPlacesWidth - 1;
+    if (rest <= 0) return;
+    render_panes(v.sub(Rect{kPlacesWidth + 1, 0, rest, v.h()}));
+    return;
+  }
+  render_panes(v);
+}
+
+void Files::render_panes(View v) {
   if (!split_) {
     draw_pane(v, panes_[0], true);
     return;

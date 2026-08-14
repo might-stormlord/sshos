@@ -12,6 +12,11 @@
 
 namespace sshos {
 
+// La largeur du liseré des raccourcis. Assez pour « Documents », pas assez
+// pour peser sur la liste : sur une fenêtre de quatre-vingts colonnes il
+// prend un huitième de la place, et `F9` le retire quand il gêne.
+inline constexpr int kPlacesWidth = 12;
+
 // LE GESTIONNAIRE DE FICHIERS. Panneau unique, barre de chemin, liste
 // triée dossiers d'abord. Pas de vue en arbre : la spec la refuse, et un
 // panneau qui tient dans une fenêtre de vingt lignes vaut mieux qu'un
@@ -81,6 +86,7 @@ class Files : public App {
   const std::string& filter_for_tests() const { return pane().filter; }
   Mode mode_for_tests() const { return mode_; }
   bool split_for_tests() const { return split_; }
+  bool places_for_tests() const { return places_; }
   size_t active_pane_for_tests() const { return active_; }
   const Pane& pane_for_tests(size_t i) const { return panes_[i]; }
   bool copy_active_for_tests() const { return job_.active(); }
@@ -113,7 +119,16 @@ class Files : public App {
   int pane_width() const;
   // Dessine UN panneau dans sa vue.  dit lequel a la main : sans
   // cette marque, une fenetre scindee ne dit pas ou la frappe ira.
-  void draw_pane(View v, const Pane& pane, bool focused);
+  void draw_pane(View v, const Pane& pn, bool focused);
+  void render_panes(View v);
+  // Le liseré des raccourcis, et où chacun mène. UN SEUL calcul, partagé
+  // par le dessin et par le clic, comme partout ailleurs dans ce projet.
+  struct Place {
+    std::string label;
+    std::string path;
+  };
+  static const std::vector<Place>& places();
+  void draw_places(View v) const;
   int rows_for_list() const;
   // La géométrie des colonnes, UN SEUL calcul partagé par le dessin et par
   // le clic sur l'en-tête. Une largeur nulle veut dire « cette colonne a
@@ -186,6 +201,7 @@ class Files : public App {
   Pane panes_[2];
   size_t active_ = 0;
   bool split_ = false;
+  bool places_ = false;
   bool show_hidden_ = false;
   // D'OÙ L'ON VIENT, et ce qu'on vient de défaire. Une nouvelle descente
   // efface la seconde : garder une branche qu'on vient d'abandonner ferait
