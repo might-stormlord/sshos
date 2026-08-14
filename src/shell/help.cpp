@@ -9,18 +9,35 @@
 namespace sshos {
 namespace {
 
-// Cadre du haut, en-tête, ligne vide, ... , cadre du bas.
+// Cadre du haut, en-tête, ligne vide, ... , ligne vide, titre de section,
+// ... , cadre du bas.
 constexpr int kChrome = 4;
+// Ce que la section des gestes directs ajoute en hauteur : son titre, et
+// rien de plus. Une ligne vide de séparation a été écrite puis retirée :
+// à 80x24 -- la taille de terminal la plus répandue -- elle faisait
+// déborder l'aide d'une ligne, et la ligne perdue était la dernière de
+// cette même section.
+constexpr int kDirectChrome = 1;
 // Bordure, marge, colonne des touches, séparation, colonne de la marque
 // « s'enchaîne », séparation, colonne des effets, marge, bordure.
 constexpr int kGutters = 7;
 
 // Mesurées une fois : la table est constante, et l'aide se redessine à
 // chaque trame tant qu'elle est ouverte.
+// Les DEUX tables partagent leurs colonnes : deux gouttières différentes
+// dans un même cadre se liraient comme deux tableaux collés par accident.
+//
+// La mutation qui retire la seconde boucle est ÉQUIVALENTE aujourd'hui, et
+// par pure coïncidence : « Tab, Maj+Tab / n, p » et « Alt+t / w / flèches »
+// font exactement la même largeur. Elle cessera de l'être au premier
+// changement de l'une ou l'autre chaîne, et c'est
+// `help_writes_every_row_of_both_tables_in_full` qui l'attrapera alors --
+// il vérifie qu'aucune ligne n'est tronquée quand la place ne manque pas.
 int keys_width() {
   static const int w = [] {
     int m = 0;
     for (const auto& r : binding_help()) m = std::max(m, text_cells(r.keys));
+    for (const auto& r : direct_help()) m = std::max(m, text_cells(r.keys));
     return m;
   }();
   return w;
@@ -30,6 +47,7 @@ int what_width() {
   static const int w = [] {
     int m = 0;
     for (const auto& r : binding_help()) m = std::max(m, text_cells(r.what));
+    for (const auto& r : direct_help()) m = std::max(m, text_cells(r.what));
     return m;
   }();
   return w;
@@ -44,7 +62,9 @@ std::string maybe_fold(const char* s, bool utf8) {
 Rect Help::rect(int cols, int rows) const {
   const int want_w = keys_width() + what_width() + kGutters;
   const int w = std::min(want_w, cols);
-  const int want_h = static_cast<int>(binding_help().size()) + kChrome;
+  const int want_h = static_cast<int>(binding_help().size()) +
+                     static_cast<int>(direct_help().size()) + kChrome +
+                     kDirectChrome;
   const int h = std::min(want_h, rows);
   return Rect{(cols - w) / 2, (rows - h) / 2, w, h};
 }
@@ -70,12 +90,10 @@ void Help::draw(View v, const Theme& th, Border b,
   const int x = rect_.x + 2;
   const int head_room = std::max(0, rect_.x + rect_.w - 1 - x);
   v.text(x, rect_.y + 1,
-         // L'ANCRAGE se dit ICI et non dans le tableau : celui-ci
-         // documente ce que l'accord permet, et `Ctrl+fleche` s'en passe.
-         // L'y mettre ferait mentir l'en-tete « puis : » -- et deux gardes
-         // de la suite le refusent, a juste titre.
-         elide_to_cells(leader_label + " puis :   (Ctrl+fleches : ancrer)",
-                        head_room, utf8 ? "…" : "~"),
+         // L'en-tete ne parle QUE de l'accord : ce qui s'en passe a
+         // desormais sa propre section plus bas. Il a porte un temps une
+         // parenthese sur l'ancrage, faute d'un endroit ou la mettre.
+         elide_to_cells(leader_label + " puis :", head_room, utf8 ? "…" : "~"),
          head);
 
   // Ce qui ne tient pas est coupé plutôt que débordé : sur un terminal trop
@@ -109,10 +127,10 @@ void Help::draw(View v, const Theme& th, Border b,
            st);
   }
 
-  for (int i = 0; i < n; ++i) {
+  int y = rect_.y + 3;
+  const int bottom = rect_.y + rect_.h - 1;  // ligne de la bordure basse
+  for (int i = 0; i < n && y < bottom; ++i, ++y) {
     const HelpRow& r = binding_help()[static_cast<size_t>(i)];
-    const int y = rect_.y + 3 + i;
-    if (y >= rect_.y + rect_.h - 1) break;
     v.text(x, y, elide_to_cells(maybe_fold(r.keys, utf8), kw, mark), keys);
     // Une ligne s'enchaîne si ce qu'elle documente s'enchaîne. La marque est
     // DÉRIVÉE, jamais recopiée : elle ne peut pas mentir sur la table.
@@ -121,6 +139,24 @@ void Help::draw(View v, const Theme& th, Border b,
     }
     v.text(what_x, y, elide_to_cells(maybe_fold(r.what, utf8), what_room, mark),
            st);
+  }
+
+  // LA SECONDE TABLE : les gestes qui ne demandent AUCUN accord. Séparée
+  // par une ligne vide et annoncée par son titre -- mêlées aux premières,
+  // on ne saurait plus lesquelles réclament le leader. Elle vient après
+  // parce qu'elle est plus rare, et parce qu'un terminal trop court doit
+  // rogner ce qui sert le moins.
+  if (y >= bottom) return;
+  v.text(x, y, maybe_fold("Sans accord :", utf8), head);
+  ++y;
+  for (const DirectRow& r : direct_help()) {
+    if (y >= bottom) break;
+    v.text(x, y, elide_to_cells(maybe_fold(r.keys.c_str(), utf8), kw, mark),
+           keys);
+    v.text(what_x, y,
+           elide_to_cells(maybe_fold(r.what.c_str(), utf8), what_room, mark),
+           st);
+    ++y;
   }
 }
 

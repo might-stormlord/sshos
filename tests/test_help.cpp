@@ -38,8 +38,10 @@ TEST(help_draws_nothing_while_closed) {
 TEST(help_is_centred_and_sized_to_its_table) {
   Help h = opened();
   const Rect r = h.rect(80, 24);
-  // Une ligne par accord, plus le cadre, l'en-tête et sa ligne vide.
-  CHECK_EQ(r.h, static_cast<int>(sshos::binding_help().size()) + 4);
+  // Une ligne par accord, une par geste direct, plus le cadre, l'en-tête et
+  // sa ligne vide, plus la ligne vide et le titre de la seconde section.
+  CHECK_EQ(r.h, static_cast<int>(sshos::binding_help().size()) +
+                    static_cast<int>(sshos::direct_help().size()) + 5);
   CHECK_EQ(r.x, (80 - r.w) / 2);
   CHECK_EQ(r.y, (24 - r.h) / 2);
   CHECK(r.w < 80);  // elle ne s'étire pas à tout l'écran
@@ -184,4 +186,108 @@ TEST(help_marks_exactly_the_gestures_that_chain) {
   CHECK(s.text_row(r.y + 1).find("∙") != std::string::npos);
   CHECK_EQ(marked, expected);
   CHECK(expected >= 3);
+}
+
+// LES GESTES SANS ACCORD ONT LEUR SECTION. Ils ne passent pas par la touche
+// leader, donc ce ne sont pas des `Action` : les deux gardes de couverture
+// de test_shortcuts.cpp ne les voient pas, et sans table à eux ils
+// n'existaient nulle part -- j'ai livré les onglets du terminal avec quatre
+// raccourcis que rien ne citait.
+TEST(help_lists_the_gestures_that_need_no_chord) {
+  Help h;
+  h.open();
+  h.layout(100, 40);
+  Surface s(100, 40);
+  View v = s.root();
+  h.draw(v, Theme::mono16(), Border::Ascii, "Ctrl+A", true);
+
+  std::string screen;
+  for (int y = 0; y < 40; ++y) screen += s.text_row(y) + "\n";
+  CHECK(screen.find("Ctrl+fleches") != std::string::npos ||
+        screen.find("Ctrl+flèches") != std::string::npos);
+  CHECK(screen.find("Alt+t") != std::string::npos);
+  CHECK(screen.find("F2") != std::string::npos);
+}
+
+// La section directe est SOUS la table des accords, et séparée d'elle :
+// mélangées, on ne saurait plus lesquelles demandent le leader.
+TEST(help_keeps_the_direct_gestures_below_the_chords) {
+  Help h;
+  h.open();
+  h.layout(100, 40);
+  Surface s(100, 40);
+  View v = s.root();
+  h.draw(v, Theme::mono16(), Border::Ascii, "Ctrl+A", true);
+
+  int last_chord = -1;
+  int first_direct = -1;
+  for (int y = 0; y < 40; ++y) {
+    const std::string row = s.text_row(y);
+    if (row.find("Cette aide") != std::string::npos) last_chord = y;
+    if (first_direct < 0 && row.find("Sans accord") != std::string::npos) {
+      first_direct = y;
+    }
+  }
+  REQUIRE(last_chord >= 0);
+  REQUIRE(first_direct >= 0);
+  CHECK(first_direct > last_chord);
+}
+
+// Toute ligne directe est nommée ET expliquée : une touche sans effet écrit
+// à côté ne documente rien.
+TEST(help_explains_every_direct_gesture_it_names) {
+  for (const auto& r : sshos::direct_help()) {
+    CHECK(std::string(r.keys).size() > 0);
+    CHECK(std::string(r.what).size() > 0);
+  }
+  CHECK(sshos::direct_help().size() >= size_t{4});
+}
+
+// L'AIDE ENTIÈRE TIENT DANS UN 80x24, la taille de terminal la plus
+// répandue. C'est la contrainte qui a décidé de sa mise en page : une ligne
+// vide de séparation en plus, ou une ligne de raccourci de plus, et la
+// dernière ligne -- celle des gestes qu'on ne peut découvrir autrement --
+// tombait hors du cadre.
+TEST(help_fits_whole_on_the_most_common_terminal) {
+  Help h;
+  h.open();
+  const Rect r = h.rect(80, 24);
+  CHECK(r.h <= 24);
+  CHECK_EQ(r.h, static_cast<int>(sshos::binding_help().size()) +
+                    static_cast<int>(sshos::direct_help().size()) + 5);
+
+  h.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  h.draw(v, Theme::mono16(), Border::Ascii, "Ctrl+A", true);
+  std::string screen;
+  for (int y = 0; y < 24; ++y) screen += s.text_row(y) + "\n";
+  // La DERNIÈRE ligne de la seconde table, celle qui tombe la première.
+  CHECK(screen.find("F2") != std::string::npos);
+  CHECK(screen.find("renommer") != std::string::npos);
+}
+
+// AUCUNE LIGNE N'EST TRONQUÉE quand la place ne manque pas -- ni son nom de
+// touche, ni son effet, dans l'une comme dans l'autre table. La colonne des
+// touches se mesure sur les DEUX : aujourd'hui la plus longue de chaque
+// table fait la même largeur, ce qui masquerait une mesure qui n'en
+// regarderait qu'une seule. Ce cas ne dépend pas de cette coïncidence.
+TEST(help_writes_every_row_of_both_tables_in_full) {
+  Help h;
+  h.open();
+  h.layout(120, 44);
+  Surface s(120, 44);
+  View v = s.root();
+  h.draw(v, Theme::mono16(), Border::Ascii, "Ctrl+A", true);
+
+  std::string screen;
+  for (int y = 0; y < 44; ++y) screen += s.text_row(y) + "\n";
+  for (const auto& r : sshos::binding_help()) {
+    CHECK(screen.find(r.keys) != std::string::npos);
+    CHECK(screen.find(r.what) != std::string::npos);
+  }
+  for (const auto& r : sshos::direct_help()) {
+    CHECK(screen.find(r.keys) != std::string::npos);
+    CHECK(screen.find(r.what) != std::string::npos);
+  }
 }

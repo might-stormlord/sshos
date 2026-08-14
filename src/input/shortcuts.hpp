@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "input/events.hpp"
@@ -58,6 +59,17 @@ struct HelpRow {
 };
 
 const std::vector<HelpRow>& binding_help();
+
+// LES GESTES SANS ACCORD. Ils ne passent pas par la touche leader, donc ce
+// ne sont pas des `Action` -- ni `bound_actions()` ni les deux gardes de
+// couverture ne les voient. Sans table a eux, ils n'existaient nulle part :
+// les onglets du terminal ont ete livres avec quatre raccourcis que rien
+// ne citait, et l'ancrage avec une parenthese coincee dans l'en-tete.
+struct DirectRow {
+  std::string keys;
+  std::string what;
+};
+const std::vector<DirectRow>& direct_help();
 
 // Toutes les actions que la table associe à une touche. Le pendant du
 // précédent : le test croise les deux listes.

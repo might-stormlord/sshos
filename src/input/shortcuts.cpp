@@ -172,6 +172,22 @@ const std::vector<HelpRow>& binding_help() {
   return rows;
 }
 
+// L'ordre va du plus general au plus particulier : ce qui vaut partout
+// d'abord, ce qui n'a de sens que dans une fenetre de terminal ensuite.
+const std::vector<DirectRow>& direct_help() {
+  static const std::vector<DirectRow> rows = {
+      {"Ctrl+Q", "Détacher (la session survit)"},
+      {"Ctrl+flèches", "Ancrer sur une moitié d'écran"},
+      // Les quatre gestes d'onglet tiennent sur UNE ligne, et c'est une
+      // contrainte de place assumée : à 80x24, l'aide entière fait
+      // exactement la hauteur de l'écran, et une ligne de plus couperait
+      // celle du bas -- c'est-à-dire celle qu'on vient d'ajouter.
+      {"Alt+t / w / flèches", "Terminal : onglet neuf, fermé, suivant, préc."},
+      {"F2", "Terminal : renommer l'onglet"},
+  };
+  return rows;
+}
+
 std::vector<Action> bound_actions() {
   std::vector<Action> out;
   for (const auto& b : kBindings) out.push_back(b.action);
