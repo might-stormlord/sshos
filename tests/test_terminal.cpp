@@ -1224,3 +1224,54 @@ TEST(terminal_types_into_the_tab_on_screen_after_a_real_read) {
   }
   CHECK(seen);
 }
+
+// CLIQUER AILLEURS VALIDE LE RENOMMAGE. Sans cela, le mode restait ouvert
+// et le texte en cours -- qui se dessine sur l'onglet ACTIF -- suivait la
+// sélection : le nom atterrissait sur l'onglet d'à côté, et celui qu'on
+// venait de renommer revenait à son titre d'invité.
+TEST(terminal_commits_a_rename_when_the_user_clicks_another_tab) {
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.on_key(KeyEvent{Key::Char, U't', mod::Alt});
+  REQUIRE_EQ(t.active_tab_for_tests(), size_t{1});
+
+  // Recliquer l'onglet regardé ouvre son renommage.
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 5, 0, 0});
+  REQUIRE(t.mode_for_tests() == Terminal::Mode::Renaming);
+  type(t, "ESSAI");
+
+  // Puis on part sur l'autre onglet, SANS valider.
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 1, 0, 0});
+
+  CHECK(t.mode_for_tests() == Terminal::Mode::Normal);
+  CHECK_EQ(t.active_tab_for_tests(), size_t{0});
+  CHECK_EQ(t.tab_label_for_tests(1), std::string("ESSAI"));
+  CHECK_EQ(t.tab_label_for_tests(0), std::string("1"));
+
+  // Et le nom TIENT quand on revient dessus puis qu'on clique ailleurs.
+  // Une validation qui s'appliquerait HORS du mode reposerait une saisie
+  // vide sur l'onglet regardé, et l'effacerait à chaque clic.
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 6, 0, 0});
+  REQUIRE_EQ(t.active_tab_for_tests(), size_t{1});
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 6, 2, 0});
+  CHECK_EQ(t.tab_label_for_tests(1), std::string("ESSAI"));
+}
+
+// Un clic DANS LA GRILLE vaut aussi validation : on est passé à autre
+// chose, et le nom qu'on venait de taper ne doit pas rester en suspens.
+TEST(terminal_commits_a_rename_when_the_user_clicks_into_the_grid) {
+  FakeHost host;
+  Terminal t;
+  t.on_resize(Size{30, 5});
+  t.attach(host);
+  t.on_key(KeyEvent{Key::F2, 0, 0});
+  type(t, "build");
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 3, 0});
+
+  CHECK(t.mode_for_tests() == Terminal::Mode::Normal);
+  CHECK_EQ(t.tab_label_for_tests(0), std::string("build"));
+  // ET LE CADRE SUIT : c'est lui qui disait encore le titre du shell
+  // pendant toute la saisie.
+  CHECK_EQ(host.title, std::string("build"));
+}

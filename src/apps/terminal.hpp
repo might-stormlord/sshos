@@ -147,6 +147,10 @@ class Terminal : public App, public ParserSink {
   // qu'on regarde, pas ce qu'on regardait.
   void retitle();
   void begin_rename();
+  // Pose le nom saisi sur l'onglet renomme et sort du mode. Appelee par
+  // Entree, et par TOUT clic : une saisie en place que rien ne termine
+  // suit la selection au lieu de se poser.
+  void commit_rename();
   void rename_key(const KeyEvent& k);
 
   // La geometrie de la barre. UN SEUL calcul, partage par le dessin et par

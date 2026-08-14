@@ -258,13 +258,23 @@ void Terminal::begin_rename() {
   if (host_ != nullptr) host_->invalidate();
 }
 
+void Terminal::commit_rename() {
+  if (mode_ != Mode::Renaming) return;
+  // L'ONGLET RENOMMÉ EST TOUJOURS L'ACTIF, et l'invariant tient parce que
+  // rien ne peut changer d'onglet pendant une saisie sans passer d'abord
+  // par ici : le clavier va tout entier au renommage, et `on_mouse` valide
+  // avant de traiter le clic.
+  active().custom_title = edit_;
+  mode_ = Mode::Normal;
+  edit_.clear();
+  retitle();
+  if (host_ != nullptr) host_->invalidate();
+}
+
 void Terminal::rename_key(const KeyEvent& k) {
   switch (k.key) {
     case Key::Enter:
-      active().custom_title = edit_;
-      mode_ = Mode::Normal;
-      edit_.clear();
-      retitle();
+      commit_rename();
       break;
     case Key::Escape:
       mode_ = Mode::Normal;
@@ -542,6 +552,14 @@ void Terminal::bar_click(int x) {
 }
 
 void Terminal::on_mouse(const MouseEvent& m) {
+  // UN CLIC, OÙ QU'IL SOIT, VALIDE LE RENOMMAGE EN COURS. Sans cette
+  // règle, le mode restait ouvert indéfiniment : le texte en cours se
+  // dessine sur l'onglet ACTIF, il suivait donc la sélection, et l'onglet
+  // qu'on venait de nommer revenait à son titre d'invité. C'est ce que
+  // font toutes les saisies en place -- on est passé à autre chose, le nom
+  // tapé ne reste pas en suspens.
+  if (m.action == MouseAction::Press) commit_rename();
+
   // LA BARRE EST AU BUREAU, PAS À L'INVITÉ -- et avant la garde de mort
   // ci-dessous, sans quoi un clic sur `+` dans un onglet dont le shell est
   // parti fermerait la fenêtre au lieu d'ouvrir un onglet.
