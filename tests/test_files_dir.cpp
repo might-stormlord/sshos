@@ -16,6 +16,7 @@ using sshos::filter_entries;
 using sshos::join_path;
 using sshos::parent_path;
 using sshos::read_dir;
+using sshos::SortBy;
 using sshos::sort_entries;
 
 namespace {
@@ -312,4 +313,170 @@ TEST(dir_returns_an_already_sorted_listing) {
   const DirListing l = read_dir(t.path(), false);
   CHECK_EQ(joined(l.entries),
            std::string("..|bravo|delta|sierra|alpha|echo|kilo|mike|zeta"));
+}
+
+// ------------------------------------------------- le tri parametrable
+
+// LA DATE EST LUE COMME LA TAILLE, dans la même passe : y revenir plus tard
+// coûterait un `stat()` par entrée au moment d'afficher, c'est-à-dire dans
+// le rendu -- l'endroit précis où ce projet s'interdit de toucher au disque.
+TEST(dir_reads_the_modification_time_of_every_entry) {
+  TempDir d;
+  d.file("vieux");
+  d.file("neuf");
+  // Deux dates franchement distinctes : une seconde de granularité suffit,
+  // et la comparaison n'a pas à départager deux écritures de la même
+  // milliseconde.
+  const std::string p = d.path() + "/vieux";
+  const timespec times[2] = {{1000000000, 0}, {1000000000, 0}};
+  REQUIRE_EQ(::utimensat(AT_FDCWD, p.c_str(), times, 0), 0);
+
+  const DirListing l = sshos::read_dir(d.path(), false);
+  uint64_t vieux = 0;
+  uint64_t neuf = 0;
+  for (const auto& e : l.entries) {
+    if (e.name == "vieux") vieux = e.mtime;
+    if (e.name == "neuf") neuf = e.mtime;
+  }
+  CHECK_EQ(vieux, uint64_t{1000000000});
+  CHECK(neuf > vieux);
+}
+
+// LES DOSSIERS RESTENT DEVANT, quel que soit le critère : c'est la
+// convention de tous les gestionnaires, et un tri par taille qui mêlerait
+// les deux rendrait une arborescence profonde illisible.
+TEST(dir_keeps_directories_first_under_every_sort) {
+  std::vector<DirEntry> v = {
+      {"zzz", EntryKind::Dir, 0, 0},
+      {"aaa", EntryKind::File, 900, 50},
+      {"..", EntryKind::Dir, 0, 0},
+  };
+  for (const auto order : {SortBy::Name, SortBy::Size, SortBy::Time}) {
+    for (const bool desc : {false, true}) {
+      sshos::sort_entries(v, order, desc);
+      REQUIRE_EQ(v[0].name, std::string(".."));
+      CHECK_EQ(v[1].name, std::string("zzz"));
+    }
+  }
+}
+
+TEST(dir_sorts_files_by_size_then_by_name) {
+  std::vector<DirEntry> v = {
+      {"moyen", EntryKind::File, 200, 0},
+      {"gros", EntryKind::File, 300, 0},
+      {"petit", EntryKind::File, 100, 0},
+  };
+  sshos::sort_entries(v, SortBy::Size, false);
+  CHECK_EQ(v[0].name, std::string("petit"));
+  CHECK_EQ(v[2].name, std::string("gros"));
+
+  sshos::sort_entries(v, SortBy::Size, true);
+  CHECK_EQ(v[0].name, std::string("gros"));
+  CHECK_EQ(v[2].name, std::string("petit"));
+}
+
+TEST(dir_sorts_files_by_time) {
+  std::vector<DirEntry> v = {
+      {"b", EntryKind::File, 0, 200},
+      {"c", EntryKind::File, 0, 300},
+      {"a", EntryKind::File, 0, 100},
+  };
+  sshos::sort_entries(v, SortBy::Time, false);
+  CHECK_EQ(v[0].name, std::string("a"));
+  CHECK_EQ(v[2].name, std::string("c"));
+
+  sshos::sort_entries(v, SortBy::Time, true);
+  CHECK_EQ(v[0].name, std::string("c"));
+}
+
+// L'ORDRE RESTE TOTAL sous tous les critères. Deux fichiers de même taille
+// -- ou de même date, ce qui est courant après une copie -- doivent garder
+// un ordre déterminé, sinon la liste saute d'un rafraîchissement à l'autre
+// sans que rien n'ait changé sur le disque.
+TEST(dir_stays_a_total_order_when_the_key_ties) {
+  std::vector<DirEntry> a = {
+      {"deux", EntryKind::File, 42, 7},
+      {"un", EntryKind::File, 42, 7},
+      {"trois", EntryKind::File, 42, 7},
+  };
+  std::vector<DirEntry> b = {
+      {"trois", EntryKind::File, 42, 7},
+      {"deux", EntryKind::File, 42, 7},
+      {"un", EntryKind::File, 42, 7},
+  };
+  for (const auto order : {SortBy::Name, SortBy::Size, SortBy::Time}) {
+    sshos::sort_entries(a, order, false);
+    sshos::sort_entries(b, order, false);
+    CHECK(a == b);
+  }
+}
+
+// L'INVERSION NE REMONTE PAS `..`. Il est la sortie, pas un résultat de
+// tri : le renvoyer en bas le rendrait introuvable sur un long répertoire.
+TEST(dir_never_sends_the_parent_to_the_bottom) {
+  std::vector<DirEntry> v = {
+      {"a", EntryKind::Dir, 0, 0},
+      {"..", EntryKind::Dir, 0, 0},
+  };
+  sshos::sort_entries(v, SortBy::Name, true);
+  CHECK_EQ(v[0].name, std::string(".."));
+}
+
+// LE TRI PAR NOM S'INVERSE AUSSI. C'est le tri par défaut, donc le plus
+// souvent bousculé, et le seul dont l'inversion passe par le comparateur de
+// casse plutôt que par une clé numérique.
+TEST(dir_reverses_a_name_sort_too) {
+  std::vector<DirEntry> v = {
+      {"beta", EntryKind::File, 0, 0},
+      {"alpha", EntryKind::File, 0, 0},
+      {"gamma", EntryKind::File, 0, 0},
+  };
+  sshos::sort_entries(v, SortBy::Name, false);
+  CHECK_EQ(v[0].name, std::string("alpha"));
+
+  sshos::sort_entries(v, SortBy::Name, true);
+  CHECK_EQ(v[0].name, std::string("gamma"));
+  CHECK_EQ(v[2].name, std::string("alpha"));
+}
+
+// LE DÉPARTAGE NE S'INVERSE PAS AVEC LA CLÉ. Trier par taille décroissante
+// range les gros d'abord, mais deux fichiers de même taille restent dans
+// l'ordre alphabétique : inverser le départage ferait sauter des paires
+// entières d'un simple clic sur l'en-tête, sans qu'aucune taille ait bougé.
+TEST(dir_keeps_its_tie_break_in_the_same_direction_when_reversed) {
+  std::vector<DirEntry> v = {
+      {"b", EntryKind::File, 42, 7},
+      {"a", EntryKind::File, 42, 7},
+      {"c", EntryKind::File, 42, 7},
+  };
+  for (const auto order : {SortBy::Size, SortBy::Time}) {
+    sshos::sort_entries(v, order, true);
+    CHECK_EQ(v[0].name, std::string("a"));
+    CHECK_EQ(v[2].name, std::string("c"));
+  }
+}
+
+// LA TAILLE D'UN FICHIER EST LUE, et c'est ce que la colonne affichera. Un
+// répertoire n'en a pas d'utile -- celle de son inode ne dit rien de ce
+// qu'il contient -- et reste donc à zéro.
+TEST(dir_reads_the_size_of_a_file_and_leaves_a_directory_at_zero) {
+  TempDir d;
+  REQUIRE(d.valid());
+  d.file("plein");
+  d.dir("dossier");
+  const std::string p = d.path() + "/plein";
+  const int fd = ::open(p.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456789", 10), ssize_t{10});
+  ::close(fd);
+
+  const DirListing l = sshos::read_dir(d.path(), false);
+  uint64_t plein = 999;
+  uint64_t dossier = 999;
+  for (const auto& e : l.entries) {
+    if (e.name == "plein") plein = e.size;
+    if (e.name == "dossier") dossier = e.size;
+  }
+  CHECK_EQ(plein, uint64_t{10});
+  CHECK_EQ(dossier, uint64_t{0});
 }

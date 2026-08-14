@@ -14,8 +14,18 @@ struct DirEntry {
   std::string name;
   EntryKind kind = EntryKind::File;
   uint64_t size = 0;
+  // La date de dernière modification, en secondes depuis l'époque. Lue
+  // DANS LA MÊME PASSE que la taille : y revenir au moment d'afficher
+  // coûterait un `stat()` par entrée pendant le rendu -- l'endroit précis
+  // où ce projet s'interdit de toucher au disque.
+  uint64_t mtime = 0;
   bool operator==(const DirEntry&) const = default;
 };
+
+// Le critère de tri. Les dossiers passent devant sous tous les trois : c'est
+// la convention de tous les gestionnaires, et un tri par taille qui mêlerait
+// les deux rendrait une arborescence profonde illisible.
+enum class SortBy : uint8_t { Name, Size, Time };
 
 // Le contenu d'un répertoire, LU EN UNE PASSE.
 //
@@ -38,11 +48,15 @@ struct DirListing {
 // l'offrir ferait tourner en rond.
 DirListing read_dir(const std::string& path, bool show_hidden);
 
-// Le tri : DOSSIERS D'ABORD, puis par nom, insensible à la casse mais
-// STABLE. Deux noms qui ne diffèrent que par la casse doivent garder un
-// ordre déterministe, sinon la liste saute d'un rafraîchissement à
-// l'autre. `..` reste en tête quoi qu'il arrive.
-void sort_entries(std::vector<DirEntry>& entries);
+// Le tri. DOSSIERS D'ABORD, `..` toujours en tête -- l'inversion ne le
+// renvoie PAS en bas, il est la sortie et non un résultat de tri.
+//
+// L'ordre est TOTAL sous tous les critères : deux fichiers de même taille,
+// ou de même date -- ce qui est courant après une copie -- sont départagés
+// par leur nom, puis par leur nom brut. Sans cela la liste sauterait d'un
+// rafraîchissement à l'autre sans que rien n'ait changé sur le disque.
+void sort_entries(std::vector<DirEntry>& entries, SortBy by = SortBy::Name,
+                  bool descending = false);
 
 // Le filtre : une sous-chaîne, insensible à la casse. Il ne relit RIEN --
 // filtrer est une opération sur ce qui est déjà en mémoire. `..` survit

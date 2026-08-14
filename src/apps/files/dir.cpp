@@ -105,11 +105,15 @@ DirListing read_dir(const std::string& path, bool show_hidden) {
     DirEntry entry;
     entry.name = name;
     entry.kind = kind_of(full, e->d_type);
-    if (entry.kind == EntryKind::File) {
-      struct stat st {};
-      if (::stat(full.c_str(), &st) == 0) {
+    // UN SEUL `stat()` par entrée, et il sert aux deux : la taille et la
+    // date. En demander un second au moment d'afficher ferait un appel
+    // système par ligne et par trame.
+    struct stat st {};
+    if (::stat(full.c_str(), &st) == 0) {
+      if (entry.kind == EntryKind::File) {
         entry.size = static_cast<uint64_t>(st.st_size);
       }
+      entry.mtime = static_cast<uint64_t>(st.st_mtime);
     }
     out.entries.push_back(std::move(entry));
   }
@@ -119,14 +123,14 @@ DirListing read_dir(const std::string& path, bool show_hidden) {
   return out;
 }
 
-void sort_entries(std::vector<DirEntry>& entries) {
+void sort_entries(std::vector<DirEntry>& entries, SortBy by, bool descending) {
   // La comparaison ci-dessous est un ORDRE TOTAL : aucun couple de noms
   // distincts n'y est égal. `stable_sort` n'apporte donc rien de plus que
   // `sort`, et la mutation qui les échange est équivalente -- c'est le
   // départage par le nom brut qui porte la garantie, pas le choix de
   // l'algorithme.
   std::stable_sort(entries.begin(), entries.end(),
-                   [](const DirEntry& a, const DirEntry& b) {
+                   [by, descending](const DirEntry& a, const DirEntry& b) {
                      // `..` d'abord, quoi qu'il arrive : c'est la sortie.
                      const bool pa = a.name == kParent;
                      const bool pb = b.name == kParent;
@@ -137,6 +141,16 @@ void sort_entries(std::vector<DirEntry>& entries) {
                      const bool da = a.kind == EntryKind::Dir;
                      const bool db = b.kind == EntryKind::Dir;
                      if (da != db) return da;
+                     // LA CLÉ DEMANDÉE D'ABORD, et elle seule porte
+                     // l'inversion : le départage ci-dessous doit rester
+                     // dans le même sens, sinon deux fichiers de même
+                     // taille échangeraient leur place à chaque bascule.
+                     if (by == SortBy::Size && a.size != b.size) {
+                       return descending ? a.size > b.size : a.size < b.size;
+                     }
+                     if (by == SortBy::Time && a.mtime != b.mtime) {
+                       return descending ? a.mtime > b.mtime : a.mtime < b.mtime;
+                     }
                      const int c = compare_folded(a.name, b.name);
                      // ORDRE TOTAL. Sans ce départage, « README » et
                      // « readme » comparent égaux, et leur ordre dépend
@@ -145,8 +159,11 @@ void sort_entries(std::vector<DirEntry>& entries) {
                      // changé sur le disque. Départager par le nom BRUT
                      // rend l'ordre entièrement déterminé, ce qui rend du
                      // même coup la stabilité du tri sans objet.
-                     if (c != 0) return c < 0;
-                     return a.name < b.name;
+                     if (c != 0) {
+                       return by == SortBy::Name && descending ? c > 0 : c < 0;
+                     }
+                     return by == SortBy::Name && descending ? a.name > b.name
+                                                            : a.name < b.name;
                    });
 }
 
