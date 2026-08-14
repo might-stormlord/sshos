@@ -318,6 +318,11 @@ class Session : public ChildSink {
   // « personne n'en veut » : c'est l'etat de tout ecran ou aucune saisie
   // n'attend de frappe.
   std::optional<Pos> cursor_;
+  // LA FENETRE QUI TIENT LA SOURIS depuis un appui dans son corps. Tant
+  // qu'elle la tient, les MOUVEMENTS et le RELACHEMENT lui vont aussi --
+  // sans quoi aucune application ne pourrait faire glisser quoi que ce
+  // soit : le bureau ne leur livrait que des appuis.
+  WindowId mouse_grab_ = 0;
   SnapAssist assist_;
   // La moitie laissee libre par le dernier ancrage, en coordonnees
   // d'ecran. Lue au clic sur une proposition.

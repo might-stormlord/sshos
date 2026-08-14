@@ -92,3 +92,25 @@ deux invalides et une équivalence déclarée sur place.
 **Et un que seule la campagne a vu :** la pile de copie traitait les
 fichiers dans l'ordre **inverse** de la sélection, alors que son propre
 commentaire prétendait le contraire.
+
+---
+
+## Après le jalon — ce que l'usage a demandé
+
+L'utilisateur pilote **à la souris**. Trois retours, et le deuxième était un
+défaut :
+
+| Demande | Ce qui a été fait |
+|---|---|
+| « toutes les fonctions au bouton droit » | Un menu contextuel de **18 entrées**, chacune avec son raccourci en face. Il s'ouvre où qu'on clique dans le panneau — sur le vide et sur la ligne d'état comprises |
+| « il me dit que l'éditeur arrive au jalon 6 » | Message écrit **avant** que le jalon 6 ne soit livré, et resté là. `Host::open_app()` ouvre maintenant l'Éditeur sur le fichier |
+| « un déplacement de fichier drag and drop » | Glisser déplace ; lâcher sur un dossier y range |
+
+**Le bureau ne livrait que des appuis.** `Session::on_mouse` avait un
+invariant explicite — *« au-delà de cette ligne, tout est un appui »* — et
+aucune application ne voyait jamais un mouvement ni un relâchement. Le
+glisser-déposer était donc **structurellement impossible** : les cas
+unitaires passaient tous, et la sonde sur le vrai bureau ne bougeait rien.
+Un appui dans le corps d'une fenêtre lui donne désormais la souris jusqu'au
+relâchement — mais pas les appuis suivants, sinon un relâchement perdu
+rendrait tout le bureau incliquable.

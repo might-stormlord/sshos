@@ -683,6 +683,24 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // LA FENÊTRE QUI TIENT LA SOURIS d'abord : un appui dans son corps lui
+  // donne aussi les mouvements et le relâchement, où qu'ils tombent. Sans
+  // cela, aucune application ne peut faire glisser quoi que ce soit --
+  // elle ne verrait jamais que des appuis isolés.
+  if (mouse_grab_ != 0 && m.action != MouseAction::Press) {
+    Window* held = wm_.find(mouse_grab_);
+    if (held != nullptr && held->app != nullptr) {
+      const Rect cr = client_rect(held->display_rect);
+      MouseEvent local = m;
+      local.x = m.x - cr.x;
+      local.y = m.y - cr.y;
+      held->app->on_mouse(local);
+      dirty_ = true;
+    }
+    if (m.action == MouseAction::Release) mouse_grab_ = 0;
+    return;
+  }
+
   // INVARIANT : au-delà de cette ligne, tout est un appui. Les glissements
   // ont consommé leurs relâchements plus haut, et rien d'autre ne réagit
   // au relâchement ni au survol. Les branches qui suivent ne re-testent
@@ -876,6 +894,11 @@ void Session::on_mouse(const MouseEvent& m) {
       MouseEvent local = m;
       local.x = h.lx;
       local.y = h.ly;
+      // L'APPUI PREND LA SOURIS : les mouvements et le relâchement qui
+      // suivent iront à cette fenêtre, même s'ils sortent de son cadre.
+      // C'est ce qui rend un glisser-déposer possible, et ce que le bureau
+      // ne savait pas faire -- il ne livrait que des appuis.
+      mouse_grab_ = w.id;
       w.app->on_mouse(local);
       break;
     }

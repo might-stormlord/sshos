@@ -4176,3 +4176,89 @@ TEST(session_keeps_waking_a_minimized_window_that_asked_for_it) {
   }
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
+
+// UN APPUI DANS LE CORPS D'UNE FENÊTRE LUI DONNE LA SOURIS : les
+// mouvements et le relâchement qui suivent lui vont aussi, où qu'ils
+// tombent. Sans cela, aucune application ne peut faire glisser quoi que ce
+// soit -- le bureau ne leur livrait que des appuis isolés, et le
+// glisser-déposer du gestionnaire de fichiers ne pouvait pas exister.
+namespace {
+
+class Grabby : public sshos::App {
+ public:
+  void render(sshos::View) override {}
+  void on_mouse(const sshos::MouseEvent& m) override { seen.push_back(m); }
+  std::vector<sshos::MouseEvent> seen;
+};
+
+std::unique_ptr<sshos::App> make_grabby() { return std::make_unique<Grabby>(); }
+
+}  // namespace
+
+TEST(session_hands_a_whole_drag_to_the_window_that_was_pressed) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+    const sshos::Window& w = *sess.windows_for_tests()[0];
+    const sshos::Rect cr = sshos::client_rect(w.display_rect);
+    auto* app = static_cast<Grabby*>(w.app.get());
+
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Press, 0, cr.x + 2, cr.y + 2, 0}});
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Motion, 0, cr.x + 5, cr.y + 4, 0}});
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Release, 0, cr.x + 5, cr.y + 4, 0}});
+
+    REQUIRE_EQ(app->seen.size(), size_t{3});
+    CHECK(app->seen[1].action == sshos::MouseAction::Motion);
+    CHECK(app->seen[2].action == sshos::MouseAction::Release);
+    // EN COORDONNÉES LOCALES, comme l'appui : une application ne connaît
+    // que sa vue.
+    CHECK_EQ(app->seen[2].x, 5);
+    CHECK_EQ(app->seen[2].y, 4);
+
+    // ET LA SOURIS EST RENDUE : le mouvement d'après ne lui appartient
+    // plus, sinon un survol du bureau irait encore à elle.
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Motion, 0, 1, 1, 0}});
+    CHECK_EQ(app->seen.size(), size_t{3});
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// UN APPUI NE RESTE PAS PRIS. La prise ne vaut que pour les mouvements et
+// le relâchement : si le relâchement se perd -- ce qui arrive, le terminal
+// n'est pas fiable là-dessus -- un appui suivant doit reprendre son cours
+// normal, sinon plus rien du bureau n'est cliquable.
+TEST(session_lets_a_new_press_out_of_a_stale_mouse_grab) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    const sshos::Window& w = *sess.windows_for_tests()[0];
+    const sshos::Rect cr = sshos::client_rect(w.display_rect);
+    auto* app = static_cast<Grabby*>(w.app.get());
+
+    // On prend la souris, et le relâchement se perd.
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Press, 0, cr.x + 2, cr.y + 2, 0}});
+    REQUIRE_EQ(app->seen.size(), size_t{1});
+
+    // Le bouton de menu du panneau, tout à gauche de la dernière ligne.
+    const sshos::PanelHitResult ph = sess.panel_hit_for_tests(2, 19);
+    REQUIRE(ph.what == sshos::PanelHit::MenuButton);
+    sess.on_input(sshos::InputEvent{
+        sshos::MouseEvent{sshos::MouseAction::Press, 0, 2, 19, 0}});
+
+    CHECK(sess.menu_open_for_tests());
+    CHECK_EQ(app->seen.size(), size_t{1});
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
