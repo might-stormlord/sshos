@@ -37,39 +37,6 @@ int display_width(std::string_view s) {
   return w;
 }
 
-// Élide en gardant la FIN. C'est la fin d'un chemin qui porte
-// l'information -- « …/paquet/exemples » se lit, « /usr/share/d… » ne dit
-// rien.
-std::string elide_left(const std::string& s, int width) {
-  if (width <= 0) return {};
-  if (display_width(s) <= width) return s;
-  if (width == 1) return kEllipsis;
-
-  // On remonte depuis la fin tant que ça tient, en s'arrêtant sur une
-  // frontière de caractère : couper au milieu d'une pleine chasse
-  // laisserait une moitié orpheline.
-  const int room = width - 1;  // la place du caractère d'élision
-  std::vector<size_t> starts;
-  size_t i = 0;
-  while (i < s.size()) {
-    char32_t cp = 0;
-    const size_t used = utf8_decode(s, i, cp);
-    if (used == 0) break;
-    starts.push_back(i);
-    i += used;
-  }
-  int w = 0;
-  size_t cut = s.size();
-  for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
-    char32_t cp = 0;
-    utf8_decode(s, *it, cp);
-    const int cw = std::max(0, char_width(cp));
-    if (w + cw > room) break;
-    w += cw;
-    cut = *it;
-  }
-  return std::string(kEllipsis) + s.substr(cut);
-}
 
 // Élide en gardant le DÉBUT : pour un nom de fichier, c'est le début qui
 // distingue.
@@ -265,6 +232,118 @@ void Files::settle() {
   }
 }
 
+bool Files::load(const std::string& path, const std::string& came_from) {
+  const DirListing probe = read_dir(path, show_hidden_);
+  if (!probe.error.empty()) {
+    // On RESTE où l'on est. Descendre dans un répertoire illisible pour y
+    // afficher une liste vide donnerait l'impression d'un dossier vide.
+    status_ = probe.error;
+    return false;
+  }
+  listing_ = probe;
+  status_.clear();
+  filter_.clear();
+  marked_.clear();
+  sel_ = 0;
+  top_ = 0;
+  // Vidée AVANT le refiltrage : celui-ci garde la ligne choisie par son
+  // NOM, et un nom de l'ancien répertoire n'a rien à faire ici.
+  //
+  // ÉQUIVALENTE aujourd'hui, et par un enchaînement fragile : `sel_` vient
+  // d'être remis à zéro, donc le nom retenu est celui de la première ligne
+  // de l'ancienne liste -- c'est-à-dire « .. », qui existe aussi dans la
+  // nouvelle et s'y trouve déjà en tête. La garde reste parce que ce
+  // raisonnement tient à l'ordre de trois lignes : déplacer `sel_ = 0`
+  // après le refiltrage suffirait à faire atterrir la sélection sur un
+  // homonyme, et rien ne le dirait.
+  visible_.clear();
+  refilter();
+
+  // Le dossier d'où l'on sort devient la sélection : remonter puis
+  // redescendre doit ramener au même endroit sans le chercher des yeux.
+  if (came_from.size() > path.size() && came_from.rfind(path, 0) == 0) {
+    std::string rest = came_from.substr(path.size());
+    while (!rest.empty() && rest.front() == '/') rest.erase(0, 1);
+    const size_t slash = rest.find('/');
+    const std::string child = slash == std::string::npos ? rest
+                                                         : rest.substr(0, slash);
+    for (size_t i = 0; i < visible_.size(); ++i) {
+      if (visible_[i].name == child) {
+        sel_ = i;
+        break;
+      }
+    }
+    settle();
+  }
+  return true;
+}
+
+void Files::go_to(const std::string& path) {
+  if (path == listing_.path) return;
+  const std::string from = listing_.path;
+  if (!load(path, from)) return;
+  back_.push_back(from);
+  forward_.clear();
+}
+
+void Files::go_back() {
+  if (back_.empty()) return;
+  const std::string from = listing_.path;
+  const std::string target = back_.back();
+  if (!load(target, from)) return;
+  back_.pop_back();
+  forward_.push_back(from);
+}
+
+void Files::go_forward() {
+  if (forward_.empty()) return;
+  const std::string from = listing_.path;
+  const std::string target = forward_.back();
+  if (!load(target, from)) return;
+  forward_.pop_back();
+  back_.push_back(from);
+}
+
+std::vector<Files::Segment> Files::path_segments(int w) const {
+  // Le chemin découpé à chaque barre : « /a/b » donne « / », « a », « b »,
+  // et chacun porte le chemin ABSOLU qu'il désigne.
+  std::vector<Segment> out;
+  const std::string& p = listing_.path;
+  size_t i = 0;
+  std::string built;
+  while (i < p.size()) {
+    while (i < p.size() && p[i] == '/') ++i;
+    if (i >= p.size()) break;
+    const size_t start = i;
+    while (i < p.size() && p[i] != '/') ++i;
+    built += "/" + p.substr(start, i - start);
+    out.push_back(Segment{0, static_cast<int>(i - start), built});
+  }
+  // La racine se clique aussi : c'est la barre la plus à gauche.
+  out.insert(out.begin(), Segment{0, 1, "/"});
+
+  // CE QUI NE TIENT PAS TOMBE PAR LA GAUCHE. La fin d'un chemin porte
+  // l'information, jamais son début : `/home/user/dev/…` ne dit rien
+  // que `…/dev/ssh_os` ne dise mieux.
+  int total = 0;
+  for (const Segment& s : out) total += s.w + (s.path == "/" ? 0 : 1);
+  size_t first = 0;
+  while (first + 1 < out.size() && total > w) {
+    total -= out[first].w + (out[first].path == "/" ? 0 : 1);
+    ++first;
+  }
+  std::vector<Segment> kept(out.begin() + static_cast<std::ptrdiff_t>(first),
+                            out.end());
+  int x = first > 0 ? 1 : 0;  // la marque d'élision prend une cellule
+  for (Segment& s : kept) {
+    s.x = x;
+    // La racine EST sa barre : lui compter une séparation de plus laisserait
+    // un blanc entre « / » et le premier nom.
+    x += s.w + (s.path == "/" ? 0 : 1);
+  }
+  return kept;
+}
+
 void Files::go_up() {
   const std::string up = parent_path(listing_.path);
   if (up == listing_.path) {
@@ -281,19 +360,8 @@ void Files::go_up() {
   const std::string name =
       cut == std::string::npos ? std::string() : leaving.substr(cut + 1);
 
-  listing_.path = up;
-  filter_.clear();
-  sel_ = 0;
-  top_ = 0;
-  reload();
-
-  for (size_t i = 0; i < visible_.size(); ++i) {
-    if (visible_[i].name == name) {
-      sel_ = i;
-      break;
-    }
-  }
-  settle();
+  (void)name;  // `load()` repose le curseur à partir du chemin quitté
+  go_to(up);
 }
 
 void Files::activate() {
@@ -311,20 +379,7 @@ void Files::activate() {
     return;
   }
 
-  const std::string target = join_path(listing_.path, e.name);
-  const DirListing probe = read_dir(target, show_hidden_);
-  if (!probe.error.empty()) {
-    // On RESTE où l'on est. Descendre dans un répertoire illisible pour y
-    // afficher une liste vide donnerait l'impression d'un dossier vide.
-    status_ = probe.error;
-    return;
-  }
-  listing_ = probe;
-  status_.clear();
-  filter_.clear();
-  sel_ = 0;
-  top_ = 0;
-  refilter();
+  go_to(join_path(listing_.path, e.name));
 }
 
 std::string Files::touchable_selection() const {
@@ -520,6 +575,20 @@ void Files::on_key(const KeyEvent& k) {
     return;
   }
 
+  // `Alt+flèches` REMONTE ET REDESCEND L'HISTORIQUE. Sans elles, ressortir
+  // d'une descente de trois niveaux demande trois retours arrière et de se
+  // souvenir d'où l'on venait.
+  if ((k.mods & mod::Alt) != 0) {
+    if (k.key == Key::Left) {
+      go_back();
+      return;
+    }
+    if (k.key == Key::Right) {
+      go_forward();
+      return;
+    }
+  }
+
   switch (k.key) {
     case Key::Up:
       // `Maj+flèche` ÉTEND depuis la position courante : c'est le geste
@@ -630,6 +699,18 @@ void Files::on_mouse(const MouseEvent& m) {
   }
   if (m.action != MouseAction::Press) return;
 
+  // LA LIGNE 0 EST LE FIL D'ARIANE : cliquer un segment y monte.
+  if (m.y == 0) {
+    for (const Segment& sg : path_segments(size_.w)) {
+      if (m.x < sg.x || m.x >= sg.x + sg.w) continue;
+      // Le dernier segment est là où l'on est déjà : recharger pour rien
+      // perdrait la sélection en cours.
+      go_to(sg.path);
+      return;
+    }
+    return;
+  }
+
   // LA LIGNE 1 EST L'EN-TÊTE, et cliquer une colonne trie dessus. C'est le
   // geste de tous les gestionnaires, et il n'a aucun équivalent au clavier
   // qui se devine.
@@ -693,11 +774,29 @@ void Files::render(View v) {
   // rien, et parce qu'un futur calcul de géométrie pourrait, lui, diviser.
   if (w <= 0 || h <= 0) return;
 
-  // La barre de chemin. En gras plutôt qu'en couleur : elle doit se
-  // distinguer sur les seize couleurs comme sur les 16 millions.
+  // LE FIL D'ARIANE. En gras plutôt qu'en couleur : il doit se distinguer
+  // sur les seize couleurs comme sur les 16 millions. Chaque segment se
+  // clique -- un chemin qui ne sert qu'à lire oblige à remonter d'un cran à
+  // la fois.
   Style path_style;
   path_style.attrs = attr::Bold;
-  v.text(0, 0, elide_left(listing_.path, w), path_style);
+  const std::vector<Segment> segs = path_segments(w);
+  if (!segs.empty() && segs.front().x > 0) {
+    Style faint;
+    faint.attrs = attr::Dim;
+    v.text(0, 0, "\u2026", faint);
+  }
+  for (size_t i = 0; i < segs.size(); ++i) {
+    const Segment& sg = segs[i];
+    const std::string label =
+        sg.path == "/" ? std::string("/") : sg.path.substr(sg.path.rfind('/') + 1);
+    v.text(sg.x, 0, label, path_style);
+    if (i + 1 < segs.size() && sg.path != "/") {
+      Style sep;
+      sep.attrs = attr::Dim;
+      v.text(sg.x + sg.w, 0, "/", sep);
+    }
+  }
 
   // L'EN-TÊTE : il nomme les colonnes, et il est la seule chose qui dise
   // sur quoi la liste est triée. La flèche marque celle qui porte le tri.

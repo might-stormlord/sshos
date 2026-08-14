@@ -86,6 +86,29 @@ class Files : public App {
   void sort_on(SortBy by);
   void activate();
   void go_up();
+  // Charge ce répertoire SANS toucher à l'historique. Rend false et laisse
+  // tout en place si la lecture échoue -- descendre dans un répertoire
+  // illisible pour y afficher une liste vide donnerait l'impression d'un
+  // dossier vide. `came_from` sert à reposer le curseur sur le dossier
+  // d'où l'on sort : le remettre en tête obligerait à le retrouver dans
+  // une liste de deux cents entrées.
+  bool load(const std::string& path, const std::string& came_from);
+  // Va là, et retient d'où l'on vient. TOUT déplacement passe par ici --
+  // descendre, remonter, cliquer le fil d'Ariane -- sinon `Alt+flèche` ne
+  // saurait défaire que la moitié des gestes.
+  void go_to(const std::string& path);
+  void go_back();
+  void go_forward();
+
+  // Le fil d'Ariane : un segment cliquable par niveau, avec le chemin
+  // complet qu'il désigne. UN SEUL calcul, partagé par le dessin et par le
+  // clic, comme partout ailleurs dans ce projet.
+  struct Segment {
+    int x = 0;
+    int w = 0;
+    std::string path;
+  };
+  std::vector<Segment> path_segments(int w) const;
   // Le nom sélectionné, ou une chaîne vide si la sélection ne désigne rien
   // qu'on ait le droit de toucher -- `..` en particulier.
   std::string touchable_selection() const;
@@ -111,6 +134,11 @@ class Files : public App {
   size_t sel_ = 0;
   size_t top_ = 0;
   bool show_hidden_ = false;
+  // D'OÙ L'ON VIENT, et ce qu'on vient de défaire. Une nouvelle descente
+  // efface la seconde : garder une branche qu'on vient d'abandonner ferait
+  // avancer `Alt+droite` vers un dossier sans rapport avec là où l'on est.
+  std::vector<std::string> back_;
+  std::vector<std::string> forward_;
   SortBy sort_by_ = SortBy::Name;
   bool sort_desc_ = false;
   // LES NOMS, PAS LES RANGS. Le filtre et le tri renumérotent la liste sous

@@ -399,8 +399,15 @@ TEST(files_ignores_a_click_on_the_path_bar) {
   f.on_key(key(Key::Down));
   REQUIRE_EQ(selected_name(f), std::string("a"));
 
-  f.on_mouse(MouseEvent{MouseAction::Press, 0, 3, 0, 0});
-  CHECK_EQ(selected_name(f), std::string("a"));
+  // La barre de chemin N'EST PLUS INERTE : chacun de ses segments monte à
+  // ce qu'il désigne. Cliquer entre deux segments, en revanche, ne fait
+  // toujours rien -- une séparation n'est pas un chemin.
+  // La barre rend le chemin tel quel tant qu'il tient : la deuxième barre
+  // du chemin est donc la séparation qui suit le premier segment.
+  const size_t slash = t.root().find('/', 1);
+  REQUIRE(slash != std::string::npos);
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(slash), 0, 0});
+  CHECK_EQ(f.path_for_tests(), t.root());
 }
 
 // ------------------------- douze trous montrés par les mutations
@@ -1735,4 +1742,137 @@ TEST(files_puts_its_cursor_on_the_chosen_row_below_the_header) {
   f.on_key(key(Key::Down));
   REQUIRE(f.wants_cursor(p));
   CHECK_EQ(p.y, 3);
+}
+
+// -------------------------------------- l'historique et le fil d'Ariane
+
+// `Alt+←` REVIENT SUR SES PAS. Sans lui, ressortir d'une descente de trois
+// niveaux demande trois retours arrière et de se souvenir d'où l'on venait.
+TEST(files_goes_back_where_it_came_from) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  REQUIRE_EQ(f.path_for_tests(), t.root() + "/sous");
+
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+
+  CHECK_EQ(f.path_for_tests(), t.root());
+}
+
+// `Alt+→` REFAIT LE PAS qu'on vient de défaire : revenir en arrière par
+// erreur ne doit pas coûter de retrouver le chemin à la main.
+TEST(files_goes_forward_again_after_going_back) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+  REQUIRE_EQ(f.path_for_tests(), t.root());
+
+  f.on_key(KeyEvent{Key::Right, 0, mod::Alt});
+
+  CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
+}
+
+// UNE NOUVELLE DESCENTE EFFACE L'AVANT. Garder une branche qu'on vient
+// d'abandonner ferait avancer `Alt+→` vers un dossier qui n'a plus rien à
+// voir avec là où l'on est.
+TEST(files_drops_the_forward_branch_when_it_takes_another_road) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("un");
+  t.dir("deux");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Enter));  // dans « deux » (les dossiers sont triés)
+  const std::string first = f.path_for_tests();
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+  f.on_key(key(Key::End));
+  f.on_key(key(Key::Enter));  // dans « un »
+  REQUIRE(f.path_for_tests() != first);
+
+  f.on_key(KeyEvent{Key::Right, 0, mod::Alt});
+
+  // Rien devant : on reste où l'on est.
+  CHECK(f.path_for_tests() != first);
+}
+
+// REVENIR REPOSE LE CURSEUR SUR LE DOSSIER D'OÙ L'ON SORT. Le remettre en
+// tête obligerait à le retrouver dans une liste de deux cents entrées.
+TEST(files_puts_the_cursor_back_on_the_folder_it_left) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("aaa");
+  t.dir("zzz");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(key(Key::End));
+  REQUIRE_EQ(selected_name(f), std::string("zzz"));
+  f.on_key(key(Key::Enter));
+
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+
+  CHECK_EQ(selected_name(f), std::string("zzz"));
+}
+
+// LE FIL D'ARIANE SE CLIQUE, segment par segment. Un chemin qui ne sert
+// qu'à lire oblige à remonter d'un cran à la fois.
+TEST(files_climbs_to_the_path_segment_that_is_clicked) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("a");
+  t.dir("a/b");
+  Files f(t.root() + "/a/b");
+  f.on_resize(Size{60, 10});
+  const std::string bar = painted_row(f, 60, 10, 0);
+  const size_t at = bar.rfind("/a/");
+  REQUIRE(at != std::string::npos);
+
+  // On clique sur le « a » du chemin : on doit atterrir dans `a`, pas dans
+  // `a/b` ni à la racine.
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(at) + 1, 0, 0});
+
+  CHECK_EQ(f.path_for_tests(), t.root() + "/a");
+}
+
+// CLIQUER LA FIN DU CHEMIN NE FAIT RIEN : c'est déjà là qu'on est, et
+// recharger pour rien perdrait la sélection en cours.
+TEST(files_stays_put_when_the_last_segment_is_clicked) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("a");
+  Files f(t.root() + "/a");
+  f.on_resize(Size{60, 10});
+  const std::string bar = painted_row(f, 60, 10, 0);
+  const size_t at = bar.rfind('a');
+  REQUIRE(at != std::string::npos);
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, static_cast<int>(at), 0, 0});
+
+  CHECK_EQ(f.path_for_tests(), t.root() + "/a");
+}
+
+// REMONTER PASSE AUSSI PAR L'HISTORIQUE : `Retour arrière` et le fil
+// d'Ariane sont des déplacements comme les autres, et `Alt+←` doit les
+// défaire.
+TEST(files_records_a_climb_in_its_history) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root() + "/sous");
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::Backspace));
+  REQUIRE_EQ(f.path_for_tests(), t.root());
+
+  f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
+  CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
 }
