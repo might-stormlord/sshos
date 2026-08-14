@@ -1,20 +1,20 @@
                                                             
-   +----------------------------------------------------+   
-  || Ctrl+A puis :       + s'enchaine                   |   
-  ||                                                    |-+ 
-  || Fleches / hjkl      + Deplacer la fenetre          | | 
-  || Maj+fleches / HJKL  + Redimensionner               | | 
-  || Tab, Maj+Tab / n, p + Fenetre suivante, precedente |-+ 
-  || w                     Fermer la fenetre            |-+ 
-  || -                     Reduire                      | | 
-  || z                     Maximiser (bascule)          | | 
-  || f                     Plein ecran (bascule)        |-+ 
-  || Espace                Ouvrir le menu               |-+ 
-  || m                     Souris : bureau ou terminal  |-+ 
-  || r                     Tout repeindre               |   
-  +| d                     Detacher (la session survit) |   
-   | ?                     Cette aide                   |   
-   | <leader>              L'envoyer a l'application    |   
-   +----------------------------------------------------+   
-                                                            
+  +-----------------------------------------------------+   
+  | Ctrl+A puis :       + s'enchaine                    |   
+  |                                                     |-+ 
+  | Fleches / hjkl      + Deplacer la fenetre           | | 
+  | Maj+fleches / HJKL  + Redimensionner                | | 
+  | Ctrl+fleches          Ancrer sur une moitie d'ecran |-+ 
+  | Tab, Maj+Tab / n, p + Fenetre suivante, precedente  |-+ 
+  | w                     Fermer la fenetre             | | 
+  | -                     Reduire                       | | 
+  | z                     Maximiser (bascule)           |-+ 
+  | f                     Plein ecran (bascule)         |-+ 
+  | Espace                Ouvrir le menu                |-+ 
+  | m                     Souris : bureau ou terminal   |   
+  | r                     Tout repeindre                |   
+  | d                     Detacher (la session survit)  |   
+  | ?                     Cette aide                    |   
+  | <leader>              L'envoyer a l'application     |   
+  +-----------------------------------------------------+   
  ssh_os  Terminal  Fichiers  Editeur *Bloc  ^A = aide 10:05 

@@ -16,6 +16,15 @@ enum class Action {
   ShrinkWidth,
   GrowHeight,
   ShrinkHeight,
+  // L'ANCRAGE, geste des bureaux modernes : la fenetre prend la moitie de
+  // l'ecran du cote de la fleche. La touche « Tux » n'existe pas dans un
+  // terminal -- aucun n'en rapporte l'etat -- d'ou le leader suivi de
+  // Ctrl+fleche, la seule combinaison d'fleche encore libre apres le
+  // deplacement (fleche nue) et le redimensionnement (Maj+fleche).
+  SnapLeft,
+  SnapRight,
+  SnapUp,
+  SnapDown,
   NextWindow,
   PrevWindow,
   Close,

@@ -348,7 +348,7 @@ TEST(session_detaches_without_destroying_anything_from_the_menu) {
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
-  for (char c : std::string("conservee")) {
+  for (char c : std::string("quitter")) {
     sess.on_input(sshos::InputEvent{sshos::KeyEvent{
         sshos::Key::Char, static_cast<char32_t>(c), 0}});
   }
@@ -3675,4 +3675,88 @@ TEST(panel_opens_a_new_instance_on_a_right_click) {
       sshos::MouseEvent{sshos::MouseAction::Press, 2, x, 19, 0}});
   sess.render(s);
   CHECK_EQ(sess.windows_for_tests().size(), before + 1);
+}
+
+// ------------------------------------------------------------- l'ancrage
+
+// `Ctrl+A` puis `Ctrl+flèche` : la fenêtre prend la MOITIÉ de l'écran du
+// côté de la flèche, pleine hauteur. La touche « Tux » des bureaux
+// graphiques n'existe pas dans un terminal -- aucun n'en rapporte l'état
+// -- d'où le leader.
+TEST(session_snaps_the_focused_window_to_a_half) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Left, 0, sshos::mod::Ctrl}});
+  sess.render(s);
+
+  const sshos::Window* w = sess.window_for_tests(sess.focused_for_tests());
+  REQUIRE(w != nullptr);
+  CHECK_EQ(w->display_rect.x, 0);
+  CHECK_EQ(w->display_rect.w, 30);
+  CHECK_EQ(w->display_rect.h, 19);  // toute la hauteur, panneau exclu
+}
+
+TEST(session_snaps_to_the_right_half_too) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Right, 0, sshos::mod::Ctrl}});
+  sess.render(s);
+
+  const sshos::Window* w = sess.window_for_tests(sess.focused_for_tests());
+  REQUIRE(w != nullptr);
+  CHECK_EQ(w->display_rect.x, 30);
+  CHECK_EQ(w->display_rect.w, 30);
+}
+
+// Ancrer vers le HAUT donne une demi-hauteur PLEINE LARGEUR : c'est
+// l'autre moitié du geste, et l'oublier laisse deux flèches sans effet.
+TEST(session_snaps_to_a_half_height_on_the_vertical_arrows) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Up, 0, sshos::mod::Ctrl}});
+  sess.render(s);
+
+  const sshos::Window* w = sess.window_for_tests(sess.focused_for_tests());
+  REQUIRE(w != nullptr);
+  CHECK_EQ(w->display_rect.w, 60);
+  CHECK_EQ(w->display_rect.y, 0);
+  CHECK_EQ(w->display_rect.h, 10);
+}
+
+// La flèche NUE déplace toujours, et la flèche MAJ redimensionne toujours :
+// l'ancrage ne leur a pas volé leur geste.
+TEST(session_leaves_the_plain_and_shifted_arrows_alone) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  const sshos::Window* w = sess.window_for_tests(sess.focused_for_tests());
+  REQUIRE(w != nullptr);
+  const sshos::Rect before = w->display_rect;
+
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Right, 0, 0}});
+  sess.render(s);
+
+  CHECK_EQ(w->display_rect.w, before.w);  // deplacee, pas ancree
+  CHECK(w->display_rect.x != before.x);
 }

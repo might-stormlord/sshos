@@ -122,3 +122,47 @@ TEST(tile_never_produces_an_empty_rectangle) {
     CHECK(r.h >= 1);
   }
 }
+
+// ------------------------------------------------------------- l'ancrage
+
+using sshos::snap_opposite;
+using sshos::snap_rect;
+using sshos::SnapDir;
+
+TEST(snap_gives_half_the_width_at_full_height) {
+  CHECK_EQ(dump({snap_rect(kWork, SnapDir::Left)}), std::string("0,0 40x20"));
+  CHECK_EQ(dump({snap_rect(kWork, SnapDir::Right)}), std::string("40,0 40x20"));
+}
+
+TEST(snap_gives_half_the_height_at_full_width) {
+  CHECK_EQ(dump({snap_rect(kWork, SnapDir::Up)}), std::string("0,0 80x10"));
+  CHECK_EQ(dump({snap_rect(kWork, SnapDir::Down)}), std::string("0,10 80x10"));
+}
+
+// DOS À DOS SANS TROU NI CHEVAUCHEMENT, y compris sur une largeur impaire
+// -- c'est tout l'intérêt de donner le reste à la moitié gauche.
+TEST(snap_halves_meet_exactly_on_an_odd_size) {
+  const Rect odd{0, 0, 81, 21};
+  const std::vector<Rect> pair = {snap_rect(odd, SnapDir::Left),
+                                  snap_rect(odd, SnapDir::Right)};
+  CHECK_EQ(covered(pair, odd), odd.w * odd.h);
+
+  const std::vector<Rect> stack = {snap_rect(odd, SnapDir::Up),
+                                   snap_rect(odd, SnapDir::Down)};
+  CHECK_EQ(covered(stack, odd), odd.w * odd.h);
+}
+
+// La moitié OPPOSÉE est exactement celle qui reste : c'est là que le
+// bureau proposera l'autre fenêtre.
+TEST(snap_opposite_is_the_half_that_stays_free) {
+  for (SnapDir d : {SnapDir::Left, SnapDir::Right, SnapDir::Up, SnapDir::Down}) {
+    const std::vector<Rect> pair = {snap_rect(kWork, d), snap_opposite(kWork, d)};
+    CHECK_EQ(covered(pair, kWork), kWork.w * kWork.h);
+  }
+}
+
+TEST(snap_respects_an_offset_work_area) {
+  const Rect shifted{10, 3, 40, 12};
+  CHECK_EQ(dump({snap_rect(shifted, SnapDir::Left)}), std::string("10,3 20x12"));
+  CHECK_EQ(dump({snap_rect(shifted, SnapDir::Down)}), std::string("10,9 40x6"));
+}

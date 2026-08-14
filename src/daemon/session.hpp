@@ -8,6 +8,7 @@
 #include "daemon/host.hpp"
 #include "daemon/reap.hpp"
 #include "shell/sysinfo.hpp"
+#include "wm/tile.hpp"
 #include "input/events.hpp"
 #include "input/shortcuts.hpp"
 #include "render/profile.hpp"
@@ -82,6 +83,8 @@ class Session : public ChildSink {
     return panel_.hit(x, y);
   }
 
+  WindowId focused_for_tests() const { return wm_.focused(); }
+
   Window* window_for_tests(WindowId id);
   const std::vector<std::unique_ptr<Window>>& windows_for_tests() const {
     return wm_.stack();
@@ -147,6 +150,7 @@ class Session : public ChildSink {
   // Range les fenêtres visibles pour qu'elles remplissent la zone de
   // travail sans se chevaucher.
   void tile_windows();
+  void snap_focused(SnapDir d);
 
  private:
   struct Idle {};

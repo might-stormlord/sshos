@@ -233,6 +233,18 @@ void Session::do_action(Action a) {
   dirty_ = true;
 
   switch (a) {
+    case Action::SnapLeft:
+      snap_focused(SnapDir::Left);
+      return;
+    case Action::SnapRight:
+      snap_focused(SnapDir::Right);
+      return;
+    case Action::SnapUp:
+      snap_focused(SnapDir::Up);
+      return;
+    case Action::SnapDown:
+      snap_focused(SnapDir::Down);
+      return;
     case Action::OpenMenu:
       menu_.open();
       return;
@@ -400,6 +412,17 @@ void Session::answer_modal(bool confirmed) {
 // Le rangement ne touche QUE les fenêtres visibles : une fenêtre réduite
 // n'occupe aucune place, et lui en donner une la ferait réapparaître sans
 // qu'on l'ait demandé.
+// Ancre la fenetre active sur une moitie de l'ecran. Un mode maximise ou
+// plein ecran redevient normal : l'ancrer sans cela lui donnerait une
+// geometrie que son mode ignore.
+void Session::snap_focused(SnapDir d) {
+  Window* w = wm_.find(wm_.focused());
+  if (w == nullptr) return;
+  wm_.set_mode(w->id, WinMode::Normal, last_work_);
+  wm_.set_rect(w->id, snap_rect(last_work_, d), last_work_);
+  dirty_ = true;
+}
+
 void Session::tile_windows() {
   std::vector<WindowId> visible;
   for (const auto& w : wm_.stack()) {

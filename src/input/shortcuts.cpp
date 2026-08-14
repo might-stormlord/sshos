@@ -28,20 +28,25 @@ constexpr Binding kBindings[] = {
 struct KeyBinding {
   Key key;
   bool shift;
+  bool ctrl;
   Action action;
 };
 
 constexpr KeyBinding kKeyBindings[] = {
-    {Key::Left, false, Action::MoveLeft},
-    {Key::Right, false, Action::MoveRight},
-    {Key::Up, false, Action::MoveUp},
-    {Key::Down, false, Action::MoveDown},
-    {Key::Left, true, Action::ShrinkWidth},
-    {Key::Right, true, Action::GrowWidth},
-    {Key::Up, true, Action::ShrinkHeight},
-    {Key::Down, true, Action::GrowHeight},
-    {Key::Tab, false, Action::NextWindow},
-    {Key::Tab, true, Action::PrevWindow},
+    {Key::Left, false, false, Action::MoveLeft},
+    {Key::Right, false, false, Action::MoveRight},
+    {Key::Up, false, false, Action::MoveUp},
+    {Key::Down, false, false, Action::MoveDown},
+    {Key::Left, true, false, Action::ShrinkWidth},
+    {Key::Right, true, false, Action::GrowWidth},
+    {Key::Up, true, false, Action::ShrinkHeight},
+    {Key::Down, true, false, Action::GrowHeight},
+    {Key::Left, false, true, Action::SnapLeft},
+    {Key::Right, false, true, Action::SnapRight},
+    {Key::Up, false, true, Action::SnapUp},
+    {Key::Down, false, true, Action::SnapDown},
+    {Key::Tab, false, false, Action::NextWindow},
+    {Key::Tab, true, false, Action::PrevWindow},
 };
 
 }  // namespace
@@ -60,8 +65,9 @@ std::optional<Action> LeaderDispatch::lookup(const KeyEvent& k) const {
       key = Key::Tab;
       shift = true;
     }
+    const bool ctrl = (k.mods & mod::Ctrl) != 0;
     for (const auto& b : kKeyBindings) {
-      if (b.key == key && b.shift == shift) return b.action;
+      if (b.key == key && b.shift == shift && b.ctrl == ctrl) return b.action;
     }
     return std::nullopt;
   }
@@ -152,6 +158,9 @@ const std::vector<HelpRow>& binding_help() {
       {"Maj+flèches / HJKL", "Redimensionner",
        {Action::ShrinkWidth, Action::GrowWidth, Action::ShrinkHeight,
         Action::GrowHeight}},
+      {"Ctrl+flèches", "Ancrer sur une moitié d'écran",
+       {Action::SnapLeft, Action::SnapRight, Action::SnapUp,
+        Action::SnapDown}},
       {"Tab, Maj+Tab / n, p", "Fenêtre suivante, précédente",
        {Action::NextWindow, Action::PrevWindow}},
       {"w", "Fermer la fenêtre", {Action::Close}},

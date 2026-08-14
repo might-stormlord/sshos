@@ -48,8 +48,8 @@ void Menu::open() {
   // main en gardant tout ; la seconde detruit. Les nommer « Quitter » et
   // « Quitter la session » les rendait indistinguables -- et c'est la
   // destructive qu'on choisissait par defaut.
-  all_.push_back({"session:detach", "Quitter (la session est conservee)"});
-  all_.push_back({"session:quit", "Fermer la session (tout est perdu)"});
+  all_.push_back({"session:detach", "Quitter"});
+  all_.push_back({"session:quit", "Fermer la session"});
   refilter();
 }
 

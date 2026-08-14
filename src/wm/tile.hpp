@@ -27,4 +27,20 @@ namespace sshos {
 // ferait glisser les fenêtres d'une cellule à chaque fois.
 std::vector<Rect> tile_rects(const Rect& work, int count);
 
+// Le cote vers lequel on ancre une fenetre.
+enum class SnapDir { Left, Right, Up, Down };
+
+// LA MOITIE de la zone de travail, du cote demande -- le geste d'ancrage
+// des bureaux modernes. Gauche et droite donnent une demi-largeur PLEINE
+// HAUTEUR ; haut et bas, une demi-hauteur pleine largeur.
+//
+// Le reste d'une division impaire va a la moitie GAUCHE (ou HAUTE) : deux
+// fenetres ancrees dos a dos doivent se toucher sans laisser de colonne
+// vide entre elles, et sans se chevaucher.
+Rect snap_rect(const Rect& work, SnapDir d);
+
+// La moitie qui RESTE libre apres un ancrage. C'est la que le bureau
+// proposera l'autre fenetre.
+Rect snap_opposite(const Rect& work, SnapDir d);
+
 }  // namespace sshos

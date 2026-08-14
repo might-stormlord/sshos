@@ -59,4 +59,36 @@ std::vector<Rect> tile_rects(const Rect& work, int count) {
   return out;
 }
 
+Rect snap_rect(const Rect& work, SnapDir d) {
+  // Le reste va a la moitie gauche (ou haute) : deux fenetres dos a dos
+  // doivent se toucher sans colonne vide ni chevauchement.
+  const int w1 = work.w - work.w / 2;
+  const int h1 = work.h - work.h / 2;
+  switch (d) {
+    case SnapDir::Left:
+      return Rect{work.x, work.y, w1, work.h};
+    case SnapDir::Right:
+      return Rect{work.x + w1, work.y, work.w - w1, work.h};
+    case SnapDir::Up:
+      return Rect{work.x, work.y, work.w, h1};
+    case SnapDir::Down:
+      return Rect{work.x, work.y + h1, work.w, work.h - h1};
+  }
+  return work;
+}
+
+Rect snap_opposite(const Rect& work, SnapDir d) {
+  switch (d) {
+    case SnapDir::Left:
+      return snap_rect(work, SnapDir::Right);
+    case SnapDir::Right:
+      return snap_rect(work, SnapDir::Left);
+    case SnapDir::Up:
+      return snap_rect(work, SnapDir::Down);
+    case SnapDir::Down:
+      return snap_rect(work, SnapDir::Up);
+  }
+  return work;
+}
+
 }  // namespace sshos
