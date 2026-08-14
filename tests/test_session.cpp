@@ -3936,3 +3936,201 @@ TEST(session_drops_a_cursor_an_app_puts_outside_its_own_view) {
   // application qui ne dessine rien.
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
+
+// ------------------------------------------------- l'assistance a l'ancrage
+
+namespace {
+
+// `Ctrl+flèche` : l'ancrage sans accord, tel que la main le fait.
+void snap_key(Session& sess, sshos::Key k) {
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{k, 0, sshos::mod::Ctrl}});
+}
+
+}  // namespace
+
+// ANCRER UNE FENÊTRE LAISSE UNE MOITIÉ VIDE, et c'est le moment où
+// l'utilisateur veut y mettre l'autre. Sans cette proposition, il doit
+// aller la chercher et refaire le geste dans l'autre sens.
+TEST(session_offers_the_free_half_after_a_snap) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+
+  REQUIRE(sess.assist_for_tests().is_open());
+  REQUIRE_EQ(sess.assist_for_tests().choices().size(), size_t{1});
+  // La proposée est l'AUTRE : celle qu'on vient d'ancrer est déjà placée.
+  CHECK(sess.assist_for_tests().choices()[0].win != sess.focused_for_tests());
+}
+
+// UNE SEULE FENÊTRE, RIEN À PROPOSER. Le bureau ne doit pas demander de
+// choisir entre zéro options.
+TEST(session_offers_nothing_when_there_is_no_other_window) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+}
+
+// LA MOITIÉ DÉJÀ OCCUPÉE NE SE PROPOSE PAS. Ancrer la seconde fenêtre à
+// droite après la première à gauche donne exactement l'écran voulu :
+// reproposer par-dessus serait du bruit sur un travail fini.
+TEST(session_offers_nothing_when_the_free_half_is_already_taken) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+  const sshos::WindowId other = sess.assist_for_tests().choices()[0].win;
+  sess.dock_for_tests(other);
+  sess.render(s);
+  // Amarrer, c'est choisir : la fenêtre qu'on vient de placer a la main.
+  REQUIRE_EQ(sess.focused_for_tests(), other);
+
+  // Elle est déjà à droite, et la gauche est prise : re-ancrer à droite ne
+  // laisse aucune moitié libre à proposer.
+  snap_key(sess, sshos::Key::Right);
+  sess.render(s);
+  CHECK(!sess.assist_for_tests().is_open());
+}
+
+// UN CLIC SUR UNE PROPOSITION L'AMARRE dans la moitié libre : c'est tout
+// l'intérêt, et c'est un seul geste au lieu de trois.
+TEST(session_docks_the_window_clicked_in_the_free_half) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+  REQUIRE(sess.assist_for_tests().is_open());
+  const sshos::Rect r = sess.assist_for_tests().rect();
+  const sshos::WindowId other = sess.assist_for_tests().choices()[0].win;
+
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 0, r.x + 2, r.y + 2, 0}});
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+  const sshos::Window* w = nullptr;
+  for (const auto& up : sess.windows_for_tests()) {
+    if (up->id == other) w = up.get();
+  }
+  REQUIRE(w != nullptr);
+  CHECK(w->display_rect == sshos::snap_rect(sess.work_for_tests(),
+                                            sshos::SnapDir::Right));
+}
+
+// LA PROPOSITION SE RETIRE À LA PREMIÈRE TOUCHE, et cette touche garde son
+// effet : elle s'est ouverte parce qu'on venait d'ancrer, pas pour
+// installer un mode dont il faudrait ressortir.
+TEST(session_drops_the_offer_at_the_first_keystroke_and_keeps_it) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+  REQUIRE(sess.assist_for_tests().is_open());
+
+  // Ctrl+A : la touche fait son travail habituel -- elle arme l'accord.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+  CHECK(sess.menu_open_for_tests());
+}
+
+// UN CLIC À CÔTÉ LA RETIRE ET GARDE SON EFFET. Elle ne recouvre qu'une
+// moitié d'écran : lui faire manger un clic qui visait autre chose se
+// paierait deux fois.
+TEST(session_drops_the_offer_on_a_click_beside_it_and_keeps_the_click) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+  REQUIRE(sess.assist_for_tests().is_open());
+
+  // Le bouton de menu du panneau, tout à gauche de la dernière ligne.
+  const sshos::PanelHitResult ph = sess.panel_hit_for_tests(2, 19);
+  REQUIRE(ph.what == sshos::PanelHit::MenuButton);
+  sess.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 0, 2, 19, 0}});
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+  CHECK(sess.menu_open_for_tests());
+}
+
+// UNE FENÊTRE RÉDUITE NE SE PROPOSE PAS. Elle n'est nulle part à l'écran ;
+// la faire réapparaître dans la moitié libre serait la rouvrir sans que
+// personne l'ait demandé.
+TEST(session_offers_no_minimized_window_in_the_free_half) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+
+  // La seconde se réduit ; la main passe à la première, qui s'ancre. Il ne
+  // reste alors rien à proposer.
+  const sshos::WindowId hidden = sess.focused_for_tests();
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'-', 0}});
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'n', 0}});
+  sess.render(s);
+  REQUIRE(sess.focused_for_tests() != hidden);
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+}
+
+// RANGER REFAIT TOUT L'ÉCRAN : la moitié que la proposition visait n'est
+// plus libre, et sa liste ne veut plus rien dire.
+TEST(session_drops_the_offer_when_the_windows_are_tiled) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 60, 20);
+  Surface s(60, 20);
+  sess.render(s);
+  REQUIRE(sess.open_from_catalog("fichiers") != 0);
+  sess.render(s);
+  snap_key(sess, sshos::Key::Left);
+  sess.render(s);
+  REQUIRE(sess.assist_for_tests().is_open());
+
+  sess.tile_for_tests();
+  sess.render(s);
+
+  CHECK(!sess.assist_for_tests().is_open());
+}

@@ -420,6 +420,42 @@ void Session::snap_focused(SnapDir d) {
   if (w == nullptr) return;
   wm_.set_mode(w->id, WinMode::Normal, last_work_);
   wm_.set_rect(w->id, snap_rect(last_work_, d), last_work_);
+
+  // L'AUTRE MOITIÉ VIENT DE SE LIBÉRER, et c'est le moment où l'on veut y
+  // mettre la seconde fenêtre. La proposer coûte un clic ; ne pas la
+  // proposer coûte d'aller la chercher et de refaire le geste à l'envers.
+  assist_rect_ = snap_opposite(last_work_, d);
+  assist_.open(assist_rect_, assist_candidates(w->id, assist_rect_));
+  dirty_ = true;
+}
+
+std::vector<SnapCandidate> Session::assist_candidates(WindowId snapped,
+                                                      const Rect& free) const {
+  std::vector<SnapCandidate> out;
+  // De l'avant vers l'arrière : la première proposée est celle du dessus,
+  // qui est aussi la plus probable.
+  const auto& st = wm_.stack();
+  for (auto it = st.rbegin(); it != st.rend(); ++it) {
+    const Window& w = **it;
+    if (w.id == snapped || w.mode == WinMode::Minimized) continue;
+    // LA MOITIÉ DÉJÀ OCCUPÉE NE SE PROPOSE PAS : l'écran est exactement
+    // celui qu'on voulait, et reproposer par-dessus serait du bruit sur un
+    // travail fini.
+    if (w.display_rect == free) return {};
+    out.push_back(SnapCandidate{w.id, w.title});
+  }
+  return out;
+}
+
+void Session::dock_into_free_half(WindowId id) {
+  Window* w = wm_.find(id);
+  assist_.close();
+  if (w == nullptr) return;
+  wm_.set_mode(id, WinMode::Normal, last_work_);
+  wm_.set_rect(id, assist_rect_, last_work_);
+  // Amarrer, c'est choisir : la fenêtre qu'on vient de placer prend la
+  // main, comme si on avait cliqué dedans.
+  wm_.focus(id);
   dirty_ = true;
 }
 
@@ -429,6 +465,10 @@ void Session::tile_windows() {
     if (w != nullptr && w->mode != WinMode::Minimized) visible.push_back(w->id);
   }
   if (visible.empty()) return;
+
+  // Ranger refait tout l'écran : la moitié que la proposition visait n'est
+  // plus libre, et sa liste ne veut plus rien dire.
+  assist_.close();
 
   const std::vector<Rect> cells =
       tile_rects(last_work_, static_cast<int>(visible.size()));
@@ -668,6 +708,21 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // LA PROPOSITION D'ANCRAGE. Un clic dessus amarre ; un clic à côté la
+  // retire ET GARDE SON EFFET -- elle ne recouvre qu'une moitié d'écran,
+  // et lui faire manger un clic qui visait autre chose se paierait deux
+  // fois. C'est la même règle que l'aide, qui se retire à la première
+  // touche sans la voler.
+  if (assist_.is_open()) {
+    const WindowId picked = assist_.hit(m.x, m.y);
+    if (picked != 0) {
+      dock_into_free_half(picked);
+      return;
+    }
+    assist_.close();
+    dirty_ = true;
+  }
+
   // Puis le panneau, qui recouvre par construction tout ce qui pourrait se
   // trouver dessous.
   const PanelHitResult ph = panel_.hit(m.x, m.y);
@@ -876,6 +931,15 @@ void Session::on_input(const InputEvent& e) {
     // installer un mode dont il faudrait ressortir.
     if (help_.is_open()) {
       help_.close();
+      dirty_ = true;
+    }
+
+    // La proposition d'ancrage suit la même règle, et pour la même raison :
+    // elle s'est ouverte parce qu'on venait d'ancrer, pas pour installer un
+    // mode. Un nouvel ancrage la rouvrira aussitôt -- c'est snap_focused()
+    // qui décide, et elle est appelée plus bas.
+    if (assist_.is_open()) {
+      assist_.close();
       dirty_ = true;
     }
 
@@ -1097,6 +1161,11 @@ void Session::render(Surface& out) {
       v.box(o, border(), ol);
     }
   }
+
+  // La proposition d'ancrage par-dessus les fenêtres : elle occupe la
+  // moitié qu'on vient de libérer, et ce qui s'y trouve encore ne doit pas
+  // la cacher.
+  assist_.draw(v, theme_, border());
 
   // Le panneau passe en dernier. clamp_to() garantit déjà qu'aucune fenêtre
   // ne l'atteint ; le dessiner par-dessus coûte une ligne et supprime toute

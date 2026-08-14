@@ -378,6 +378,20 @@ char proc_state(pid_t pid) {
   return line[close + 2];
 }
 
+// RÉCOLTE CE QU'ON A LAISSÉ. Les cas de ce fichier tournent dans le MÊME
+// processus que ceux du démon, et `reap_children()` y appelle
+// `waitpid(-1, WNOHANG)` : un enfant abandonné en zombie est ramassé par le
+// premier cas de démon qui passe, ce qui fait échouer soit son compte à lui,
+// soit le `try_reap()` d'un cas de pseudo-terminal qui attendait le sien
+// (ECHILD, pour toujours). Défaut mesuré à un lancement sur dix, et c'est ce
+// qu'il coûte de ne pas récolter.
+void reap_orphan(pid_t pid) {
+  if (pid <= 0) return;
+  int status = 0;
+  while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+}
+
 bool gone_or_dead(pid_t pid, int deadline_ms = kDeadlineMs) {
   for (int waited = 0; waited < deadline_ms; waited += 10) {
     const char st = proc_state(pid);
@@ -400,6 +414,7 @@ TEST(pty_destructor_takes_an_ordinary_shell_with_it) {
     REQUIRE(read_until(p, "pret").find("pret") != std::string::npos);
   }
   CHECK(gone_or_dead(shell));
+  reap_orphan(shell);
 }
 
 // ET IL EMPORTE AUSSI CELUI QUI A REFUSÉ LE RACCROCHAGE. Un `trap '' HUP`
@@ -419,6 +434,7 @@ TEST(pty_destructor_takes_a_shell_that_refused_the_hangup) {
     REQUIRE(read_until(p, "pret").find("pret") != std::string::npos);
   }
   CHECK(gone_or_dead(shell));
+  reap_orphan(shell);
 }
 
 // MAIS PAS CELUI QUI A QUITTÉ LA SESSION. `setsid` -- ce que font `nohup` et
@@ -427,15 +443,18 @@ TEST(pty_destructor_takes_a_shell_that_refused_the_hangup) {
 // elle, il n'y aurait aucun moyen de faire survivre un travail à sa fenêtre.
 TEST(pty_destructor_leaves_a_child_that_left_the_session) {
   pid_t escaped = 0;
+  pid_t shell = 0;
   {
     Pty p;
     REQUIRE_EQ(p.spawn(shell_running(
                    "setsid sleep 30 & printf '%d\\n' \"$!\"; sleep 30")),
                std::string());
+    shell = p.pid();
     const std::string out = read_until(p, "\n", 2000);
     escaped = static_cast<pid_t>(std::atoi(out.c_str()));
     REQUIRE(escaped > 0);
   }
+  reap_orphan(shell);
   nap_ms(300);
   const char st = proc_state(escaped);
   ::kill(escaped, SIGKILL);  // on ne laisse rien tourner derriere un cas
@@ -459,19 +478,25 @@ TEST(pty_destructor_gives_the_master_descriptor_back) {
 
   // Un premier tour à part : il paie les allocations et les tampons que la
   // bibliothèque garde, et que le compte suivant prendrait pour une fuite.
+  pid_t warmed = 0;
   {
     Pty warm;
     REQUIRE_EQ(warm.spawn(shell_running("sleep 30")), std::string());
+    warmed = warm.pid();
   }
+  reap_orphan(warmed);
   const int before = open_fds();
   REQUIRE(before > 0);
 
+  std::vector<pid_t> spawned;
   for (int i = 0; i < 8; ++i) {
     Pty p;
     REQUIRE_EQ(p.spawn(shell_running("sleep 30")), std::string());
+    spawned.push_back(p.pid());
   }
 
   CHECK_EQ(open_fds(), before);
+  for (pid_t pid : spawned) reap_orphan(pid);
 }
 
 // LE SIGKILL PART AU GROUPE, pas au seul enfant. Un `trap '' HUP` se
@@ -480,15 +505,18 @@ TEST(pty_destructor_gives_the_master_descriptor_back) {
 // Ne tuer que le shell la laisserait tourner, orpheline, sans terminal.
 TEST(pty_destructor_takes_the_whole_group_of_a_shell_that_refused_the_hangup) {
   pid_t background = 0;
+  pid_t shell = 0;
   {
     Pty p;
     REQUIRE_EQ(p.spawn(shell_running("trap '' HUP; sleep 30 & "
                                      "printf '%d\\n' \"$!\"; sleep 30")),
                std::string());
     const std::string out = read_until(p, "\n", 2000);
+    shell = p.pid();
     background = static_cast<pid_t>(std::atoi(out.c_str()));
     REQUIRE(background > 0);
   }
+  reap_orphan(shell);
   const bool dead = gone_or_dead(background, 2000);
   if (!dead) ::kill(background, SIGKILL);  // rien ne traîne derrière un echec
   CHECK(dead);

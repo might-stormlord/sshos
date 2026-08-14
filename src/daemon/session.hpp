@@ -20,6 +20,7 @@
 #include "shell/menu.hpp"
 #include "shell/modal.hpp"
 #include "shell/panel.hpp"
+#include "shell/snapassist.hpp"
 #include "wm/hittest.hpp"
 #include "wm/layout.hpp"
 #include "wm/manager.hpp"
@@ -93,6 +94,11 @@ class Session : public ChildSink {
   }
 
   WindowId focused_for_tests() const { return wm_.focused(); }
+  const SnapAssist& assist_for_tests() const { return assist_; }
+  bool menu_open_for_tests() const { return menu_.is_open(); }
+  const Rect& work_for_tests() const { return last_work_; }
+  void dock_for_tests(WindowId w) { dock_into_free_half(w); }
+  void tile_for_tests() { tile_windows(); }
 
   Window* window_for_tests(WindowId id);
   const std::vector<std::unique_ptr<Window>>& windows_for_tests() const {
@@ -160,6 +166,14 @@ class Session : public ChildSink {
   // travail sans se chevaucher.
   void tile_windows();
   void snap_focused(SnapDir d);
+  // Amarre cette fenetre dans la moitie que le dernier ancrage a laissee
+  // libre, et referme la proposition.
+  void dock_into_free_half(WindowId w);
+  // Les fenetres qu'on peut proposer dans la moitie libre : visibles, et
+  // pas celle qu'on vient d'ancrer. Vide s'il n'y a rien a proposer, ou si
+  // la moitie est deja exactement occupee.
+  std::vector<SnapCandidate> assist_candidates(WindowId snapped,
+                                               const Rect& free) const;
 
  private:
   struct Idle {};
@@ -296,6 +310,10 @@ class Session : public ChildSink {
   // « personne n'en veut » : c'est l'etat de tout ecran ou aucune saisie
   // n'attend de frappe.
   std::optional<Pos> cursor_;
+  SnapAssist assist_;
+  // La moitie laissee libre par le dernier ancrage, en coordonnees
+  // d'ecran. Lue au clic sur une proposition.
+  Rect assist_rect_{};
 };
 
 }  // namespace sshos
