@@ -50,10 +50,34 @@ std::string encode_mouse_sgr(const MouseEvent& m, int x, int y) {
 
 }  // namespace
 
-Terminal::Terminal() { screen_.set_scrollback(&history_); }
+Terminal::Terminal() {
+  // UN ONGLET DES LA NAISSANCE : le reste du code n'a alors jamais a se
+  // demander s'il y en a un, et `active()` n'a pas de cas degenere.
+  tabs_.push_back(std::make_unique<Tab>(*this));
+  active().screen.set_scrollback(&active().history);
+}
 
 Terminal::Terminal(std::vector<std::string> argv) : argv_(std::move(argv)) {
-  screen_.set_scrollback(&history_);
+  tabs_.push_back(std::make_unique<Tab>(*this));
+  active().screen.set_scrollback(&active().history);
+}
+
+Terminal::Tab& Terminal::target() {
+  return feeding_ != nullptr ? *feeding_ : active();
+}
+
+int Terminal::tab_bar_rows() const {
+  // UN SEUL onglet n'a pas de barre : elle couterait une ligne de grille
+  // pour ne rien dire. Elle apparait des le second.
+  return tabs_.size() > 1 || mode_ == Mode::Renaming ? 1 : 0;
+}
+
+std::string Terminal::tab_label_for_tests(size_t i) const {
+  if (i >= tabs_.size()) return {};
+  const Tab& t = *tabs_[i];
+  if (!t.custom_title.empty()) return t.custom_title;
+  if (!t.guest_title.empty()) return t.guest_title;
+  return std::to_string(i + 1);
 }
 
 Terminal::~Terminal() {
@@ -61,12 +85,57 @@ Terminal::~Terminal() {
   // prévenir que lui laisserait la compilation tourner. `Pty` fait les deux
   // dans son propre destructeur ; ceci ne fait que retirer la surveillance
   // avant que le descripteur ne parte, comme partout ailleurs.
-  if (host_ != nullptr && watching_) host_->unwatch(token_);
+  for (const auto& t : tabs_) {
+    if (host_ != nullptr && t->watching) host_->unwatch(t->token);
+  }
 }
 
 void Terminal::attach(Host& host) {
   host_ = &host;
+  open_tab_into(active());
+  host.set_title("Terminal");
+}
 
+bool Terminal::open_tab() {
+  tabs_.push_back(std::make_unique<Tab>(*this));
+  Tab& t = *tabs_.back();
+  t.screen.set_scrollback(&t.history);
+  t.screen.resize(std::max(1, size_.w), std::max(1, size_.h - 1));
+  if (host_ != nullptr && !open_tab_into(t)) {
+    // Le shell n'a pas demarre : on reste sur celui qui marche plutot que
+    // de poser un onglet mort au premier plan.
+    tabs_.pop_back();
+    return false;
+  }
+  active_ = tabs_.size() - 1;
+  if (host_ != nullptr) host_->invalidate();
+  return true;
+}
+
+void Terminal::select_tab(size_t i) {
+  if (i >= tabs_.size()) return;
+  active_ = i;
+  if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::close_tab(size_t i) {
+  if (i >= tabs_.size()) return;
+  Tab& t = *tabs_[i];
+  if (host_ != nullptr && t.watching) host_->unwatch(t.token);
+  tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(i));
+  if (tabs_.empty()) {
+    // LE DERNIER ONGLET FERME LA FENETRE. Une fenetre de terminal sans
+    // terminal dedans n'a rien a montrer.
+    tabs_.push_back(std::make_unique<Tab>(*this));
+    active_ = 0;
+    if (host_ != nullptr) host_->request_close();
+    return;
+  }
+  if (active_ >= tabs_.size()) active_ = tabs_.size() - 1;
+  if (host_ != nullptr) host_->invalidate();
+}
+
+bool Terminal::open_tab_into(Tab& t) {
   PtySpawn spec;
   if (argv_.empty()) {
     // Le shell vient de `getpwuid()`, PAS de `$SHELL` : l'environnement du
@@ -81,80 +150,116 @@ void Terminal::attach(Host& host) {
   spec.cols = static_cast<unsigned short>(std::max(1, size_.w));
   spec.rows = static_cast<unsigned short>(std::max(1, size_.h));
 
-  spawn_error_ = pty_.spawn(spec);
-  if (!spawn_error_.empty()) return;
+  t.spawn_error = t.pty.spawn(spec);
+  if (!t.spawn_error.empty()) return false;
 
-  token_ = host.watch(pty_.master(), EPOLLIN);
-  watching_ = true;
-  // La récolte est globale au démon : l'application ne fait que dire à qui
-  // appartient ce pid.
-  host.watch_child(pty_.pid());
-  host.set_title("Terminal");
+  if (host_ != nullptr) {
+    t.token = host_->watch(t.pty.master(), EPOLLIN);
+    t.watching = true;
+    // La récolte est globale au démon : l'application ne fait que dire à
+    // qui appartient ce pid.
+    host_->watch_child(t.pty.pid());
+  }
+  return true;
 }
 
 void Terminal::to_guest(std::string_view bytes) {
   if (bytes.empty()) return;
-  if (pty_.master() < 0) {
+  Tab& t = active();
+  if (t.pty.master() < 0) {
     // Pas de PTY : en test, ou après la fermeture du maître. On retient au
     // lieu de perdre -- c'est ce qui rend l'encodage vérifiable sans
     // lancer de shell.
-    pending_.append(bytes);
+    t.pending.append(bytes);
     return;
   }
-  pty_.write(bytes.data(), bytes.size());
+  t.pty.write(bytes.data(), bytes.size());
 }
 
 std::string Terminal::take_written_for_tests() {
   std::string out;
-  out.swap(pending_);
+  out.swap(active().pending);
   return out;
 }
 
-void Terminal::feed_for_tests(std::string_view bytes) { parser_.feed(bytes); }
+void Terminal::feed_for_tests(std::string_view bytes) {
+  active().parser.feed(bytes);
+}
 
 IoStatus Terminal::on_io(uint64_t token, uint32_t events) {
-  if (token != token_) return IoStatus::Ok;
   (void)events;
+  Tab* tab = nullptr;
+  for (const auto& t : tabs_) {
+    if (t->watching && t->token == token) {
+      tab = t.get();
+      break;
+    }
+  }
+  if (tab == nullptr) return IoStatus::Ok;
+
+  // ON DIT AU PUITS DE QUI VIENNENT LES OCTETS. Le parseur de chaque onglet
+  // appelle le même `Terminal`, qui sans ceci écrirait dans la grille de
+  // l'onglet regardé -- un `ls` lancé dans le second onglet repeindrait le
+  // premier.
+  feeding_ = tab;
 
   // On DRAINE avant de conclure quoi que ce soit. Les noyaux récents
   // livrent d'abord ce qui restait en tampon, puis rendent EIO : fermer sur
   // le premier réveil jetterait le dernier mot de l'invité.
   for (;;) {
     char buf[8192];
-    const ssize_t n = pty_.read(buf, sizeof buf);
+    const ssize_t n = tab->pty.read(buf, sizeof buf);
     if (n > 0) {
-      parser_.feed(std::string_view(buf, static_cast<size_t>(n)));
+      tab->parser.feed(std::string_view(buf, static_cast<size_t>(n)));
       continue;
     }
     if (n == 0) {
       // Fin de fichier : l'esclave n'est plus ouvert nulle part.
-      pty_.note_eof();
+      tab->pty.note_eof();
+      feeding_ = nullptr;
       if (host_ != nullptr) host_->invalidate();
       return IoStatus::Closed;
     }
     break;  // rien de plus à lire pour l'instant
   }
+  feeding_ = nullptr;
   if (host_ != nullptr) host_->invalidate();
   return IoStatus::Ok;
 }
 
 void Terminal::on_child_exit(int status) {
   (void)status;
-  pty_.try_reap();
+  // On ne sait PAS quel onglet vient de perdre son shell : la récolte est
+  // globale au démon, et `waitpid(WNOHANG)` sur un pid encore vivant ne
+  // coûte qu'un appel système qui ne fait rien.
+  for (const auto& t : tabs_) t->pty.try_reap();
   if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::relayout() {
+  // LA BARRE MANGE UNE LIGNE, et donc tous les onglets rétrécissent quand
+  // le second s'ouvre -- pas seulement celui qu'on regarde. Un `vim` laissé
+  // dans un onglet de fond qui garderait l'ancienne hauteur peindrait sa
+  // dernière ligne sous la fenêtre.
+  const int w = std::max(1, size_.w);
+  const int h = std::max(1, size_.h - tab_bar_rows());
+  for (const auto& t : tabs_) {
+    t->screen.resize(w, h);
+    // La taille faisant autorité est celle du PTY : c'est le noyau qui
+    // envoie `SIGWINCH` au groupe au premier plan, pas nous.
+    t->pty.resize(static_cast<unsigned short>(w), static_cast<unsigned short>(h));
+  }
 }
 
 void Terminal::on_resize(Size s) {
   if (s.w <= 0 || s.h <= 0) return;
   size_ = s;
-  screen_.resize(s.w, s.h);
-  // La taille faisant autorité est celle du PTY : c'est le noyau qui
-  // envoie `SIGWINCH` au groupe au premier plan, pas nous.
-  pty_.resize(static_cast<unsigned short>(s.w), static_cast<unsigned short>(s.h));
+  relayout();
 }
 
 void Terminal::on_key(const KeyEvent& k) {
-  if (pty_.exited()) {
+  Tab& t = active();
+  if (t.pty.exited()) {
     // Un terminal mort ne prend plus de frappes : `Entrée` le ferme, tout
     // le reste est ignoré. La fenêtre RESTE ouverte jusque-là, pour qu'on
     // puisse lire la dernière erreur.
@@ -164,29 +269,30 @@ void Terminal::on_key(const KeyEvent& k) {
 
   // `Maj+PgPréc` / `PgSuiv` consultent l'historique. Ils ne vont jamais à
   // l'invité : c'est notre historique, pas le sien.
-  if ((k.mods & mod::Shift) != 0 && !screen_.alt_screen()) {
+  if ((k.mods & mod::Shift) != 0 && !t.screen.alt_screen()) {
     if (k.key == Key::PgUp) {
-      history_.scroll_back(static_cast<size_t>(std::max(1, size_.h / 2)));
+      t.history.scroll_back(static_cast<size_t>(std::max(1, size_.h / 2)));
       if (host_ != nullptr) host_->invalidate();
       return;
     }
     if (k.key == Key::PgDn) {
-      history_.scroll_forward(static_cast<size_t>(std::max(1, size_.h / 2)));
+      t.history.scroll_forward(static_cast<size_t>(std::max(1, size_.h / 2)));
       if (host_ != nullptr) host_->invalidate();
       return;
     }
   }
 
-  const std::string bytes = encode_key(k, modes_.cursor_keys_application);
+  const std::string bytes = encode_key(k, t.modes.cursor_keys_application);
   if (bytes.empty()) return;
   // Écrire, c'est revenir au présent : personne ne tape en aveugle dans
   // une page d'historique.
-  history_.scroll_to_bottom();
+  t.history.scroll_to_bottom();
   to_guest(bytes);
 }
 
 void Terminal::on_mouse(const MouseEvent& m) {
-  if (pty_.exited()) {
+  Tab& t = active();
+  if (t.pty.exited()) {
     // Un CLIC ferme aussi un terminal mort. Une fonction qui n'a qu'un
     // raccourci clavier est une fonction incomplète.
     if (m.action == MouseAction::Press && host_ != nullptr) {
@@ -201,88 +307,99 @@ void Terminal::on_mouse(const MouseEvent& m) {
   // inactif ; quand il est actif, elle part à l'invité -- c'est ce que font
   // les vrais émulateurs, et c'est ce qui fait défiler `less` sans que
   // notre historique s'en mêle.
-  if (wheel && !screen_.alt_screen() && modes_.tracking() == MouseTracking::None) {
+  if (wheel && !t.screen.alt_screen() && t.modes.tracking() == MouseTracking::None) {
     const size_t step = 3;
     if (m.action == MouseAction::WheelUp) {
-      history_.scroll_back(step);
+      t.history.scroll_back(step);
     } else {
-      history_.scroll_forward(step);
+      t.history.scroll_forward(step);
     }
     if (host_ != nullptr) host_->invalidate();
     return;
   }
 
-  if (modes_.tracking() == MouseTracking::None) return;
-  if (modes_.tracking() == MouseTracking::Click &&
+  if (t.modes.tracking() == MouseTracking::None) return;
+  if (t.modes.tracking() == MouseTracking::Click &&
       m.action == MouseAction::Motion) {
     // 1000 ne rapporte PAS le mouvement. Le rapporter quand même noierait
     // le lien SSH d'un paquet par cellule parcourue.
     return;
   }
-  to_guest(encode_mouse_sgr(m, m.x, m.y));
+  // Coordonnées LOCALES À LA GRILLE : la barre d'onglets n'existe pas pour
+  // l'invité, et lui donner un `y` décalé ferait cliquer `htop` une ligne
+  // trop bas.
+  to_guest(encode_mouse_sgr(m, m.x, m.y - tab_bar_rows()));
 }
 
 bool Terminal::wants_cursor(Pos& out) const {
-  if (!modes_.cursor_visible || pty_.exited()) return false;
+  const Tab& t = active();
+  if (!t.modes.cursor_visible || t.pty.exited()) return false;
   // Remonté dans l'historique, le curseur n'est pas à l'écran : le montrer
   // ailleurs qu'où il est serait pire que ne pas le montrer.
-  if (history_.offset() != 0) return false;
-  const CursorPos c = screen_.cursor();
-  out = Pos{c.x, c.y};
+  if (t.history.offset() != 0) return false;
+  const CursorPos c = t.screen.cursor();
+  out = Pos{c.x, c.y + tab_bar_rows()};
   return true;
 }
 
 CloseCheck Terminal::can_close() const {
-  if (!pty_.exited() && pty_.pid() > 0) {
-    return CloseCheck::ask("Un processus tourne encore. Fermer quand meme ?");
+  // N'IMPORTE QUEL onglet vivant retient la fenêtre. Ne regarder que celui
+  // qu'on voit tuerait un `make` en cours dans un onglet de fond sans
+  // jamais poser la question.
+  for (const auto& t : tabs_) {
+    if (!t->pty.exited() && t->pty.pid() > 0) {
+      return CloseCheck::ask("Un processus tourne encore. Fermer quand meme ?");
+    }
   }
   return CloseCheck::allow();
 }
 
 void Terminal::render(View v) {
   const int vw = v.w();
-  const int vh = v.h();
-  if (!spawn_error_.empty()) {
+  const int top = tab_bar_rows();
+  const int vh = v.h() - top;
+  const Tab& t = active();
+  if (!t.spawn_error.empty()) {
     Style st;
     st.fg = Color::indexed(1);
-    v.text(0, 0, spawn_error_, st);
+    v.text(0, top, t.spawn_error, st);
     return;
   }
 
   // Ce qui est visible est la concaténation « historique, puis écran »,
   // lue `offset()` lignes plus haut que sa fin.
-  const size_t back = history_.offset();
-  const size_t have = history_.size();
+  const size_t back = t.history.offset();
+  const size_t have = t.history.size();
   for (int y = 0; y < vh; ++y) {
     const size_t from_top = static_cast<size_t>(y);
     if (from_top < back) {
       // Une ligne d'historique. Elle est ROGNÉE : ce qui manque à droite
       // est du vide, pas une erreur.
       const size_t idx = have - back + from_top;
-      const ScrollbackLine& line = history_.at(idx);
+      const ScrollbackLine& line = t.history.at(idx);
       for (size_t x = 0; x < line.size() && static_cast<int>(x) < vw; ++x) {
         if (line[x].width == 0) continue;
-        v.put(static_cast<int>(x), y, line[x].ch, line[x].style);
+        v.put(static_cast<int>(x), top + y, line[x].ch, line[x].style);
       }
       continue;
     }
     const int gy = y - static_cast<int>(back);
-    if (gy >= screen_.rows()) break;
-    for (int x = 0; x < vw && x < screen_.cols(); ++x) {
-      const ScreenCell& c = screen_.at(x, gy);
+    if (gy >= t.screen.rows()) break;
+    for (int x = 0; x < vw && x < t.screen.cols(); ++x) {
+      const ScreenCell& c = t.screen.at(x, gy);
       if (c.width == 0) continue;  // seconde moitié d'une pleine chasse
-      v.put(x, y, c.ch, c.style);
+      v.put(x, top + y, c.ch, c.style);
     }
   }
 
-  if (pty_.exited()) {
+  if (t.pty.exited()) {
     // La fenêtre RESTE ouverte : on doit pouvoir lire la dernière erreur.
     Style st;
     st.attrs = attr::Reverse;
     const std::string msg =
-        "[processus termine (code " + std::to_string(pty_.exit_code()) +
+        "[processus termine (code " + std::to_string(t.pty.exit_code()) +
         ") - Entree ou clic pour fermer]";
-    v.text(0, vh - 1, msg, st);
+    v.text(0, v.h() - 1, msg, st);
   }
 }
 
@@ -290,23 +407,23 @@ void Terminal::render(View v) {
 // Le puits du parseur.
 // ---------------------------------------------------------------------------
 
-void Terminal::print(char32_t c) { screen_.print(c); }
+void Terminal::print(char32_t c) { target().screen.print(c); }
 
 void Terminal::execute(uint8_t byte) {
   switch (byte) {
     case '\n':
     case 0x0b:
     case 0x0c:
-      screen_.line_feed();
+      target().screen.line_feed();
       break;
     case '\r':
-      screen_.carriage_return();
+      target().screen.carriage_return();
       break;
     case '\b':
-      screen_.backspace();
+      target().screen.backspace();
       break;
     case '\t':
-      screen_.tab();
+      target().screen.tab();
       break;
     default:
       // La cloche et le reste : rien à faire d'une grille.
@@ -315,11 +432,11 @@ void Terminal::execute(uint8_t byte) {
 }
 
 void Terminal::sync_modes() {
-  screen_.set_autowrap(modes_.autowrap);
-  if (modes_.alt_screen && !screen_.alt_screen()) {
-    screen_.enter_alt_screen();
-  } else if (!modes_.alt_screen && screen_.alt_screen()) {
-    screen_.leave_alt_screen();
+  target().screen.set_autowrap(target().modes.autowrap);
+  if (target().modes.alt_screen && !target().screen.alt_screen()) {
+    target().screen.enter_alt_screen();
+  } else if (!target().modes.alt_screen && target().screen.alt_screen()) {
+    target().screen.leave_alt_screen();
   }
 }
 
@@ -327,9 +444,9 @@ void Terminal::csi(const Params& params, std::string_view intermediates,
                    uint8_t final_byte) {
   // Les questions d'abord : une réponse part sur le maître, jamais vers le
   // client, et elle ne doit pas se faire doubler par un effet de bord.
-  const CursorPos cur = screen_.cursor();
+  const CursorPos cur = target().screen.cursor();
   const std::string answer =
-      reply_for_csi(params, intermediates, final_byte, cur.x, cur.y, modes_);
+      reply_for_csi(params, intermediates, final_byte, cur.x, cur.y, target().modes);
   if (!answer.empty()) {
     to_guest(answer);
     return;
@@ -337,7 +454,7 @@ void Terminal::csi(const Params& params, std::string_view intermediates,
 
   if (intermediates == "?") {
     if (final_byte == 'h' || final_byte == 'l') {
-      apply_dec_private(params, final_byte == 'h', modes_);
+      apply_dec_private(params, final_byte == 'h', target().modes);
       sync_modes();
     }
     return;
@@ -346,62 +463,62 @@ void Terminal::csi(const Params& params, std::string_view intermediates,
 
   switch (final_byte) {
     case 'A':
-      screen_.move_up(count_of(params));
+      target().screen.move_up(count_of(params));
       break;
     case 'B':
-      screen_.move_down(count_of(params));
+      target().screen.move_down(count_of(params));
       break;
     case 'C':
-      screen_.move_right(count_of(params));
+      target().screen.move_right(count_of(params));
       break;
     case 'D':
-      screen_.move_left(count_of(params));
+      target().screen.move_left(count_of(params));
       break;
     case 'G':
-      screen_.set_column(count_of(params) - 1);
+      target().screen.set_column(count_of(params) - 1);
       break;
     case 'd':
-      screen_.set_row(count_of(params) - 1);
+      target().screen.set_row(count_of(params) - 1);
       break;
     case 'H':
     case 'f':
       // Le fil compte à partir de 1, la grille à partir de 0. La
       // conversion se fait ICI, en un seul endroit.
-      screen_.move_to(count_of(params, 1) - 1, count_of(params, 0) - 1);
+      target().screen.move_to(count_of(params, 1) - 1, count_of(params, 0) - 1);
       break;
     case 'J':
-      screen_.erase_display(param_or(params, 0, 0));
+      target().screen.erase_display(param_or(params, 0, 0));
       break;
     case 'K':
-      screen_.erase_line(param_or(params, 0, 0));
+      target().screen.erase_line(param_or(params, 0, 0));
       break;
     case 'X':
-      screen_.erase_chars(count_of(params));
+      target().screen.erase_chars(count_of(params));
       break;
     case '@':
-      screen_.insert_chars(count_of(params));
+      target().screen.insert_chars(count_of(params));
       break;
     case 'P':
-      screen_.delete_chars(count_of(params));
+      target().screen.delete_chars(count_of(params));
       break;
     case 'L':
-      screen_.insert_lines(count_of(params));
+      target().screen.insert_lines(count_of(params));
       break;
     case 'M':
-      screen_.delete_lines(count_of(params));
+      target().screen.delete_lines(count_of(params));
       break;
     case 'r':
       if (params.empty()) {
-        screen_.reset_scroll_region();
+        target().screen.reset_scroll_region();
       } else {
-        screen_.set_scroll_region(count_of(params, 0) - 1,
-                                  param_or(params, 1, screen_.rows()) - 1);
+        target().screen.set_scroll_region(count_of(params, 0) - 1,
+                                  param_or(params, 1, target().screen.rows()) - 1);
       }
       break;
     case 'm': {
-      Style pen = screen_.pen();
+      Style pen = target().screen.pen();
       apply_sgr(params, pen);
-      screen_.set_pen(pen);
+      target().screen.set_pen(pen);
       break;
     }
     default:
@@ -413,26 +530,26 @@ void Terminal::csi(const Params& params, std::string_view intermediates,
 
 void Terminal::esc(std::string_view intermediates, uint8_t final_byte) {
   if (intermediates == "(") {
-    screen_.set_charset(charset_from_final(final_byte));
+    target().screen.set_charset(charset_from_final(final_byte));
     return;
   }
   if (!intermediates.empty()) return;
 
   switch (final_byte) {
     case '7':
-      screen_.save_cursor();
+      target().screen.save_cursor();
       break;
     case '8':
-      screen_.restore_cursor();
+      target().screen.restore_cursor();
       break;
     case 'D':
-      screen_.index();
+      target().screen.index();
       break;
     case 'M':
-      screen_.reverse_index();
+      target().screen.reverse_index();
       break;
     case 'E':
-      screen_.next_line();
+      target().screen.next_line();
       break;
     default:
       break;

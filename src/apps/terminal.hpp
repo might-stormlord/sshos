@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <memory>
 #include <vector>
 
 #include "app/app.hpp"
@@ -30,6 +31,35 @@ namespace sshos {
 // deux côtés.
 class Terminal : public App, public ParserSink {
  public:
+  // UN ONGLET : son pseudo-terminal, sa grille, son historique, ses modes.
+  // Tout est par onglet et rien n'est partage -- deux onglets sont deux
+  // terminaux, pas deux vues du meme.
+  //
+  // Le parseur de chaque onglet appelle le MEME puits (le Terminal), qui
+  // ne saurait donc pas de qui viennent les octets. D'ou `feeding_` :
+  // pose juste avant `feed()`, il dit a quel onglet appartient ce qui
+  // arrive. Un seul thread, un seul appel a la fois : le pointeur ne peut
+  // pas etre pris de vitesse.
+  struct Tab {
+    explicit Tab(Terminal& owner) : parser(owner) {}
+    Tab(const Tab&) = delete;
+    Tab& operator=(const Tab&) = delete;
+
+    Pty pty;
+    Parser parser;
+    Screen screen{80, 24};
+    Scrollback history;
+    Modes modes;
+    uint64_t token = 0;
+    bool watching = false;
+    std::string pending;
+    std::string spawn_error;
+    // Le titre AFFICHE. Vide veut dire « celui que l'invite a pose », ou a
+    // defaut le numero -- renommer est un choix de l'utilisateur, et il
+    // doit survivre au prochain `OSC 2` du shell.
+    std::string custom_title;
+    std::string guest_title;
+  };
   Terminal();
   // La commande à lancer. Vide -- le cas normal -- veut dire « le shell de
   // connexion de l'utilisateur », lu dans `getpwuid()`. Le constructeur
@@ -59,16 +89,23 @@ class Terminal : public App, public ParserSink {
   void esc(std::string_view intermediates, uint8_t final_byte) override;
   void osc(std::string_view data) override;
 
+  // Ce que le Terminal est en train de faire.
+  enum class Mode { Normal, Renaming };
+
   // --- pour les tests ---
   // Le liant n'a AUCUN effet observable sans un vrai PTY : ces accès
   // permettent de le nourrir d'octets comme s'ils en venaient, et de lire
   // ce qu'il en a fait. Aucun code de production ne doit s'en servir.
   void feed_for_tests(std::string_view bytes);
-  const Screen& screen_for_tests() const { return screen_; }
-  const Scrollback& scrollback_for_tests() const { return history_; }
-  const Modes& modes_for_tests() const { return modes_; }
+  const Screen& screen_for_tests() const { return active().screen; }
+  const Scrollback& scrollback_for_tests() const { return active().history; }
+  const Modes& modes_for_tests() const { return active().modes; }
   std::string take_written_for_tests();
-  pid_t pid_for_tests() const { return pty_.pid(); }
+  pid_t pid_for_tests() const { return active().pty.pid(); }
+  size_t tab_count_for_tests() const { return tabs_.size(); }
+  size_t active_tab_for_tests() const { return active_; }
+  std::string tab_label_for_tests(size_t i) const;
+  Mode mode_for_tests() const { return mode_; }
 
  private:
   // Écrit vers l'invité. Sans PTY -- en test, ou après la mort de
@@ -76,25 +113,35 @@ class Terminal : public App, public ParserSink {
   // qui rend l'encodage vérifiable sans lancer de shell.
   void to_guest(std::string_view bytes);
 
+  Tab& active() { return *tabs_[active_]; }
+  const Tab& active() const { return *tabs_[active_]; }
+  // L'onglet que le parseur est en train de nourrir, ou l'actif hors
+  // lecture -- c'est ce qui rend `feed_for_tests()` utilisable.
+  Tab& target();
+  // Ouvre un onglet et le rend actif. Rend false si le shell n'a pas
+  // demarre : mieux vaut rester sur celui qui marche.
+  bool open_tab();
+  // Lance un shell dans cet onglet. Rend false si l'exec a echoue.
+  bool open_tab_into(Tab& t);
+  void close_tab(size_t i);
+  void select_tab(size_t i);
+  int tab_bar_rows() const;
+  // Redonne a CHAQUE onglet la taille de la grille -- la barre en mange une
+  // ligne, et son apparition rétrécit aussi les onglets qu'on ne voit pas.
+  void relayout();
+
   // Applique ce que l'invité a demandé et qui a un effet mécanique sur la
   // grille. Le registre reste la seule source de vérité ; ceci n'en est
   // que la conséquence.
   void sync_modes();
 
-  Pty pty_;
-  Parser parser_{*this};
-  Screen screen_{80, 24};
-  Scrollback history_;
-  Modes modes_;
+  std::vector<std::unique_ptr<Tab>> tabs_;
+  size_t active_ = 0;
+  Tab* feeding_ = nullptr;
+  Mode mode_ = Mode::Normal;
+  std::string edit_;
 
   Host* host_ = nullptr;
-  uint64_t token_ = 0;
-  bool watching_ = false;
-  // Retenu quand il n'y a pas de PTY sous la main.
-  std::string pending_;
-  // L'erreur de démarrage, s'il y en a eu une. Elle s'affiche dans la
-  // fenêtre au lieu de laisser une grille vide inexplicable.
-  std::string spawn_error_;
   Size size_{80, 24};
   std::vector<std::string> argv_;
 };
