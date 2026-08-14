@@ -1876,3 +1876,166 @@ TEST(files_records_a_climb_in_its_history) {
   f.on_key(KeyEvent{Key::Left, 0, mod::Alt});
   CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
 }
+
+// ------------------------------------------------------------------ creer
+
+// `F7` CRÉE UN DOSSIER. C'est la touche de Dolphin et de Krusader, et un
+// gestionnaire qui ne sait que détruire oblige à sortir dans un terminal
+// pour la moitié du travail.
+TEST(files_makes_a_directory_on_f7) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::F7));
+  REQUIRE(f.mode_for_tests() == Files::Mode::Creating);
+  for (char c : std::string("neuf")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  struct stat st {};
+  REQUIRE_EQ(::lstat((t.root() + "/neuf").c_str(), &st), 0);
+  CHECK(S_ISDIR(st.st_mode));
+  ::rmdir((t.root() + "/neuf").c_str());
+}
+
+// `Maj+F7` CRÉE UN FICHIER VIDE. Le même geste, l'autre sorte : deux
+// touches éloignées pour deux choses aussi proches se retiennent mal.
+TEST(files_makes_an_empty_file_on_shift_f7) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  f.on_key(KeyEvent{Key::F7, 0, mod::Shift});
+  for (char c : std::string("vide.txt")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  struct stat st {};
+  REQUIRE_EQ(::lstat((t.root() + "/vide.txt").c_str(), &st), 0);
+  CHECK(S_ISREG(st.st_mode));
+  ::unlink((t.root() + "/vide.txt").c_str());
+}
+
+// CE QU'ON VIENT DE CRÉER EST SOUS LE CURSEUR. Le chercher des yeux dans
+// une liste de deux cents entrées, juste après l'avoir nommé, est le genre
+// de détail qui fait qu'on n'utilise pas la fonction.
+TEST(files_puts_the_cursor_on_what_it_just_made) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("aaa");
+  t.file("zzz");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("mmm")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  CHECK_EQ(selected_name(f), std::string("mmm"));
+  ::rmdir((t.root() + "/mmm").c_str());
+}
+
+// UN NOM DÉJÀ PRIS EST REFUSÉ, et rien n'est écrasé. C'est la même règle
+// que le renommage, et pour la même raison.
+TEST(files_refuses_to_create_over_something_that_exists) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("occupe");
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("occupe")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  struct stat st {};
+  REQUIRE_EQ(::lstat((t.root() + "/occupe").c_str(), &st), 0);
+  CHECK(S_ISREG(st.st_mode));  // toujours le fichier, pas un dossier
+  CHECK(!f.status_for_tests().empty());
+}
+
+// UN NOM VIDE NE CRÉE RIEN, et `Échap` annule : une saisie ouverte par
+// erreur ne doit pas laisser un « nouveau dossier » derrière elle.
+TEST(files_creates_nothing_from_an_empty_name_or_an_escape) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  const size_t before = f.visible_for_tests().size();
+
+  f.on_key(key(Key::F7));
+  f.on_key(key(Key::Enter));
+  CHECK_EQ(f.visible_for_tests().size(), before);
+  // ET SANS SE PLAINDRE : un nom vide n'est pas une erreur, c'est un
+  // renoncement. Laisser partir la création sur le répertoire lui-même
+  // rendrait un « creation impossible » que personne n'a provoqué.
+  CHECK(f.status_for_tests().empty());
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("perdu")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Escape));
+  CHECK_EQ(f.visible_for_tests().size(), before);
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// UN NOM AVEC UNE BARRE EST REFUSÉ. « ../ailleurs » créerait hors du
+// répertoire affiché, ce que rien à l'écran n'aurait laissé prévoir.
+TEST(files_refuses_a_name_that_leaves_the_directory) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root() + "/sous");
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("../evade")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  struct stat st {};
+  CHECK(::lstat((t.root() + "/evade").c_str(), &st) != 0);
+  CHECK(!f.status_for_tests().empty());
+}
+
+// LA SAISIE SE VOIT, et elle dit CE QU'ON CRÉE : « nouveau nom » pendant
+// qu'on nomme un dossier laisserait croire à un renommage.
+TEST(files_says_what_it_is_creating_while_you_type) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("ab")) f.on_key(ch(static_cast<char32_t>(c)));
+  const std::string screen = painted(f, 60, 10);
+  CHECK(screen.find("dossier") != std::string::npos);
+  CHECK(screen.find("ab") != std::string::npos);
+
+  f.on_key(key(Key::Escape));
+  f.on_key(KeyEvent{Key::F7, 0, mod::Shift});
+  const std::string screen2 = painted(f, 60, 10);
+  CHECK(screen2.find("fichier") != std::string::npos);
+}
+
+// CRÉER UN FICHIER N'ÉCRASE JAMAIS : sans `O_EXCL`, `Maj+F7` sur un nom
+// déjà pris vide le fichier qui était là, et rien à l'écran ne le dit.
+TEST(files_never_truncates_an_existing_file_when_creating) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string p = t.file("precieux");
+  const int fd = ::open(p.c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "contenu", 7), ssize_t{7});
+  ::close(fd);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 10});
+  f.on_key(KeyEvent{Key::F7, 0, mod::Shift});
+  for (char c : std::string("precieux")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  struct stat st {};
+  REQUIRE_EQ(::lstat(p.c_str(), &st), 0);
+  CHECK_EQ(st.st_size, off_t{7});
+  CHECK(!f.status_for_tests().empty());
+}

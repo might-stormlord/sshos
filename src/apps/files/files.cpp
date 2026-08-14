@@ -1,5 +1,6 @@
 #include "apps/files/files.hpp"
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -474,6 +475,51 @@ void Files::commit_rename() {
   settle();
 }
 
+void Files::commit_create() {
+  const std::string name = edit_;
+  mode_ = Mode::Normal;
+  edit_.clear();
+  // Un nom vide ne crée rien : une saisie ouverte par erreur ne doit pas
+  // laisser un « nouveau dossier » derrière elle.
+  if (name.empty()) return;
+  // UN NOM AVEC UNE BARRE EST REFUSÉ. « ../ailleurs » créerait hors du
+  // répertoire affiché, ce que rien à l'écran n'aurait laissé prévoir.
+  if (name.find('/') != std::string::npos || name == "." || name == "..") {
+    status_ = "nom invalide : " + name;
+    return;
+  }
+
+  const std::string target = join_path(listing_.path, name);
+  // `O_EXCL` et `mkdir` refusent tous deux un nom déjà pris, et c'est le
+  // noyau qui tranche : vérifier soi-même laisserait une fenêtre entre le
+  // test et la création.
+  int rc = 0;
+  if (creating_dir_) {
+    rc = ::mkdir(target.c_str(), 0755);
+  } else {
+    const int fd = ::open(target.c_str(),
+                          O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0644);
+    rc = fd < 0 ? -1 : 0;
+    if (fd >= 0) ::close(fd);
+  }
+  if (rc != 0) {
+    status_ = std::string("creation impossible : ") + std::strerror(errno);
+    return;
+  }
+
+  reload();
+  // CE QU'ON VIENT DE CRÉER EST SOUS LE CURSEUR : le chercher des yeux
+  // juste après l'avoir nommé est le genre de détail qui fait qu'on
+  // n'utilise pas la fonction.
+  for (size_t i = 0; i < visible_.size(); ++i) {
+    if (visible_[i].name == name) {
+      sel_ = i;
+      break;
+    }
+  }
+  settle();
+}
+
 void Files::commit_delete() {
   const std::vector<std::string> victims = targets();
   mode_ = Mode::Normal;
@@ -518,10 +564,15 @@ void Files::on_key(const KeyEvent& k) {
   // Le renommage et la confirmation CAPTENT le clavier. Les laisser
   // partager les touches de la navigation ferait filtrer la liste sous les
   // doigts de celui qui tape un nom.
-  if (mode_ == Mode::Renaming) {
+  if (mode_ == Mode::Renaming || mode_ == Mode::Creating) {
+    const bool creating = mode_ == Mode::Creating;
     switch (k.key) {
       case Key::Enter:
-        commit_rename();
+        if (creating) {
+          commit_create();
+        } else {
+          commit_rename();
+        }
         return;
       case Key::Escape:
         mode_ = Mode::Normal;
@@ -638,6 +689,13 @@ void Files::on_key(const KeyEvent& k) {
       mode_ = Mode::Renaming;
       return;
     }
+    case Key::F7:
+      // `F7` un dossier, `Maj+F7` un fichier vide : le même geste, et
+      // `Maj` en change la sorte.
+      creating_dir_ = (k.mods & mod::Shift) == 0;
+      edit_.clear();
+      mode_ = Mode::Creating;
+      return;
     case Key::Delete:
       // `targets()`, pas la seule ligne : avec une sélection, le curseur
       // peut très bien être resté sur `..`, qui ne se supprime pas.
@@ -880,6 +938,12 @@ void Files::render(View v) {
     // application qui a l'air bloquée.
     status_style.attrs = attr::Reverse;
     bottom = "nouveau nom: " + edit_;
+  } else if (mode_ == Mode::Creating) {
+    // L'INVITE DIT CE QU'ON CRÉE : « nouveau nom » pendant qu'on nomme un
+    // dossier laisserait croire à un renommage.
+    status_style.attrs = attr::Reverse;
+    bottom = std::string(creating_dir_ ? "nouveau dossier: " : "nouveau fichier: ") +
+             edit_;
   } else if (mode_ == Mode::Confirming) {
     status_style.attrs = attr::Reverse;
     status_style.fg = Color::indexed(1);

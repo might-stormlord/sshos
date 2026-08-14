@@ -37,7 +37,7 @@ class Files : public App {
   // suppression sont des ÉTATS, pas des raccourcis : la suppression est le
   // seul geste irréversible du projet, et un raccourci qui détruit sans
   // repasser par une question détruit tôt ou tard par erreur.
-  enum class Mode { Normal, Renaming, Confirming };
+  enum class Mode { Normal, Renaming, Confirming, Creating };
 
   // --- pour les tests ---
   // La navigation n'a aucun effet observable hors de son dessin : ces
@@ -113,6 +113,10 @@ class Files : public App {
   // qu'on ait le droit de toucher -- `..` en particulier.
   std::string touchable_selection() const;
   void commit_rename();
+  // Crée ce que `creating_dir_` dit, sous le nom saisi. Un gestionnaire
+  // qui ne sait que détruire oblige à sortir dans un terminal pour la
+  // moitié du travail.
+  void commit_create();
   void commit_delete();
 
   // Le nom sous la sélection, ou vide si elle ne désigne rien de marquable
@@ -149,6 +153,10 @@ class Files : public App {
   Mode mode_ = Mode::Normal;
   // Le nom en cours de saisie pendant un renommage.
   std::string edit_;
+  // Ce qu'on est en train de créer : un dossier, ou un fichier vide. Deux
+  // touches éloignées pour deux choses aussi proches se retiendraient mal ;
+  // c'est le même geste, et `Maj` en change la sorte.
+  bool creating_dir_ = true;
   Size size_{40, 12};
   Host* host_ = nullptr;
 };

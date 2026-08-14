@@ -46,7 +46,7 @@ tâche.
 - [x] Tâche 2 — la sélection multiple : Espace marque et descend, Ctrl+A bascule tout/rien, Maj+flèches étend, Ctrl/Maj+clic, ligne d'état qui compte et pèse, suppression groupée avec une seule question. 15 cas, 15 mutations, toutes mordues.
 - [x] Tâche 3 — les colonnes : nom, taille, date ; en-tête cliquable qui trie et inverse, flèche de sens, chiffres calés à droite, colonnes qui cèdent la place avant les noms. 14 cas, 14 mutations, toutes mordues.
 - [x] Tâche 4 — l'historique et le fil d'Ariane : Alt+flèches, tout déplacement passe par go_to(), segments cliquables, élision par la gauche. 8 cas, 14 mutations, 12 mordues, 1 invalide, 1 équivalence déclarée.
-- [ ] Tâche 5 — créer
+- [x] Tâche 5 — créer : F7 un dossier, Maj+F7 un fichier vide, le neuf sous le curseur, jamais d'écrasement, ni de nom qui sort du répertoire. 9 cas, 11 mutations, 10 mordues, 1 invalide.
 - [ ] Tâche 6 — la vue scindée
 - [ ] Tâche 7 — le presse-papiers
 - [ ] Tâche 8 — les raccourcis
