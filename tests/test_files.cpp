@@ -2,9 +2,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
+#include "apps/editor/editor.hpp"
 #include "apps/files/files.hpp"
 #include "harness.hpp"
 #include "render/surface.hpp"
@@ -189,11 +191,13 @@ TEST(files_says_something_when_a_file_cannot_be_opened_yet) {
   REQUIRE_EQ(selected_name(f), std::string("a.txt"));
   f.on_key(key(Key::Enter));
 
+  // ON NE DESCEND PAS DANS UN FICHIER : il s'ouvre dans l'éditeur, et le
+  // répertoire affiché ne bouge pas. Sans hôte -- ce cas n'en attache pas
+  // -- l'éditeur n'a nulle part où s'ouvrir, et c'est le silence qui est
+  // juste : une erreur du système sur un `opendir` de fichier serait la
+  // trace d'une descente qu'on n'a jamais tentée.
   CHECK_EQ(f.path_for_tests(), t.root());
-  // Le message EXACT : « non vide » passerait aussi bien contre un code
-  // qui aurait essayé de descendre dans le fichier et rapporté l'erreur du
-  // système.
-  CHECK(f.status_for_tests().find("editeur") != std::string::npos);
+  CHECK(f.status_for_tests().empty());
 }
 
 // --------------------------------------------------------------- le filtre
@@ -2618,4 +2622,317 @@ TEST(files_leaves_the_cursor_alone_when_there_is_no_filter) {
   f.on_resize(Size{60, 12});
 
   CHECK_EQ(selected_name(f), std::string(".."));
+}
+
+// ------------------------------------------------- ouvrir dans l'editeur
+
+namespace {
+
+// Hôte qui retient ce qu'on lui demande d'ouvrir. Le vrai le confie à la
+// session, qui lui fait une fenêtre ; ici on veut seulement savoir QUE
+// l'application l'a demandé, et AVEC QUOI.
+struct OpeningHost : sshos::Host {
+  void set_title(std::string) override {}
+  void request_close() override {}
+  void invalidate() override {}
+  uint64_t watch(int, uint32_t) override { return 0; }
+  void unwatch(uint64_t) override {}
+  void watch_child(pid_t) override {}
+  void open_app(std::unique_ptr<sshos::App> a, std::string id) override {
+    opened.push_back(std::move(a));
+    ids.push_back(std::move(id));
+  }
+  std::vector<std::unique_ptr<sshos::App>> opened;
+  std::vector<std::string> ids;
+};
+
+}  // namespace
+
+// OUVRIR UN FICHIER L'OUVRE DANS L'ÉDITEUR. Il disait « l'editeur arrive
+// au jalon 6 » -- message écrit AVANT que le jalon 6 ne soit livré, et
+// resté là depuis : la fonction existait, personne ne l'avait branchée.
+TEST(files_opens_a_file_in_the_editor) {
+  OpeningHost host;
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("note.txt");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.attach(host);
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("note.txt"));
+
+  f.on_key(key(Key::Enter));
+
+  REQUIRE_EQ(host.opened.size(), size_t{1});
+  CHECK_EQ(host.ids[0], std::string("editeur"));
+  // Et il a bien reçu SON chemin : un éditeur ouvert sur un tampon vide
+  // n'aurait rien ouvert du tout.
+  const auto* ed = dynamic_cast<sshos::Editor*>(host.opened[0].get());
+  REQUIRE(ed != nullptr);
+  CHECK_EQ(ed->path_for_tests(), t.root() + "/note.txt");
+}
+
+// UN RÉPERTOIRE SE DESCEND, il ne s'édite pas : c'est la même touche, et
+// c'est le type qui tranche.
+TEST(files_still_descends_into_a_directory_on_enter) {
+  OpeningHost host;
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("sous");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.attach(host);
+  f.on_key(key(Key::Down));
+
+  f.on_key(key(Key::Enter));
+
+  CHECK(host.opened.empty());
+  CHECK_EQ(f.path_for_tests(), t.root() + "/sous");
+}
+
+// -------------------------------------------------- le menu contextuel
+
+// LE BOUTON DROIT OUVRE TOUT. L'utilisateur pilote à la souris : chaque
+// fonction doit être atteignable sans connaître un seul raccourci.
+TEST(files_opens_a_context_menu_on_right_click) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  REQUIRE(!f.menu_open_for_tests());
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  CHECK(f.menu_open_for_tests());
+  const std::string screen = painted(f, 60, 16);
+  CHECK(screen.find("Nouveau dossier") != std::string::npos);
+  CHECK(screen.find("Nouveau fichier") != std::string::npos);
+  CHECK(screen.find("Renommer") != std::string::npos);
+  CHECK(screen.find("Supprimer") != std::string::npos);
+  CHECK(screen.find("Copier") != std::string::npos);
+  CHECK(screen.find("Coller") != std::string::npos);
+}
+
+// IL DIT LES RACCOURCIS EN FACE. C'est ainsi qu'on les apprend sans les
+// chercher : on vient pour cliquer, on repart en sachant taper.
+TEST(files_names_the_shortcut_beside_each_entry) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  const std::string screen = painted(f, 60, 16);
+  CHECK(screen.find("F7") != std::string::npos);
+  CHECK(screen.find("F2") != std::string::npos);
+}
+
+// LE CLIC DROIT CHOISIT LA LIGNE QU'IL VISE avant d'ouvrir : sans cela,
+// « Renommer » porterait sur celle d'avant, qu'on ne regarde plus.
+TEST(files_selects_the_row_it_was_right_clicked_on) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+
+  // La ligne 3 est la première entrée après `..`.
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  CHECK_EQ(selected_name(f), std::string("a"));
+}
+
+// UNE ENTRÉE CLIQUÉE FAIT SON TRAVAIL, et le menu se referme.
+TEST(files_runs_the_entry_that_is_clicked) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  const std::string screen = painted(f, 60, 16);
+  int y = -1;
+  for (int i = 0; i < 16; ++i) {
+    if (painted_row(f, 60, 16, i).find("Nouveau dossier") != std::string::npos) {
+      y = i;
+    }
+  }
+  REQUIRE(y >= 0);
+  const int x = static_cast<int>(painted_row(f, 60, 16, y).find("Nouveau"));
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, x, y, 0});
+
+  CHECK(!f.menu_open_for_tests());
+  REQUIRE(f.mode_for_tests() == Files::Mode::Creating);
+  // ET LA BONNE : viser une ligne et en lancer une autre est le défaut
+  // classique d'un menu dont le dessin et le clic ne comptent pas pareil.
+  CHECK(painted(f, 60, 16).find("nouveau dossier:") != std::string::npos);
+  (void)screen;
+}
+
+// UN CLIC À CÔTÉ LE REFERME SANS RIEN FAIRE : c'est la sortie qu'on
+// cherche en premier quand on l'a ouvert par erreur.
+TEST(files_closes_its_menu_on_a_click_outside) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+  REQUIRE(f.menu_open_for_tests());
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 58, 15, 0});
+
+  CHECK(!f.menu_open_for_tests());
+  CHECK(f.mode_for_tests() == Files::Mode::Normal);
+}
+
+// `ÉCHAP` LE REFERME AUSSI, et le clavier ne va nulle part ailleurs tant
+// qu'il est ouvert : un menu qui laisse filtrer la liste sous lui n'est
+// pas un menu.
+TEST(files_keeps_the_keyboard_while_its_menu_is_open) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("abc");
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  f.on_key(ch(U'a'));
+  CHECK(f.filter_for_tests().empty());
+
+  f.on_key(key(Key::Escape));
+  CHECK(!f.menu_open_for_tests());
+}
+
+// LE MENU TIENT DANS LA FENÊTRE. Ouvert près du bord bas, il déborderait
+// et la `View` le couperait : on ne verrait plus les dernières entrées, et
+// c'est justement là que sont « Coller » et « Scinder ».
+TEST(files_keeps_its_menu_inside_the_window) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 55, 15, 0});
+
+  const sshos::Rect r = f.menu_rect_for_tests();
+  CHECK(r.x >= 0);
+  CHECK(r.y >= 0);
+  CHECK(r.x + r.w <= 60);
+  CHECK(r.y + r.h <= 16);
+}
+
+
+// --------------------------------------------------- le glisser-deposer
+
+// GLISSER UN FICHIER D'UN PANNEAU À L'AUTRE LE DÉPLACE. C'est le geste
+// qu'on essaie en premier quand deux dossiers sont côte à côte, et il n'a
+// aucun équivalent au clavier qui se devine.
+TEST(files_moves_a_file_dragged_to_the_other_pane) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gauche");
+  t.dir("droite");
+  t.file("gauche/voyageur");
+  Files f(t.root() + "/gauche");
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  f.on_key(key(Key::Tab));
+  f.on_key(key(Key::Backspace));
+  f.on_key(key(Key::Home));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("droite"));
+  f.on_key(key(Key::Enter));
+  f.on_key(key(Key::Tab));
+
+  // Appui sur « voyageur » à gauche, glissement, relâchement à droite.
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 30, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 50, 4, 0});
+  f.on_mouse(MouseEvent{MouseAction::Release, 0, 50, 4, 0});
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK(!exists(t.root() + "/gauche/voyageur"));
+  CHECK(exists(t.root() + "/droite/voyageur"));
+}
+
+// UN CLIC N'EST PAS UN GLISSEMENT. Sans ce seuil, choisir une ligne
+// déplacerait le fichier chez le voisin dès que la main tremble.
+TEST(files_does_not_move_anything_on_a_plain_click) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("tranquille");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 3, 0});
+  // Un mouvement SUR PLACE n'est pas un mouvement : la souris rapporte la
+  // même cellule, et la main n'a rien fait.
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 4, 3, 0});
+  CHECK(painted(f, 80, 12).find("deplacer") == std::string::npos);
+  f.on_mouse(MouseEvent{MouseAction::Release, 0, 4, 3, 0});
+
+  CHECK(exists(t.root() + "/tranquille"));
+  CHECK(!f.copy_active_for_tests());
+  CHECK_EQ(selected_name(f), std::string("tranquille"));
+}
+
+// DÉPOSER SUR UN DOSSIER Y ENTRE LE FICHIER, même dans le même panneau :
+// c'est ce que fait tout gestionnaire, et c'est le seul moyen de ranger
+// sans scinder.
+TEST(files_moves_a_file_dropped_onto_a_directory) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("boite");
+  t.file("range-moi");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  REQUIRE_EQ(names(f), std::string("..|boite|range-moi"));
+
+  // « range-moi » est en ligne 4, « boite » en ligne 3.
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 4, 0});
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 4, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Release, 0, 4, 3, 0});
+  for (int i = 0; i < 200 && f.copy_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK(!exists(t.root() + "/range-moi"));
+  CHECK(exists(t.root() + "/boite/range-moi"));
+  ::unlink((t.root() + "/boite/range-moi").c_str());
+}
+
+// DÉPOSER UN DOSSIER SUR LUI-MÊME NE FAIT RIEN. Le laisser passer
+// demanderait au système de mettre un répertoire dans son propre
+// descendant, et la réponse est un message d'erreur incompréhensible.
+TEST(files_refuses_to_drop_a_directory_onto_itself) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("boite");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 6, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Release, 0, 6, 3, 0});
+
+  CHECK(!f.copy_active_for_tests());
+  CHECK(exists(t.root() + "/boite"));
+}
+
+// LE GLISSEMENT SE VOIT PENDANT QU'IL DURE : sans marque, on ne sait pas
+// si l'on traîne quelque chose ni quoi.
+TEST(files_says_what_it_is_dragging) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("attrape-moi");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 4, 3, 0});
+  f.on_mouse(MouseEvent{MouseAction::Motion, 0, 20, 5, 0});
+
+  const std::string screen = painted(f, 80, 12);
+  CHECK(screen.find("attrape-moi") != std::string::npos);
+  CHECK(screen.find("deplacer") != std::string::npos);
 }

@@ -3,6 +3,7 @@
 #include <sys/types.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,6 +34,8 @@ enum class IoStatus { Ok, Closed };
 // Ce qu'une application a le droit de demander au bureau. Elle ne reçoit
 // jamais l'epoll ni son propre numéro de fenêtre : watch() rend un jeton
 // opaque, que on_io() lui rendra tel quel.
+class App;
+
 class Host {
  public:
   virtual ~Host() = default;
@@ -47,6 +50,20 @@ class Host {
   // applications qui appelleraient `waitpid(-1)` chacune de leur côté se
   // voleraient mutuellement leurs enfants.
   virtual void watch_child(pid_t pid) = 0;
+
+  // « OUVRE ÇA DANS SA PROPRE FENÊTRE. » Une application ne sait pas
+  // ouvrir de fenêtre -- elle ne connaît ni le gestionnaire ni la zone de
+  // travail -- mais elle sait fabriquer une autre application. C'est ce
+  // qui permet au gestionnaire de fichiers d'ouvrir un fichier dans
+  // l'éditeur sans rien savoir du bureau.
+  //
+  // Défaut : ne rien faire. Un hôte de test n'a pas de bureau derrière
+  // lui, et une application qui demande poliment ne doit pas planter là où
+  // personne ne peut la servir.
+  virtual void open_app(std::unique_ptr<App> app, std::string app_id) {
+    (void)app;
+    (void)app_id;
+  }
 };
 
 // Le contrat applicatif du projet, valable jusqu'au jalon 6. Tout est

@@ -1,5 +1,7 @@
 #include "apps/files/files.hpp"
 
+#include "apps/editor/editor.hpp"
+
 #include <fcntl.h>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -163,6 +165,170 @@ void Files::draw_places(View v) const {
     st.fg = Color::indexed(4);
     v.text(0, 2 + static_cast<int>(i),
            elide_right(places()[i].label, kPlacesWidth), st);
+  }
+}
+
+std::string Files::drop_target(const MouseEvent& e,
+                               const std::vector<std::string>& sources) const {
+  // Le panneau visé a déjà pris la main : `pane()` est celui du lâcher.
+  const int row = e.y - 2;
+  if (row >= 0) {
+    const size_t hit = pane().top + static_cast<size_t>(row);
+    if (hit < pane().visible.size()) {
+      const DirEntry& over = pane().visible[hit];
+      // DÉPOSER SUR UN DOSSIER Y ENTRE, même dans le même panneau : c'est
+      // le seul moyen de ranger sans scinder. `..` compte : c'est le
+      // parent, et l'y jeter est un geste courant.
+      if (over.kind == EntryKind::Dir) {
+        if (over.name == "..") return parent_path(pane().listing.path);
+        const std::string target = join_path(pane().listing.path, over.name);
+        // SUR LUI-MÊME, RIEN. Le laisser passer demanderait au système de
+        // mettre un répertoire dans son propre descendant, et la réponse
+        // est un message incompréhensible.
+        for (const std::string& src : sources) {
+          if (src == target) return {};
+        }
+        return target;
+      }
+    }
+  }
+  // Ailleurs dans le panneau : c'est son répertoire. Lâcher là où l'on a
+  // pris ne fait rien -- le travail serait vide, mais l'annoncer serait du
+  // bruit.
+  const std::string here = pane().listing.path;
+  for (const std::string& src : sources) {
+    if (parent_path(src) == here) return {};
+  }
+  return here;
+}
+
+const std::vector<Files::MenuItem>& Files::menu_items() {
+  // L'ORDRE EST CELUI DE L'USAGE : ce qu'on fait le plus souvent en haut.
+  // Une séparation vide n'a pas sa place ici -- elle coûterait une ligne
+  // sur une fenêtre de seize, et le regroupement se lit déjà.
+  static const std::vector<MenuItem> kItems = {
+      {Cmd::Open, "Ouvrir", "Entree"},
+      {Cmd::NewDir, "Nouveau dossier", "F7"},
+      {Cmd::NewFile, "Nouveau fichier", "Maj+F7"},
+      {Cmd::Rename, "Renommer", "F2"},
+      {Cmd::Delete, "Supprimer", "Suppr"},
+      {Cmd::Copy, "Copier", "Ctrl+C"},
+      {Cmd::Cut, "Couper", "Ctrl+X"},
+      {Cmd::Paste, "Coller", "Ctrl+V"},
+      {Cmd::SelectAll, "Tout selectionner", "Ctrl+A"},
+      {Cmd::Up, "Dossier parent", "Ret.arr."},
+      {Cmd::Back, "Precedent", "Alt+gauche"},
+      {Cmd::Forward, "Suivant", "Alt+droite"},
+      {Cmd::Split, "Scinder la vue", "F3"},
+      {Cmd::Places, "Raccourcis", "F9"},
+      {Cmd::Hidden, "Fichiers caches", "."},
+      {Cmd::SortName, "Trier par nom", ""},
+      {Cmd::SortSize, "Trier par taille", ""},
+      {Cmd::SortTime, "Trier par date", ""},
+  };
+  return kItems;
+}
+
+void Files::open_menu(int x, int y) {
+  int widest = 0;
+  for (const MenuItem& it : menu_items()) {
+    widest = std::max(widest,
+                      text_cells(it.label) + 2 + text_cells(it.keys));
+  }
+  const int w = std::min(std::max(1, size_.w), widest + 4);
+  const int h = std::min(std::max(1, size_.h),
+                         static_cast<int>(menu_items().size()) + 2);
+  // IL TIENT DANS LA FENÊTRE. Ouvert près d'un bord, il déborderait et la
+  // `View` le couperait : on ne verrait plus les dernières entrées, et
+  // c'est justement là que sont le tri et les bascules.
+  const int px = std::min(std::max(0, x), std::max(0, size_.w - w));
+  const int py = std::min(std::max(0, y), std::max(0, size_.h - h));
+  menu_rect_ = Rect{px, py, w, h};
+  menu_open_ = true;
+}
+
+void Files::draw_menu(View v) const {
+  if (!menu_open_) return;
+  Style st;
+  st.attrs = attr::Reverse;
+  v.fill(menu_rect_, st);
+  v.box(menu_rect_, Border::Unicode, st);
+
+  const int x = menu_rect_.x + 1;
+  const int room = menu_rect_.w - 2;
+  for (size_t i = 0; i < menu_items().size(); ++i) {
+    const int y = menu_rect_.y + 1 + static_cast<int>(i);
+    if (y >= menu_rect_.y + menu_rect_.h - 1) break;
+    const MenuItem& it = menu_items()[i];
+    v.text(x, y, elide_right(it.label, room), st);
+    // Le raccourci calé à DROITE : c'est une colonne, pas une glose, et
+    // une colonne se lit d'un coup d'œil.
+    Style keys = st;
+    keys.attrs |= attr::Dim;
+    const int kw = text_cells(it.keys);
+    if (kw > 0 && kw < room) {
+      v.text(menu_rect_.x + menu_rect_.w - 1 - kw, y, it.keys, keys);
+    }
+  }
+}
+
+void Files::run_menu(Cmd c) {
+  menu_open_ = false;
+  switch (c) {
+    case Cmd::Open: activate(); return;
+    case Cmd::NewDir:
+      creating_dir_ = true;
+      edit_.clear();
+      mode_ = Mode::Creating;
+      return;
+    case Cmd::NewFile:
+      creating_dir_ = false;
+      edit_.clear();
+      mode_ = Mode::Creating;
+      return;
+    case Cmd::Rename: {
+      const std::string name = touchable_selection();
+      if (name.empty()) return;
+      edit_ = name;
+      mode_ = Mode::Renaming;
+      return;
+    }
+    case Cmd::Delete:
+      if (targets().empty()) return;
+      mode_ = Mode::Confirming;
+      return;
+    case Cmd::Copy: take_clipboard(false); return;
+    case Cmd::Cut: take_clipboard(true); return;
+    case Cmd::Paste: paste_clipboard(); return;
+    case Cmd::SelectAll:
+      if (pane().marked.empty()) {
+        mark_range(0, pane().visible.empty() ? 0 : pane().visible.size() - 1);
+      } else {
+        pane().marked.clear();
+      }
+      return;
+    case Cmd::Up: go_up(); return;
+    case Cmd::Back: go_back(); return;
+    case Cmd::Forward: go_forward(); return;
+    case Cmd::Split:
+      if (split_) {
+        if (active_ == 1) panes_[0] = panes_[1];
+        active_ = 0;
+        split_ = false;
+      } else {
+        panes_[1] = panes_[0];
+        panes_[1].marked.clear();
+        split_ = true;
+      }
+      return;
+    case Cmd::Places: places_ = !places_; return;
+    case Cmd::Hidden:
+      show_hidden_ = !show_hidden_;
+      reload();
+      return;
+    case Cmd::SortName: sort_on(SortBy::Name); return;
+    case Cmd::SortSize: sort_on(SortBy::Size); return;
+    case Cmd::SortTime: sort_on(SortBy::Time); return;
   }
 }
 
@@ -422,10 +588,13 @@ void Files::activate() {
   if (pane().visible.empty()) return;
   const DirEntry& e = pane().visible[pane().sel];
   if (e.kind != EntryKind::Dir) {
-    // Un fichier s'ouvrirait dans l'éditeur, qui est le jalon 6. D'ici là,
-    // le dire vaut mieux que ne rien faire : une touche sans effet et sans
-    // explication passe pour une panne.
-    pane().status = "l'editeur arrive au jalon 6";
+    // OUVRIR UN FICHIER, C'EST L'OUVRIR DANS L'ÉDITEUR. Cette branche a
+    // dit « l'editeur arrive au jalon 6 » longtemps après que le jalon 6
+    // eut été livré : la fonction existait, personne ne l'avait branchée.
+    if (host_ == nullptr) return;
+    host_->open_app(
+        std::make_unique<Editor>(join_path(pane().listing.path, e.name)),
+        "editeur");
     return;
   }
   if (e.name == "..") {
@@ -673,6 +842,14 @@ void Files::commit_delete() {
 }
 
 void Files::on_key(const KeyEvent& k) {
+  // LE MENU CAPTE LE CLAVIER. Un menu qui laisse filtrer la liste sous lui
+  // n'est pas un menu ; `Échap` est la sortie qu'on cherche en premier
+  // quand on l'a ouvert par erreur.
+  if (menu_open_) {
+    if (k.key == Key::Escape) menu_open_ = false;
+    return;
+  }
+
   // Le renommage et la confirmation CAPTENT le clavier. Les laisser
   // partager les touches de la navigation ferait filtrer la liste sous les
   // doigts de celui qui tape un nom.
@@ -905,6 +1082,22 @@ void Files::on_key(const KeyEvent& k) {
 }
 
 void Files::on_mouse(const MouseEvent& m) {
+  // LE MENU PASSE DEVANT TOUT : ouvert, il prend le clic ou se referme. Un
+  // clic à côté le referme SANS RIEN FAIRE -- c'est la sortie qu'on
+  // cherche en premier quand on l'a ouvert par erreur.
+  if (menu_open_) {
+    if (m.action != MouseAction::Press) return;
+    const int row = m.y - menu_rect_.y - 1;
+    if (m.x > menu_rect_.x && m.x < menu_rect_.x + menu_rect_.w - 1 &&
+        row >= 0 && static_cast<size_t>(row) < menu_items().size() &&
+        row < menu_rect_.h - 2) {
+      run_menu(menu_items()[static_cast<size_t>(row)].cmd);
+      return;
+    }
+    menu_open_ = false;
+    return;
+  }
+
   // CLIQUER DANS UN PANNEAU LUI DONNE LA MAIN, avant tout le reste. Sans
   // cela il faudrait viser à la souris puis appuyer sur `Tab` pour que la
   // frappe suivante y aille.
@@ -938,6 +1131,37 @@ void Files::on_mouse(const MouseEvent& m) {
       // La cloison n'appartient à personne.
       return;
     }
+  }
+
+  // LE GLISSEMENT, avant tout le reste : une fois engagé, ni la molette ni
+  // le survol ne veulent dire quoi que ce soit d'autre.
+  if (pressed_ && e.action == MouseAction::Motion) {
+    if (m.x != press_x_ || m.y != press_y_) {
+      if (!dragging_) {
+        drag_ = targets();
+        dragging_ = !drag_.empty();
+        if (dragging_) {
+          for (std::string& n : drag_) {
+            n = join_path(panes_[active_].listing.path, n);
+          }
+        }
+      }
+    }
+    return;
+  }
+  if (e.action == MouseAction::Release) {
+    const bool was = dragging_;
+    const std::vector<std::string> taken = drag_;
+    pressed_ = false;
+    dragging_ = false;
+    drag_.clear();
+    if (!was || taken.empty()) return;
+    const std::string dest = drop_target(e, taken);
+    if (dest.empty() || job_.active()) return;
+    // DÉPLACER, c'est ce qu'on veut d'un glissement : copier se demande, se
+    // glisser se range.
+    job_.start(taken, dest, CopyKind::Move);
+    return;
   }
 
   const size_t rows = static_cast<size_t>(rows_for_list());
@@ -982,9 +1206,29 @@ void Files::on_mouse(const MouseEvent& m) {
 
   // La barre de chemin, puis l'en-tête : la liste commence en 2.
   const int row = e.y - 2;
-  if (row < 0 || static_cast<size_t>(row) >= rows) return;
-  const size_t hit = pane().top + static_cast<size_t>(row);
-  if (hit >= pane().visible.size()) return;
+  const bool in_list = row >= 0 && static_cast<size_t>(row) < rows;
+  const size_t hit =
+      in_list ? pane().top + static_cast<size_t>(row) : pane().visible.size();
+
+  // LE BOUTON DROIT OUVRE LE MENU, où qu'il tombe dans le panneau -- même
+  // sur la ligne d'état, même sur le vide. C'est justement là qu'on veut
+  // « Nouveau dossier » ou « Coller », et exiger de viser une ligne
+  // rendrait un dossier vide inutilisable à la souris.
+
+  // Quand il vise une ligne, il la choisit d'abord : sans cela,
+  // « Renommer » porterait sur celle d'avant, qu'on ne regarde plus.
+  if (e.button == 2) {
+    if (hit < pane().visible.size()) {
+      pane().sel = hit;
+      settle();
+    }
+    // Les coordonnées du menu sont celles de la FENÊTRE, pas du panneau :
+    // c'est elle qu'il doit tenir.
+    open_menu(m.x, m.y);
+    return;
+  }
+
+  if (!in_list || hit >= pane().visible.size()) return;
 
   // `Ctrl+clic` ajoute ou retire UNE entrée sans toucher au reste et sans
   // l'ouvrir : c'est ce qui distingue le clic qui choisit du clic qui agit.
@@ -1000,6 +1244,17 @@ void Files::on_mouse(const MouseEvent& m) {
     pane().sel = hit;
     settle();
     return;
+  }
+
+  // L'APPUI ARME LE GLISSEMENT, il ne le déclenche pas : c'est le
+  // MOUVEMENT qui décide, et c'est ce seuil qui fait qu'un simple clic
+  // reste un simple clic.
+  // `targets()` refuse déjà `..` -- il n'est pas un fichier mais la sortie
+  // -- et un second garde ici ne ferait que répéter la même règle.
+  if (hit < pane().visible.size()) {
+    pressed_ = true;
+    press_x_ = m.x;
+    press_y_ = m.y;
   }
 
   // Cliquer SÉLECTIONNE ; recliquer la ligne déjà choisie l'OUVRE. Pas de
@@ -1030,9 +1285,11 @@ void Files::render(View v) {
     const int rest = v.w() - kPlacesWidth - 1;
     if (rest <= 0) return;
     render_panes(v.sub(Rect{kPlacesWidth + 1, 0, rest, v.h()}));
+    draw_menu(v);
     return;
   }
   render_panes(v);
+  draw_menu(v);
 }
 
 void Files::render_panes(View v) {
@@ -1198,6 +1455,15 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
   } else if (!pn.filter.empty()) {
     status_style.attrs = attr::Bold;
     bottom = "filtre: " + pn.filter;
+  } else if (dragging_ && !drag_.empty()) {
+    // CE QU'ON TRAÎNE, ET QU'ON S'APPRÊTE À EN FAIRE. Sans marque, on ne
+    // sait pas si l'on tient quelque chose ni quoi.
+    status_style.attrs = attr::Reverse;
+    const size_t cut = drag_[0].rfind('/');
+    bottom = "deplacer " +
+             (drag_.size() > 1 ? std::to_string(drag_.size()) + " elements"
+                               : drag_[0].substr(cut + 1)) +
+             " vers...";
   } else if (job_.active()) {
     // CE QUI SE PASSE, ET SUR QUOI. Une copie de deux minutes sans rien à
     // l'écran passe pour un blocage, et l'utilisateur tue la fenêtre.

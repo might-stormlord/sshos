@@ -38,6 +38,7 @@ class Editor : public App {
   Mode mode_for_tests() const { return mode_; }
   const std::string& status_for_tests() const { return status_; }
   size_t top_for_tests() const { return top_; }
+  const std::string& path_for_tests() const { return path_; }
 
  private:
   void settle();

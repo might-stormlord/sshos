@@ -85,6 +85,8 @@ class Files : public App {
   const std::string& status_for_tests() const { return pane().status; }
   const std::string& filter_for_tests() const { return pane().filter; }
   Mode mode_for_tests() const { return mode_; }
+  bool menu_open_for_tests() const { return menu_open_; }
+  const Rect& menu_rect_for_tests() const { return menu_rect_; }
   bool split_for_tests() const { return split_; }
   bool places_for_tests() const { return places_; }
   size_t active_pane_for_tests() const { return active_; }
@@ -128,6 +130,28 @@ class Files : public App {
     std::string path;
   };
   static const std::vector<Place>& places();
+
+  // LE MENU CONTEXTUEL. L'utilisateur pilote a la SOURIS : chaque fonction
+  // doit etre atteignable au bouton droit, sans connaitre un seul
+  // raccourci. Et chaque entree porte le sien en face -- on vient pour
+  // cliquer, on repart en sachant taper.
+  enum class Cmd {
+    Open, NewDir, NewFile, Rename, Delete, Copy, Cut, Paste, SelectAll,
+    Split, Places, Hidden, Up, Back, Forward, SortName, SortSize, SortTime,
+  };
+  struct MenuItem {
+    Cmd cmd = Cmd::Open;
+    const char* label = "";
+    const char* keys = "";
+  };
+  static const std::vector<MenuItem>& menu_items();
+  void open_menu(int x, int y);
+  void run_menu(Cmd c);
+  // Ou tombe un lacher, en coordonnees DEJA locales au panneau vise :
+  // rend le repertoire d'arrivee, ou vide si le lacher ne mene nulle part.
+  std::string drop_target(const MouseEvent& e,
+                          const std::vector<std::string>& sources) const;
+  void draw_menu(View v) const;
   void draw_places(View v) const;
   int rows_for_list() const;
   // La géométrie des colonnes, UN SEUL calcul partagé par le dessin et par
@@ -202,6 +226,16 @@ class Files : public App {
   size_t active_ = 0;
   bool split_ = false;
   bool places_ = false;
+  // LE GLISSEMENT EN COURS. Un clic n'est pas un glissement : sans le
+  // seuil de `dragging_`, choisir une ligne deplacerait le fichier chez le
+  // voisin des que la main tremble.
+  bool pressed_ = false;
+  bool dragging_ = false;
+  int press_x_ = 0;
+  int press_y_ = 0;
+  std::vector<std::string> drag_;
+  bool menu_open_ = false;
+  Rect menu_rect_{};
   bool show_hidden_ = false;
   // D'OÙ L'ON VIENT, et ce qu'on vient de défaire. Une nouvelle descente
   // efface la seconde : garder une branche qu'on vient d'abandonner ferait

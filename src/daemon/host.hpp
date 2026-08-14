@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <memory>
 #include <vector>
 
 #include "app/app.hpp"
@@ -60,6 +61,16 @@ struct ChildWatch {
   WindowId win = 0;
 };
 
+// Une application qu'une AUTRE application a demandé d'ouvrir. Elle
+// attend là que la session la prenne : `HostImpl` ne connaît ni le
+// gestionnaire de fenêtres ni la zone de travail, et ouvrir une fenêtre au
+// milieu du traitement d'un clic ferait bouger la pile sous les pieds de
+// celui qui l'a demandé.
+struct PendingApp {
+  std::unique_ptr<App> app;
+  std::string app_id;
+};
+
 // Le seul objet qui traverse la frontière entre une application et le
 // bureau. Il tient une référence sur SA fenêtre, dont l'adresse est stable
 // parce que les fenêtres vivent derrière des unique_ptr, jamais dans un
@@ -67,12 +78,14 @@ struct ChildWatch {
 class HostImpl : public Host {
  public:
   HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen, bool& dirty,
-           std::vector<ChildWatch>& children)
+           std::vector<ChildWatch>& children,
+           std::vector<PendingApp>& pending)
       : win_(&win),
         fds_(&fds),
         gen_(&gen),
         dirty_(&dirty),
-        children_(&children) {}
+        children_(&children),
+        pending_(&pending) {}
 
   void set_title(std::string title) override;
   void request_close() override;
@@ -81,6 +94,7 @@ class HostImpl : public Host {
   uint64_t watch(int fd, uint32_t events) override;
   void unwatch(uint64_t token) override;
   void watch_child(pid_t pid) override;
+  void open_app(std::unique_ptr<App> app, std::string app_id) override;
 
   // Cette clé désigne-t-elle encore une surveillance vivante ? Répondre non
   // est tout l'intérêt des générations : un événement livré par epoll pour
@@ -103,6 +117,7 @@ class HostImpl : public Host {
   uint32_t* gen_;
   bool* dirty_;
   std::vector<ChildWatch>* children_;
+  std::vector<PendingApp>* pending_;
   std::vector<std::pair<uint64_t, int>> watched_;
 };
 

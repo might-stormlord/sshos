@@ -43,6 +43,15 @@ void HostImpl::watch_child(pid_t pid) {
   children_->push_back(ChildWatch{pid, win_->id});
 }
 
+void HostImpl::open_app(std::unique_ptr<App> app, std::string app_id) {
+  if (app == nullptr) return;
+  // Elle ATTEND : ouvrir une fenêtre au milieu du traitement d'un clic
+  // ferait bouger la pile sous les pieds de celui qui l'a demandé. La
+  // session la prendra au tour suivant, comme elle prend les fermetures.
+  pending_->push_back(PendingApp{std::move(app), std::move(app_id)});
+  *dirty_ = true;
+}
+
 bool HostImpl::owns(uint64_t key) const {
   return std::any_of(watched_.begin(), watched_.end(),
                      [key](const auto& p) { return p.first == key; });

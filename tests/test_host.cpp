@@ -60,6 +60,7 @@ bool g_dirty = false;
 // La table des enfants surveillés appartient normalement à la Session ;
 // les cas qui ne la regardent pas partagent celle-ci.
 std::vector<sshos::ChildWatch> g_children;
+std::vector<sshos::PendingApp> g_pending;
 
 std::unique_ptr<Window> make_window(sshos::WindowId id, std::unique_ptr<App> app,
                                     FdRegistrar& reg, uint32_t& gen,
@@ -69,7 +70,7 @@ std::unique_ptr<Window> make_window(sshos::WindowId id, std::unique_ptr<App> app
   auto w = std::make_unique<Window>();
   w->id = id;
   w->app = std::move(app);
-  w->host = std::make_unique<HostImpl>(*w, reg, gen, dirty, children);
+  w->host = std::make_unique<HostImpl>(*w, reg, gen, dirty, children, g_pending);
   return w;
 }
 

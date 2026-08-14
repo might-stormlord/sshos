@@ -254,6 +254,7 @@ class Session : public ChildSink {
   // globale au processus : le démon apprend qu'un pid est mort sans savoir
   // à qui il était, et c'est ici qu'on le retrouve.
   std::vector<ChildWatch> children_;
+  std::vector<PendingApp> pending_apps_;
 
   // Le panneau porte son bord et son épaisseur ; la zone de travail s'en
   // déduit. Ancré en bas par défaut : les trois autres bords marchent, mais

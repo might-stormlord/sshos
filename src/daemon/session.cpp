@@ -369,7 +369,8 @@ WindowId Session::open_from_catalog(std::string_view id) {
   // L'hôte est créé APRÈS que le gestionnaire a donné à la fenêtre son
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
-  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_);
+  w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_,
+                                      pending_apps_);
   w->app->attach(*w->host);
   return w->id;
 }
@@ -575,7 +576,8 @@ void Session::ensure_window(const Rect& work) {
     // gestionnaire a donné son adresse définitive à la fenêtre, et AVANT
     // `attach()`, qui fait poser son titre à l'application.
     if (Window* w = wm_.open(seed_factory()(), last_work_)) {
-      w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_);
+      w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_,
+                                      pending_apps_);
       w->app->attach(*w->host);
     }
     return;
@@ -1074,6 +1076,21 @@ void Session::render(Surface& out) {
   // [×], donc par can_close() et, s'il le faut, par le dialogue. Le
   // Terminal s'en sert deux fois : quand son processus est mort et qu'on
   // demande à fermer, et quand `Alt+w` ferme le dernier onglet.
+  // CE QU'UNE APPLICATION A DEMANDÉ D'OUVRIR. Une par tour : la pile vient
+  // de changer, et le reste attendra le suivant -- même règle que les
+  // fermetures juste en dessous.
+  if (!pending_apps_.empty()) {
+    PendingApp req = std::move(pending_apps_.front());
+    pending_apps_.erase(pending_apps_.begin());
+    if (Window* w = wm_.open(std::move(req.app), last_work_)) {
+      w->app_id = req.app_id;
+      w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_,
+                                           children_, pending_apps_);
+      w->app->attach(*w->host);
+    }
+    dirty_ = true;
+  }
+
   for (const auto& up : wm_.stack()) {
     if (!up->close_requested) continue;
     up->close_requested = false;
