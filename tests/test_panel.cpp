@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -562,4 +563,112 @@ TEST(panel_drops_the_vertical_reminder_before_dropping_a_task) {
                    b.text_row(y) + "|");
     }
   }
+}
+
+// LE LIBELLÉ S'ÉTIRE QUAND LA BARRE EST VIDE. Huit cellules fixes
+// coupaient « Terminal (build) » en « Termina… » alors que les trois
+// quarts de la barre étaient blancs -- et c'est précisément le titre qui
+// dit ce que la fenêtre contient.
+TEST(panel_widens_its_labels_when_the_bar_has_room) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  REQUIRE(w != nullptr);
+  w->title = "Terminal (build)";
+  p.layout(wm, 80, 24, true);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  const std::string row = s.text_row(23);
+  CHECK(row.find("Terminal (build)") != std::string::npos);
+  CHECK(row.find("10:05") != std::string::npos);
+}
+
+// MAIS PAS AU PRIX D'UNE ENTRÉE. Une barre chargée revient au libellé
+// court : montrer trente fenêtres à moitié nommées vaut mieux que d'en
+// montrer six bien nommées et de replier le reste.
+TEST(panel_narrows_its_labels_again_when_the_bar_fills_up) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  Window* first = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+  REQUIRE(first != nullptr);
+  first->title = "Terminal (build)";
+  p.layout(wm, 80, 24, true);
+  int wide = 0;
+  for (int x = 0; x < 80; ++x) {
+    if (p.hit(x, 23).what == PanelHit::Task) ++wide;
+  }
+
+  for (int i = 0; i < 8; ++i) {
+    Window* o = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+    REQUIRE(o != nullptr);
+    o->title = "Terminal (build)";
+  }
+  p.layout(wm, 80, 24, true);
+  int narrow_widest = 0;
+  int cur = 0;
+  WindowId last = 0;
+  for (int x = 0; x < 80; ++x) {
+    const PanelHitResult h = p.hit(x, 23);
+    if (h.what != PanelHit::Task) continue;
+    if (h.win != last) {
+      last = h.win;
+      cur = 0;
+    }
+    ++cur;
+    narrow_widest = std::max(narrow_widest, cur);
+  }
+  CHECK(narrow_widest < wide);
+}
+
+// LA PLACE SE COMPTE AU LIBELLÉ COURT, PUIS ON ÉTIRE. L'ordre inverse
+// replierait des entrées qui tenaient : mesurer d'abord large fait croire
+// que la barre est pleine, et le compteur de repli apparaît alors qu'il
+// restait de la place au libellé minimum.
+TEST(panel_folds_nothing_that_would_have_fitted_at_the_short_label) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  for (int i = 0; i < 3; ++i) {
+    Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+    REQUIRE(w != nullptr);
+    w->title = "Terminal (build)";
+  }
+  p.layout(wm, 80, 24, true);
+
+  for (int x = 0; x < 80; ++x) {
+    CHECK(p.hit(x, 23).what != PanelHit::Overflow);
+  }
+}
+
+
+// LA BARRE PREND TOUTE LA PLACE LIBRE, à la cellule près. La largeur
+// exacte EST le contrat : elle se mesure au libellé court -- c'est lui qui
+// décide si quelque chose se replie -- puis on étire dans ce qui reste.
+// Mesurer large d'abord fait croire à un débordement, réserve trois
+// cellules pour un compteur qui ne servira pas, et le titre y perd un
+// caractère sans que rien ne l'ait exigé.
+//
+// À 80 colonnes, deux fenêtres nommées « Terminal (build) » et les trois
+// entrées du catalogue laissent tout juste quinze cellules par titre.
+TEST(panel_spends_every_free_cell_on_its_labels) {
+  Panel p;
+  p.set_edge(PanelEdge::Bottom);
+  WindowManager wm;
+  for (int i = 0; i < 2; ++i) {
+    Window* w = wm.open(std::make_unique<Bloc>(), Rect{0, 0, 80, 23});
+    REQUIRE(w != nullptr);
+    w->title = "Terminal (build)";
+  }
+  p.layout(wm, 80, 24, true);
+
+  Surface s(80, 24);
+  View v = s.root();
+  p.draw(v, Theme::mono16(), "10:05");
+  const std::string row = s.text_row(23);
+  CHECK(row.find("Terminal (buil\xe2\x80\xa6") != std::string::npos);
+  CHECK(row.find("10:05") != std::string::npos);
 }

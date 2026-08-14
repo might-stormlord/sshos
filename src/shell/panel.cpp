@@ -9,9 +9,12 @@
 namespace sshos {
 namespace {
 
-// Un libellé plus long que ça est coupé. Huit cellules laissent « Battemen »
-// lisible, et c'est la limite au-delà de laquelle une barre de 80 colonnes
-// ne montre plus assez de fenêtres pour servir à quelque chose.
+// LE PLANCHER, pas la mesure. Huit cellules laissent « Termina » lisible,
+// et c'est ce à quoi la barre revient quand elle est pleine : mieux vaut
+// trente fenêtres à moitié nommées que six bien nommées et le reste
+// replié. Au-dessus, le libellé s'étire jusqu'à ce que la place manque --
+// une barre aux trois quarts blanche qui coupe « Terminal (build) » en
+// « Termina… » perd justement ce qui distingue deux fenêtres.
 constexpr int kLabelCells = 8;
 
 // « HH:MM » : toujours cinq cellules, ce qui permet à layout() de réserver
@@ -175,11 +178,11 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   // Combien d'entrées tiennent avant `end`. Appelée deux fois : une fois
   // sans réserve, puis, si tout ne tient pas, avec la place du compteur de
   // repli mise de côté.
-  const auto fits = [&](int end) {
+  const auto fits = [&](int end, int cells) {
     int cx = start_x;
     int n = 0;
     for (const auto& e : entries) {
-      const int w = text_cells(entry_text(e, kLabelCells));
+      const int w = text_cells(entry_text(e, cells));
       if (cx + w > end) break;
       cx += w + 1;
       ++n;
@@ -198,22 +201,36 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   // c'est voulu, pas un trou : la place ne peut pas manquer là où l'on vient
   // de vérifier qu'elle ne manque pas.
   const int hint_w = hint_.empty() ? 0 : text_cells(hint_);
-  const bool show_hint = hint_w > 0 && fits(clock_x - 1 - hint_w - 1) == total;
+  const bool show_hint =
+      hint_w > 0 && fits(clock_x - 1 - hint_w - 1, kLabelCells) == total;
   int end = show_hint ? clock_x - 1 - hint_w - 1 : clock_x - 1;
 
-  int shown = fits(end);
+  int shown = fits(end, kLabelCells);
   if (shown < total) {
     // Les libellés sont déjà à leur minimum : ce qui dépasse se replie sur
     // un compteur, plutôt que de disparaître sans le dire. Le rappel a
     // forcément cédé la place à ce stade -- sa garde exige que TOUT tienne.
     const int over_w = 1 + static_cast<int>(std::to_string(total).size());
     end = clock_x - 1 - over_w - 1;
-    shown = fits(end);
+    shown = fits(end, kLabelCells);
+  }
+
+  // LE LIBELLÉ S'ÉTIRE DANS CE QUI RESTE, sans jamais coûter une entrée :
+  // on cherche la plus grande largeur qui laisse tenir exactement le même
+  // nombre d'entrées. Le plafond est le plus long libellé présent -- aller
+  // au-delà n'ajouterait que du blanc -- et la recherche est donc bornée
+  // par la barre elle-même, pas par une constante.
+  int longest = kLabelCells;
+  for (const auto& e : entries) longest = std::max(longest, text_cells(e.label));
+  int label = kLabelCells;
+  for (int c = kLabelCells + 1; c <= longest; ++c) {
+    if (fits(end, c) < shown) break;
+    label = c;
   }
 
   for (int i = 0; i < shown; ++i) {
     const PanelEntry& e = entries[static_cast<size_t>(i)];
-    const std::string t = entry_text(e, kLabelCells);
+    const std::string t = entry_text(e, label);
     const int cw = text_cells(t);
     // Rien d'ouvert : le clic doit LANCER, et Session a besoin du rang au
     // catalogue pour savoir quoi. Dès qu'une fenêtre existe, c'est elle que
