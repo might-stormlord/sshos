@@ -588,14 +588,14 @@ bool surface_contains(const Surface& s, const std::string& needle) {
 // glyphes : c'est ce que l'utilisateur peut réellement attraper.
 int left_edge_of(Session& s, int y) {
   for (int x = 0; x < 80; ++x) {
-    if (s.hit_window_at(x, y).what != sshos::WinHit::None) return x;
+    if (s.hit_window_at_for_tests(x, y).what != sshos::WinHit::None) return x;
   }
   return -1;
 }
 
 int right_edge_of(Session& s, int y) {
   for (int x = 79; x >= 0; --x) {
-    if (s.hit_window_at(x, y).what != sshos::WinHit::None) return x;
+    if (s.hit_window_at_for_tests(x, y).what != sshos::WinHit::None) return x;
   }
   return -1;
 }
@@ -607,7 +607,7 @@ size_t count_windows(Session& s, int cols, int rows) {
   std::vector<sshos::WindowId> ids;
   for (int y = 0; y < rows; ++y) {
     for (int x = 0; x < cols; ++x) {
-      const sshos::WinHitResult h = s.hit_window_at(x, y);
+      const sshos::WinHitResult h = s.hit_window_at_for_tests(x, y);
       if (h.what == sshos::WinHit::None) continue;
       if (std::find(ids.begin(), ids.end(), h.win) == ids.end()) {
         ids.push_back(h.win);
@@ -823,7 +823,7 @@ TEST(session_dims_every_window_that_does_not_have_the_focus) {
   CHECK(swapped.at(20, 1).bg == front);
 }
 
-// hit_window_at() est l'entrée publique du test de collision. Avec une seule
+// hit_window_at_for_tests() est l'entrée publique du test de collision. Avec une seule
 // fenêtre, parcourir la pile à l'endroit ou à l'envers donne le même
 // résultat : il faut deux fenêtres qui se recouvrent pour que l'ordre
 // compte.
@@ -838,17 +838,17 @@ TEST(session_hit_test_answers_for_the_window_on_top) {
   sess.render(two);
 
   // (20, 5) tombe dans les DEUX cadres, {2,1,44,14} et {4,2,44,14}.
-  const sshos::WinHitResult over = sess.hit_window_at(20, 5);
+  const sshos::WinHitResult over = sess.hit_window_at_for_tests(20, 5);
   CHECK_EQ(over.win, top);
   CHECK(over.what == sshos::WinHit::Client);
 
   // Colonne 2 : seul le cadre du dessous l'atteint.
-  const sshos::WinHitResult below = sess.hit_window_at(2, 5);
+  const sshos::WinHitResult below = sess.hit_window_at_for_tests(2, 5);
   CHECK(below.win != top);
   CHECK(below.what == sshos::WinHit::Frame);
 
   // Et le bureau nu ne répond rien.
-  CHECK(sess.hit_window_at(70, 20).what == sshos::WinHit::None);
+  CHECK(sess.hit_window_at_for_tests(70, 20).what == sshos::WinHit::None);
 }
 
 // Sous 40x12, la session affiche un avertissement -- et ne touche à RIEN.

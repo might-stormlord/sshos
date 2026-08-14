@@ -151,7 +151,11 @@ class Session : public ChildSink {
   // neuf » a chaque reveil.
   void mark_refresh_due() { dirty_ = true; }
 
-  WinHitResult hit_window_at(int x, int y) const;
+  // Le test de collision d'une fenetre, par le MEME chemin que le clic.
+  // Le suffixe dit ce qu'il est : aucun code de production ne l'appelle,
+  // et un balayage des methodes sans appelant ne doit pas le confondre
+  // avec une fonction qu'on aurait oublie de brancher.
+  WinHitResult hit_window_at_for_tests(int x, int y);
 
   // Appelée par le démon au détachement d'un client et à l'attache du
   // suivant. Un glissement engagé n'a plus de sens quand la souris qui le

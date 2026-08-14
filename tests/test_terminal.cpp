@@ -1297,3 +1297,21 @@ TEST(terminal_names_its_window_after_the_app_then_the_tab) {
   t.on_key(KeyEvent{Key::Enter, 0, 0});
   CHECK_EQ(host.title, std::string("Terminal (build)"));
 }
+
+// UN SIGNAL N'EST PAS UN CODE DE SORTIE. « processus termine (code 11) »
+// pour un SIGSEGV se lit exactement comme un `exit 11`, et envoie chercher
+// un défaut là où il n'y en a pas -- le shell n'a pas rendu 11, il a été
+// tué. `Pty` sait les distinguer depuis toujours ; personne ne le lui
+// demandait.
+TEST(terminal_says_a_signal_killed_the_process_not_a_code) {
+  FakeHost host;
+  Terminal t({"/bin/sh", "-c", "kill -SEGV $$"});
+  t.on_resize(Size{50, 5});
+  t.attach(host);
+  REQUIRE(wait_until_zombie(t.pid_for_tests(), 3000));
+  t.on_child_exit(0);
+
+  const std::string screen = painted(t, 50, 4);
+  CHECK(screen.find("signal 11") != std::string::npos);
+  CHECK(screen.find("code 11") == std::string::npos);
+}

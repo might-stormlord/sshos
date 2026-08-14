@@ -588,15 +588,16 @@ void Session::watchdog() {
   if (plat_->steady_now() - drag_stamp_ >= kDragWatchdog) cancel_drag();
 }
 
-WinHitResult Session::hit_window_at(int x, int y) const {
-  // De l'avant vers l'arrière : c'est la fenêtre du dessus qui répond.
-  const auto& st = wm_.stack();
-  for (auto it = st.rbegin(); it != st.rend(); ++it) {
-    const Window& w = **it;
-    if (w.mode == WinMode::Minimized) continue;
-    if (w.display_rect.contains(x, y)) return hit_window(w, x, y);
-  }
-  return WinHitResult{};
+WinHitResult Session::hit_window_at_for_tests(int x, int y) {
+  // LE MÊME CHEMIN QUE LE CLIC, et c'est tout l'intérêt : `wm_.hit()`
+  // choisit la fenêtre, `hit_window()` dit quelle partie. Cette fonction a
+  // longtemps refait la pile elle-même -- boucle identique à celle de
+  // `WindowManager::hit()`, minimisées comprises -- si bien que les cas qui
+  // s'en servaient vérifiaient une COPIE de la règle et non la règle. Une
+  // divergence entre les deux ne se serait vue nulle part.
+  const Window* w = wm_.hit(x, y);
+  if (w == nullptr) return WinHitResult{};
+  return hit_window(*w, x, y);
 }
 
 void Session::on_mouse(const MouseEvent& m) {

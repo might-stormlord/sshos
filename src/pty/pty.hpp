@@ -76,6 +76,11 @@ class Pty {
   bool exited() const { return exited_; }
   int exit_code() const { return code_; }
   bool killed_by_signal() const { return signalled_; }
+  // `saw_eof()` N'A AUCUN LECTEUR, et ce n'est pas un oubli : sous Linux,
+  // un maître dont le dernier esclave s'est fermé rend EIO (-1), pas 0, si
+  // bien que `note_eof()` n'est atteinte que dans des cas de bord. Le
+  // drapeau reste parce que la distinction ci-dessus est vraie et qu'un
+  // lecteur futur en aura besoin -- pas parce qu'il sert aujourd'hui.
   bool saw_eof() const { return eof_; }
   void note_eof() { eof_ = true; }
 

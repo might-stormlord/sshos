@@ -723,9 +723,15 @@ void Terminal::render(View v) {
     // La fenêtre RESTE ouverte : on doit pouvoir lire la dernière erreur.
     Style st;
     st.attrs = attr::Reverse;
+    // UN SIGNAL N'EST PAS UN CODE DE SORTIE. « code 11 » pour un SIGSEGV se
+    // lit comme un `exit 11` et envoie chercher un défaut là où il n'y en a
+    // pas : le shell n'a rien rendu, il a été tué.
+    const std::string how =
+        t.pty.killed_by_signal()
+            ? "tue par le signal " + std::to_string(t.pty.exit_code())
+            : "termine (code " + std::to_string(t.pty.exit_code()) + ")";
     const std::string msg =
-        "[processus termine (code " + std::to_string(t.pty.exit_code()) +
-        ") - Entree ou clic pour fermer]";
+        "[processus " + how + " - Entree ou clic pour fermer]";
     v.text(0, v.h() - 1, msg, st);
   }
 }
