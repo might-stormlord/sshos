@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,6 +51,7 @@ class Files : public App {
   const std::string& filter_for_tests() const { return filter_; }
   Mode mode_for_tests() const { return mode_; }
   const std::string& edit_for_tests() const { return edit_; }
+  const std::set<std::string>& marked_for_tests() const { return marked_; }
 
  private:
   // Relit le répertoire courant et refait la liste visible. LE SEUL
@@ -73,6 +75,18 @@ class Files : public App {
   void commit_rename();
   void commit_delete();
 
+  // Le nom sous la sélection, ou vide si elle ne désigne rien de marquable
+  // -- `..` en particulier, qui n'est pas un fichier mais la sortie.
+  std::string markable_at(size_t i) const;
+  // Marque ou démarque, et rend true si quelque chose a changé.
+  bool toggle_mark(size_t i);
+  // Marque tout ce qui va de `a` à `b`, dans un sens comme dans l'autre.
+  void mark_range(size_t a, size_t b);
+  // Ce sur quoi une action porte : les marqués s'il y en a, sinon la seule
+  // ligne sous la sélection. C'est la règle de tous les gestionnaires, et
+  // elle évite d'avoir à marquer un fichier pour agir sur lui.
+  std::vector<std::string> targets() const;
+
   DirListing listing_;
   std::vector<DirEntry> visible_;
   std::string filter_;
@@ -80,6 +94,11 @@ class Files : public App {
   size_t sel_ = 0;
   size_t top_ = 0;
   bool show_hidden_ = false;
+  // LES NOMS, PAS LES RANGS. Le filtre et le tri renumérotent la liste sous
+  // les pieds de la sélection ; un rang marqué désignerait alors un autre
+  // fichier. Vidé à chaque changement de répertoire : les noms d'avant
+  // auraient des homonymes ici, et l'action porterait sur eux.
+  std::set<std::string> marked_;
   Mode mode_ = Mode::Normal;
   // Le nom en cours de saisie pendant un renommage.
   std::string edit_;

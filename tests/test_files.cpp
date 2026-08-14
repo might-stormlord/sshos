@@ -15,6 +15,7 @@ using sshos::KeyEvent;
 using sshos::MouseAction;
 using sshos::MouseEvent;
 using sshos::Size;
+namespace mod = sshos::mod;
 
 namespace {
 
@@ -1195,4 +1196,275 @@ TEST(files_deletes_an_empty_directory) {
 
   CHECK(!exists(d));
   CHECK_EQ(f.status_for_tests(), std::string(""));
+}
+
+// ------------------------------------------------- la selection multiple
+
+// `Espace` MARQUE ET DESCEND. C'est le geste de tous les gestionnaires en
+// mode texte : on parcourt la liste en marquant au passage, sans jamais
+// relever les doigts pour bouger.
+TEST(files_marks_an_entry_with_space_and_moves_on) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Down, 0, 0});  // depuis `..` jusqu'au premier nom
+  const size_t start = f.selected_for_tests();
+
+  f.on_key(KeyEvent{Key::Char, U' ', 0});
+
+  CHECK_EQ(f.marked_for_tests().size(), size_t{1});
+  CHECK_EQ(f.selected_for_tests(), start + 1);
+}
+
+// `..` NE SE MARQUE PAS. Ce n'est pas un fichier, c'est la sortie : le
+// laisser entrer dans une sélection ferait porter une copie ou une
+// suppression sur le répertoire parent.
+TEST(files_never_marks_the_way_out) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  REQUIRE_EQ(f.visible_for_tests()[0].name, std::string(".."));
+
+  f.on_key(KeyEvent{Key::Char, U' ', 0});
+
+  CHECK(f.marked_for_tests().empty());
+  // Mais le curseur avance quand même : rester bloqué sur `..` donnerait
+  // l'impression que la touche ne fait rien.
+  CHECK_EQ(f.selected_for_tests(), size_t{1});
+}
+
+// `Ctrl+A` BASCULE : tout, puis rien. Un terminal ne sait pas distinguer
+// `Ctrl+Maj+A` de `Ctrl+A` -- la combinaison de Dolphin est intapable ici
+// -- et deux raccourcis pour un aller-retour valent moins qu'un seul qui
+// fait les deux.
+TEST(files_selects_everything_then_nothing_with_ctrl_a) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  d.dir("c");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  // Tout sauf `..`.
+  CHECK_EQ(f.marked_for_tests().size(), f.visible_for_tests().size() - 1);
+
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  CHECK(f.marked_for_tests().empty());
+}
+
+// `Maj+flèches` ÉTEND depuis la position courante : c'est le geste qu'on
+// essaie en premier quand on vient d'un vrai bureau.
+TEST(files_extends_the_selection_with_shift_arrows) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  d.file("c");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Down, 0, 0});  // sur « a »
+
+  f.on_key(KeyEvent{Key::Down, 0, mod::Shift});
+  f.on_key(KeyEvent{Key::Down, 0, mod::Shift});
+
+  CHECK_EQ(f.marked_for_tests().size(), size_t{3});
+  CHECK_EQ(f.selected_for_tests(), size_t{3});
+}
+
+// `Ctrl+clic` ajoute ou retire UNE entrée sans toucher au reste, et sans
+// l'ouvrir : c'est ce qui distingue le clic qui choisit du clic qui agit.
+TEST(files_toggles_one_entry_with_a_ctrl_click) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 2, mod::Ctrl});
+  CHECK_EQ(f.marked_for_tests().size(), size_t{1});
+  CHECK_EQ(f.path_for_tests(), d.root());  // rien n'a été ouvert
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 2, mod::Ctrl});
+  CHECK(f.marked_for_tests().empty());
+}
+
+// `Maj+clic` prend TOUT ce qui va de la position courante au clic, dans un
+// sens comme dans l'autre.
+TEST(files_takes_a_whole_range_with_a_shift_click) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  d.file("c");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Down, 0, 0});  // sur « a », ligne 2 de l'écran
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 0, 2, 4, mod::Shift});
+
+  CHECK_EQ(f.marked_for_tests().size(), size_t{3});
+}
+
+// CHANGER DE RÉPERTOIRE OUBLIE LA SÉLECTION. Les noms marqués sont ceux
+// d'AVANT : les garder ferait porter la prochaine action sur des homonymes
+// d'un autre dossier, ce qui est le pire résultat possible.
+TEST(files_forgets_its_selection_when_it_changes_directory) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.dir("sous");
+  d.file("a");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE(!f.marked_for_tests().empty());
+
+  f.on_key(KeyEvent{Key::Backspace, 0, 0});  // on remonte
+
+  CHECK(f.marked_for_tests().empty());
+}
+
+// `Échap` REND LA SÉLECTION sans rien détruire : il faut une porte de
+// sortie qui ne soit pas « re-parcourir la liste en démarquant ».
+TEST(files_drops_its_selection_on_escape) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE(!f.marked_for_tests().empty());
+
+  f.on_key(KeyEvent{Key::Escape, 0, 0});
+
+  CHECK(f.marked_for_tests().empty());
+}
+
+// LA LIGNE D'ÉTAT COMPTE ET PÈSE. Une sélection qu'on ne voit pas est une
+// sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.
+TEST(files_says_how_many_it_has_and_how_much_they_weigh) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("a");
+  d.file("b");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+
+  const std::string screen = painted(f, 40, 10);
+  CHECK(screen.find("2 selectionnes") != std::string::npos ||
+        screen.find("2 sélectionnés") != std::string::npos);
+}
+
+// LES MARQUÉS SE VOIENT DANS LA LISTE. Un compteur en bas ne dit pas
+// LESQUELS, et une sélection qu'on ne peut pas relire ne se corrige pas.
+TEST(files_marks_the_chosen_lines_on_screen) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("choisi");
+  d.file("laisse");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Down, 0, 0});
+  f.on_key(KeyEvent{Key::Char, U' ', 0});
+
+  const std::string screen = painted(f, 40, 10);
+  const size_t at = screen.find("choisi");
+  REQUIRE(at != std::string::npos);
+  // La marque précède le nom, sur sa ligne.
+  CHECK_EQ(screen[at - 1], '*');
+  CHECK(screen.find("*laisse") == std::string::npos);
+}
+
+// SUPPRIMER PORTE SUR LA SÉLECTION. Marquer trois fichiers puis appuyer sur
+// Suppr doit les emporter tous les trois, et poser UNE seule question : une
+// confirmation par fichier ferait cliquer « oui » sans lire dès la seconde.
+TEST(files_deletes_everything_that_is_marked) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("un");
+  d.file("deux");
+  d.file("trois");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE_EQ(f.marked_for_tests().size(), size_t{3});
+
+  f.on_key(key(Key::Delete));
+  REQUIRE(f.mode_for_tests() == Files::Mode::Confirming);
+  f.on_key(ch(U'o'));
+
+  CHECK(!exists(d.root() + "/un"));
+  CHECK(!exists(d.root() + "/deux"));
+  CHECK(!exists(d.root() + "/trois"));
+}
+
+// SANS SÉLECTION, l'action porte sur la seule ligne sous le curseur. C'est
+// la règle de tous les gestionnaires, et elle évite d'avoir à marquer un
+// fichier pour agir sur lui.
+TEST(files_falls_back_to_the_line_under_the_cursor) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("cible");
+  d.file("voisin");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("cible"));
+
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  CHECK(!exists(d.root() + "/cible"));
+  CHECK(exists(d.root() + "/voisin"));
+}
+
+// LA QUESTION DIT COMBIEN. « supprimer ? » sur une sélection de trente
+// fichiers ne dit pas ce qu'on s'apprête à perdre.
+TEST(files_says_how_many_it_is_about_to_delete) {
+  Tree d;
+  REQUIRE(d.valid());
+  d.file("un");
+  d.file("deux");
+  Files f(d.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  f.on_key(key(Key::Delete));
+
+  const std::string screen = painted(f, 40, 10);
+  CHECK(screen.find("2 ") != std::string::npos);
+  CHECK(screen.find("(o/n)") != std::string::npos);
+}
+
+// UN ÉCHEC N'ARRÊTE PAS LE RESTE. S'arrêter au premier laisserait une
+// sélection à moitié traitée dont l'utilisateur ne sait pas où elle en est
+// -- et il rappuierait, sur une liste qui a changé sous lui.
+TEST(files_keeps_deleting_after_one_of_them_refuses) {
+  Tree t;
+  REQUIRE(t.valid());
+  // « a » avant « b » : la sélection est un ensemble ordonné par nom, donc
+  // celui qui échoue passe en premier.
+  t.dir("a-plein");
+  t.file("a-plein/dedans");
+  t.file("b-simple");
+  Files f(t.root());
+  f.on_resize(Size{40, 10});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE_EQ(f.marked_for_tests().size(), size_t{2});
+
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+
+  // Le dossier non vide résiste -- pas de suppression récursive ici --
+  // mais le fichier d'après est bel et bien parti.
+  CHECK(exists(t.root() + "/a-plein"));
+  CHECK(!exists(t.root() + "/b-simple"));
+  CHECK(f.status_for_tests().find("1 sur 2") != std::string::npos);
 }

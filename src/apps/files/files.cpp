@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cerrno>
 #include <cstring>
 #include <vector>
@@ -71,6 +72,24 @@ std::string elide_left(const std::string& s, int width) {
 
 // Élide en gardant le DÉBUT : pour un nom de fichier, c'est le début qui
 // distingue.
+// Une taille lisible d'un coup d'œil. Les puissances de 1024, parce que
+// c'est ce que tout le reste du système affiche, et une seule décimale --
+// « 1,4 Go » se lit, « 1503238553 » se compte.
+std::string human_size(uint64_t bytes) {
+  static const char* kUnits[] = {"o", "Ko", "Mo", "Go", "To"};
+  double v = static_cast<double>(bytes);
+  size_t u = 0;
+  while (v >= 1024.0 && u + 1 < sizeof kUnits / sizeof kUnits[0]) {
+    v /= 1024.0;
+    ++u;
+  }
+  char buf[32];
+  // Pas de décimale aux octets : « 7,0 o » est du bruit, pas de la
+  // précision.
+  std::snprintf(buf, sizeof buf, u == 0 ? "%.0f %s" : "%.1f %s", v, kUnits[u]);
+  return buf;
+}
+
 std::string elide_right(const std::string& s, int width) {
   if (width <= 0) return {};
   if (display_width(s) <= width) return s;
@@ -121,6 +140,10 @@ int Files::rows_for_list() const {
 }
 
 void Files::reload() {
+  // Les noms marqués sont ceux d'AVANT. Les garder ferait porter la
+  // prochaine action sur leurs homonymes ici, ce qui est le pire résultat
+  // possible.
+  marked_.clear();
   listing_ = read_dir(listing_.path, show_hidden_);
   status_ = listing_.error;
   refilter();
@@ -229,6 +252,47 @@ std::string Files::touchable_selection() const {
   return name;
 }
 
+std::string Files::markable_at(size_t i) const {
+  if (i >= visible_.size()) return {};
+  // `..` n'est pas un fichier, c'est la sortie : le laisser entrer dans une
+  // sélection ferait porter une copie ou une suppression sur le parent.
+  if (visible_[i].name == "..") return {};
+  return visible_[i].name;
+}
+
+bool Files::toggle_mark(size_t i) {
+  const std::string name = markable_at(i);
+  if (name.empty()) return false;
+  const auto at = marked_.find(name);
+  if (at == marked_.end()) {
+    marked_.insert(name);
+  } else {
+    marked_.erase(at);
+  }
+  return true;
+}
+
+void Files::mark_range(size_t a, size_t b) {
+  const size_t lo = std::min(a, b);
+  const size_t hi = std::max(a, b);
+  for (size_t i = lo; i <= hi && i < visible_.size(); ++i) {
+    const std::string name = markable_at(i);
+    if (!name.empty()) marked_.insert(name);
+  }
+}
+
+std::vector<std::string> Files::targets() const {
+  // LES MARQUÉS S'IL Y EN A, sinon la seule ligne sous la sélection. C'est
+  // la règle de tous les gestionnaires, et elle évite d'avoir à marquer un
+  // fichier pour agir sur lui.
+  if (!marked_.empty()) {
+    return std::vector<std::string>(marked_.begin(), marked_.end());
+  }
+  const std::string one = touchable_selection();
+  if (one.empty()) return {};
+  return {one};
+}
+
 void Files::commit_rename() {
   const std::string from = touchable_selection();
   mode_ = Mode::Normal;
@@ -271,22 +335,43 @@ void Files::commit_rename() {
 }
 
 void Files::commit_delete() {
-  const std::string name = touchable_selection();
+  const std::vector<std::string> victims = targets();
   mode_ = Mode::Normal;
-  if (name.empty()) return;
+  if (victims.empty()) return;
 
-  const std::string victim = join_path(listing_.path, name);
-  const bool is_dir = visible_[sel_].kind == EntryKind::Dir;
-  // Pas de suppression RÉCURSIVE : `rmdir` refuse un dossier non vide, et
-  // c'est exactement ce qu'on veut. Effacer une arborescence entière sur
-  // une touche est le genre de fonction qu'on regrette une seule fois.
-  const int rc = is_dir ? ::rmdir(victim.c_str()) : ::unlink(victim.c_str());
-  if (rc != 0) {
-    status_ = std::string("suppression impossible : ") + std::strerror(errno);
-    return;
-  }
   status_.clear();
+  int failed = 0;
+  std::string first_error;
+  for (const std::string& name : victims) {
+    const std::string victim = join_path(listing_.path, name);
+    // Pas de suppression RÉCURSIVE : `rmdir` refuse un dossier non vide, et
+    // c'est exactement ce qu'on veut. Effacer une arborescence entière sur
+    // une touche est le genre de fonction qu'on regrette une seule fois.
+    // `unlink` d'abord et `rmdir` en repli plutôt que de relire le type :
+    // la liste peut dater, le disque non.
+    int rc = ::unlink(victim.c_str());
+    if (rc != 0 && (errno == EISDIR || errno == EPERM)) {
+      rc = ::rmdir(victim.c_str());
+    }
+    if (rc != 0) {
+      ++failed;
+      if (first_error.empty()) first_error = std::strerror(errno);
+    }
+  }
+  // RELIRE D'ABORD, DIRE ENSUITE : `reload()` repose `status_` sur l'erreur
+  // de lecture du répertoire -- vide quand tout va bien -- et effacerait
+  // donc le message qu'on vient d'écrire.
   reload();
+  // ON CONTINUE APRÈS UN ÉCHEC, et on dit combien : s'arrêter au premier
+  // laisserait une sélection à moitié traitée dont l'utilisateur ne
+  // saurait pas où elle en est.
+  if (failed > 0) {
+    status_ = failed == 1 && victims.size() == 1
+                  ? "suppression impossible : " + first_error
+                  : std::to_string(failed) + " sur " +
+                        std::to_string(victims.size()) +
+                        " n'ont pas pu etre supprimes : " + first_error;
+  }
 }
 
 void Files::on_key(const KeyEvent& k) {
@@ -326,9 +411,37 @@ void Files::on_key(const KeyEvent& k) {
 
   const size_t rows = static_cast<size_t>(rows_for_list());
 
+  // `Ctrl+A` BASCULE : tout, puis rien. Un terminal ne sait pas distinguer
+  // `Ctrl+Maj+A` de `Ctrl+A` -- la combinaison de Dolphin est intapable ici
+  // -- et deux raccourcis pour un aller-retour valent moins qu'un seul qui
+  // fait les deux.
+  if (k.key == Key::Char && (k.ch == U'a' || k.ch == U'A') &&
+      (k.mods & mod::Ctrl) != 0) {
+    if (marked_.empty()) {
+      mark_range(0, visible_.empty() ? 0 : visible_.size() - 1);
+    } else {
+      marked_.clear();
+    }
+    return;
+  }
+  // `Espace` MARQUE ET DESCEND : on parcourt la liste en marquant au
+  // passage, sans relever les doigts pour bouger. Il descend MÊME sur `..`,
+  // qui ne se marque pas -- rester bloqué là donnerait l'impression que la
+  // touche ne fait rien.
+  if (k.key == Key::Char && k.ch == U' ' && filter_.empty()) {
+    toggle_mark(sel_);
+    if (sel_ + 1 < visible_.size()) ++sel_;
+    settle();
+    return;
+  }
+
   switch (k.key) {
     case Key::Up:
+      // `Maj+flèche` ÉTEND depuis la position courante : c'est le geste
+      // qu'on essaie en premier quand on vient d'un vrai bureau.
+      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
       if (sel_ > 0) --sel_;
+      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
       settle();
       return;
     case Key::Down:
@@ -338,7 +451,9 @@ void Files::on_key(const KeyEvent& k) {
       // enverrait la sélection À LA FIN de la liste. On les garde
       // symétriques pour que le lecteur n'ait pas à refaire cette
       // vérification.
+      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
       if (sel_ + 1 < visible_.size()) ++sel_;
+      if ((k.mods & mod::Shift) != 0) mark_range(sel_, sel_);
       settle();
       return;
     case Key::PgUp:
@@ -370,17 +485,21 @@ void Files::on_key(const KeyEvent& k) {
       return;
     }
     case Key::Delete:
-      if (touchable_selection().empty()) return;
+      // `targets()`, pas la seule ligne : avec une sélection, le curseur
+      // peut très bien être resté sur `..`, qui ne se supprime pas.
+      if (targets().empty()) return;
       mode_ = Mode::Confirming;
       return;
     case Key::Escape:
-      // L'échappement efface le filtre. C'est le seul geste d'annulation
-      // de l'application, et il ne doit pas fermer la fenêtre : on perdrait
-      // le répertoire courant pour une frappe de trop.
+      // L'échappement RÉTABLIT, du plus récent au plus ancien : le filtre
+      // d'abord, la sélection ensuite. Il ne ferme jamais la fenêtre -- on
+      // perdrait le répertoire courant pour une frappe de trop.
       if (!filter_.empty()) {
         filter_.clear();
         refilter();
+        return;
       }
+      marked_.clear();
       return;
     case Key::Backspace:
       // Le retour arrière EFFACE LE FILTRE tant qu'il en reste, et remonte
@@ -431,6 +550,22 @@ void Files::on_mouse(const MouseEvent& m) {
   if (row < 0 || static_cast<size_t>(row) >= rows) return;
   const size_t hit = top_ + static_cast<size_t>(row);
   if (hit >= visible_.size()) return;
+
+  // `Ctrl+clic` ajoute ou retire UNE entrée sans toucher au reste et sans
+  // l'ouvrir : c'est ce qui distingue le clic qui choisit du clic qui agit.
+  if ((m.mods & mod::Ctrl) != 0) {
+    toggle_mark(hit);
+    sel_ = hit;
+    settle();
+    return;
+  }
+  // `Maj+clic` prend TOUT ce qui va de la position courante au clic.
+  if ((m.mods & mod::Shift) != 0) {
+    mark_range(sel_, hit);
+    sel_ = hit;
+    settle();
+    return;
+  }
 
   // Cliquer SÉLECTIONNE ; recliquer la ligne déjà choisie l'OUVRE. Pas de
   // double-clic : l'application n'a pas à savoir compter les clics, et
@@ -485,6 +620,10 @@ void Files::render(View v) {
         break;
     }
     const int y = 1 + i;
+    // LA MARQUE PRÉCÈDE LE NOM, et elle est en couleur : un compteur en bas
+    // dit COMBIEN sont choisis, jamais LESQUELS, et une sélection qu'on ne
+    // peut pas relire ne se corrige pas.
+    const bool chosen = marked_.count(e.name) != 0;
     if (idx == sel_) {
       // La ligne ENTIÈRE porte l'inverse vidéo, pas seulement le nom : une
       // barre de sélection qui s'arrête au dernier caractère se lit comme
@@ -492,7 +631,15 @@ void Files::render(View v) {
       st.attrs |= attr::Reverse;
       v.fill(Rect{0, y, w, 1}, st);
     }
-    v.text(0, y, elide_right(e.name, w), st);
+    if (chosen) {
+      Style mark = st;
+      mark.fg = Color::indexed(3);
+      mark.attrs |= attr::Bold;
+      v.text(0, y, "*", mark);
+      v.text(1, y, elide_right(e.name, w - 1), st);
+    } else {
+      v.text(0, y, elide_right(e.name, w), st);
+    }
   }
 
   // La ligne d'état : l'erreur si elle existe, sinon le filtre en cours.
@@ -508,14 +655,31 @@ void Files::render(View v) {
   } else if (mode_ == Mode::Confirming) {
     status_style.attrs = attr::Reverse;
     status_style.fg = Color::indexed(1);
-    bottom = "supprimer " + (visible_.empty() ? std::string() : visible_[sel_].name) +
-             " ? (o/n)";
+    // COMBIEN, PAS SEULEMENT « quoi ». « supprimer ? » sur une sélection de
+    // trente fichiers ne dit pas ce qu'on s'apprête à perdre.
+    bottom = marked_.empty()
+                 ? "supprimer " +
+                       (visible_.empty() ? std::string() : visible_[sel_].name) +
+                       " ? (o/n)"
+                 : "supprimer " + std::to_string(marked_.size()) +
+                       " elements ? (o/n)";
   } else if (!status_.empty()) {
     status_style.fg = Color::indexed(1);
     bottom = status_;
   } else if (!filter_.empty()) {
     status_style.attrs = attr::Bold;
     bottom = "filtre: " + filter_;
+  } else if (!marked_.empty()) {
+    // COMBIEN, ET COMBIEN ÇA PÈSE. Une sélection qu'on ne voit pas est une
+    // sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.
+    uint64_t bytes = 0;
+    for (const DirEntry& e : listing_.entries) {
+      if (marked_.count(e.name) != 0) bytes += e.size;
+    }
+    status_style.attrs = attr::Bold;
+    status_style.fg = Color::indexed(3);
+    bottom = std::to_string(marked_.size()) + " selectionnes, " +
+             human_size(bytes);
   }
   if (!bottom.empty()) v.text(0, h - 1, elide_right(bottom, w), status_style);
 }
