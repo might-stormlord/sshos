@@ -4,15 +4,20 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `81fc657`.
-> **1120 tests au vert** en `Release` (19,4 s) comme sous ASan/UBSan (46,7 s),
-> 0 avertissement. Arbre de travail propre. 193 commits depuis `main`.
+> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `e59573f`.
+> **1121 tests au vert** en `Release` (~19 s) comme sous ASan/UBSan (~47 s),
+> 0 avertissement. Arbre de travail propre. **194 commits** depuis `main`.
 > **Les SEPT jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'usage par l'utilisateur. Le §3 donne la position exacte.
 >
-> **Par où commencer :** §2 pour compiler et lancer, §3 pour savoir où l'on en est,
-> §3 bis pour la carte du code, §4 pour ce qui n'est pas négociable, et **§9 bis pour
-> le défaut qui revient dix fois dans ce projet**. Le reste se lit à la demande.
+> **Par où commencer, dans cet ordre :**
+> **§2** compiler et lancer — *et l'avertissement en tête : le projet n'existe que
+> sur ce disque* · **§3** où l'on en est · **§3 bis** la carte du code ·
+> **§4** ce qui n'est pas négociable · **§8 bis** le rythme de travail et la campagne
+> de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
+> **§9 bis** le défaut qui revient dix fois dans ce projet, et son balayage ·
+> **§10** le carnet de ce qui reste à faire.
+> Le reste (§5 à §7, §8, §9) se lit à la demande.
 >
 > ⚠️ Les §4, §8 et §9 (contraintes, méthode, pièges d'environnement) ont été écrits au
 > jalon 1 et restent **entièrement valides**. Le §5 décrit un harnais toujours exact,
@@ -56,6 +61,14 @@ complet.
 ---
 
 ## 2. Compiler, lancer, tester
+
+> 🔴 **LE PROJET N'EXISTE QUE SUR CE DISQUE.** `git remote -v` est **vide**, et
+> `main` pointe encore sur `0c1e7b9` — le plan du jalon 1. Les **194 commits** du
+> produit, sept jalons compris, vivent tous sur la branche locale `m1-noyau`.
+> Un `rm -rf` de ce répertoire, ou une panne de disque, **détruit le projet**.
+> Deux décisions attendent l'utilisateur : fusionner `m1-noyau` dans `main`, et
+> pousser vers un dépôt distant. Aucune n'a été prise ; aucune n'est à prendre sans
+> lui.
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
@@ -451,9 +464,14 @@ ci-dessus datent du jalon 1 : 7.1 est **soldé**, 7.2 et 7.3 restent **vrais**.
 | `Pty::saw_eof()` sans lecteur | documenté sur place | Sous Linux un maître dont le dernier esclave s'est fermé rend `EIO`, pas 0 : `note_eof()` n'est atteinte que dans des cas de bord |
 | `set_cloexec()` sans appelant | documenté sur place | Chaque descripteur naît déjà `CLOEXEC` en un seul appel système, ce qui est le motif **sûr** |
 
-**Il n'y a aucune dette cachée connue au-delà de cette table.** Le balayage des
-méthodes sans appelant (§9 bis) a été passé le 15 août : ses candidats restants sont
-tous vérifiés à la main et légitimes.
+**Cette table est la dette d'ARCHITECTURE.** Les **défauts fonctionnels** connus du
+gestionnaire de fichiers sont listés à part, au §10 (« Le carnet du gestionnaire de
+fichiers ») : un dossier non vide insupprimable, un lien symbolique qui part dans
+l'Éditeur, la bascule des cachés qui n'atteint qu'un panneau, et une copie que rien
+n'annule. **Ne pas lire cette section comme « il n'y a rien d'autre ».**
+
+Le balayage des méthodes sans appelant (§9 bis) a été passé le 15 août : quatre
+orphelines retirées, les candidates restantes toutes vérifiées à la main.
 
 ---
 
@@ -535,6 +553,28 @@ Cinq règles, toutes payées comptant :
 `-Werror` refuse une variable devenue inutilisée. Une mutation qui retire le seul
 usage d'un paramètre ne compile pas et n'est **pas** une survivante : c'est une
 mutation invalide, à compter comme telle et non comme un succès.
+
+---
+
+## 8 ter. Les deux outils, désormais versionnés
+
+Ils vivaient dans un scratchpad de session et disparaissaient avec elle. Ils sont
+maintenant dans `tools/`, et leur docstring porte les règles.
+
+```bash
+python3 -u tools/sonde.py               # sonde de fumée : le bureau se lève
+cp tools/mutation.py /tmp/ma_campagne.py    # puis remplir FILES et M
+DRY=1 python3 /tmp/ma_campagne.py           # vérifie chaque motif AVANT
+python3 -u /tmp/ma_campagne.py > camp.log   # jamais derrière un tube
+```
+
+- **`tools/sonde.py`** — la boîte à outils des sondes bout-en-bout : `spawn()`
+  (démon neuf), `screen()` (rejoue une trame en grille), `suivre()`, `clic()`,
+  `glisser()`, `trouve()`, `jiffies()`. **Quatre des dix défauts du §9 bis n'ont été
+  vus que par une sonde.**
+- **`tools/mutation.py`** — le harnais de campagne, avec ses cinq règles en
+  docstring et un mode `DRY=1` qui vérifie que chaque motif existe **exactement une
+  fois** avant de toucher au code.
 
 ---
 
@@ -636,6 +676,12 @@ tests. C'est ce qui rend le balayage exploitable.
   n'accepte que les lignes finissant par `;`. Parade : parenthèse restée ouverte
   = signature valide.
 
+> **La sortie du script n'est JAMAIS une conclusion.** Un candidat n'est un défaut
+> qu'après un `grep -rn "\bnom\b" src/ tests/` **sans troncature**, lu à la main.
+> Un audit adversarial lancé le 15 août a déclaré ces quatre-là inexistantes — il
+> les avait cherchées *après* leur retrait, et en concluait que le balayage mentait.
+> **Ne jamais prendre un rapport d'agent pour argent comptant : vérifier soi-même.**
+
 **Passage du 15 août 2026 :** 464 noms déclarés, 27 candidats bruts, **4 vraies
 orphelines** après vérification manuelle — `Screen::autowrap()`, `Files::other()`
 (privée, donc même pas atteignable par un test), `LeaderDispatch::phase()` et
@@ -731,10 +777,11 @@ jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
 Établi en relisant `src/apps/files/` face à Dolphin, et filtré : ce qui n'a pas de
 sens en mode texte (vignettes, aperçus graphiques) est écarté.
 
-**Trois sont des DÉFAUTS, pas des manques** — à traiter en premier :
+**Quatre sont des DÉFAUTS, pas des manques** — à traiter en premier :
 
 | Défaut | Ce qu'il coûte | Taille |
 |---|---|---|
+| **Rien n'annule une copie en cours** : `CopyJob::cancel()` n'est atteint qu'à la fin du travail et par le destructeur | Une copie de 2 Go ne s'arrête qu'en fermant la fenêtre — et `can_close()` n'est pas implémenté, donc elle meurt **sans un mot** | petit |
 | **Un dossier non vide est insupprimable** depuis l'application : `rmdir` le refuse, et il n'y a pas de suppression récursive | On sort dans un terminal pour la moitié du ménage. Une pile comme celle de `CopyJob` suffirait — et **par tranches**, même contrainte | petit |
 | **Un lien symbolique vers un dossier part dans l'Éditeur** : `EntryKind::Link` n'est pas suivi, et la cible n'est jamais montrée | Un `~/Documents -> /data/docs` est inutilisable | petit |
 | **La bascule des fichiers cachés ne touche que le panneau actif** : `reload()` ignore l'autre | En vue scindée, un panneau reste périmé jusqu'à ce qu'on y navigue | petit |
@@ -743,8 +790,6 @@ sens en mode texte (vignettes, aperçus graphiques) est écarté.
 
 | Manque | Pourquoi ça compte | Taille |
 |---|---|---|
-| **Annuler une copie en cours** — `CopyJob::cancel()` existe et **aucun geste ne l'appelle** | Une copie de 2 Go ne s'arrête qu'en fermant la fenêtre | petit |
-| **`can_close()` pendant une copie** | Fermer la fenêtre tue la copie sans un mot ; le Terminal, lui, pose la question | petit |
 | **Conflit de noms** : `O_EXCL` échoue en silence (« N ont echoue ») | Il manque Écraser / Renommer / Ignorer / Tout | moyen |
 | **Permissions et propriétaire** — le `stat()` est **déjà payé**, `DirEntry` jette `st_mode`, `uid`, `gid` | C'est l'information la plus attendue en mode texte (`ls -l`) | petit |
 | **Copier au glisser** (`Ctrl` enfoncé) | Le lâcher déplace toujours | petit |
