@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "app/app.hpp"
-#include "apps/files/copy.hpp"
+#include "apps/files/job.hpp"
 #include "apps/files/dir.hpp"
 
 namespace sshos {
@@ -41,6 +41,9 @@ class Files : public App {
   // On ne demande à être réveillé QUE pendant une copie : un
   // rafraîchissement permanent coûterait une trame par intervalle sur un
   // bureau qui ne change pas.
+  // Un travail en cours RETIENT la fenetre : le tuer en silence est la
+  // pire des surprises, et une suppression ne se rattrape pas.
+  CloseCheck can_close() const override;
   int refresh_ms() const override;
   void on_refresh() override;
 
@@ -92,6 +95,7 @@ class Files : public App {
   size_t active_pane_for_tests() const { return active_; }
   const Pane& pane_for_tests(size_t i) const { return panes_[i]; }
   bool copy_active_for_tests() const { return job_.active(); }
+  bool job_active_for_tests() const { return job_.active(); }
   void on_tick_for_tests() { on_refresh(); }
   SortBy sort_by_for_tests() const { return pane().sort_by; }
   bool sort_desc_for_tests() const { return pane().sort_desc; }
@@ -137,13 +141,18 @@ class Files : public App {
   enum class Cmd {
     Open, NewDir, NewFile, Rename, Delete, Copy, Cut, Paste, SelectAll,
     Split, Places, Hidden, Up, Back, Forward, SortName, SortSize, SortTime,
+    StopJob,
   };
   struct MenuItem {
     Cmd cmd = Cmd::Open;
     const char* label = "";
     const char* keys = "";
   };
-  static const std::vector<MenuItem>& menu_items();
+  // Les entrees du menu tel qu'il est OUVERT. Posees une fois par
+  // ouverture dans `menu_shown_`, et relues telles quelles par le dessin
+  // comme par le clic : deux listes calculees separement finiraient par
+  // diverger, et on lancerait l'entree d'a cote.
+  std::vector<MenuItem> menu_items() const;
   void open_menu(int x, int y);
   void run_menu(Cmd c);
   // Ou tombe un lacher, en coordonnees DEJA locales au panneau vise :
@@ -202,6 +211,9 @@ class Files : public App {
   // moitié du travail.
   void commit_create();
   // Met la sélection au presse-papiers. `cut` dit si le coller déplacera.
+  // Arrete le travail en cours et le dit. UN SEUL endroit : Echap et le
+  // menu y menent tous deux.
+  void stop_job();
   void take_clipboard(bool cut);
   void paste_clipboard();
   void commit_delete();
@@ -235,6 +247,7 @@ class Files : public App {
   std::vector<std::string> drag_;
   bool menu_open_ = false;
   Rect menu_rect_{};
+  std::vector<MenuItem> menu_shown_;
   bool show_hidden_ = false;
   // D'OÙ L'ON VIENT, et ce qu'on vient de défaire. Une nouvelle descente
   // efface la seconde : garder une branche qu'on vient d'abandonner ferait
@@ -255,7 +268,7 @@ class Files : public App {
   // gestes -- c'est-à-dire toujours.
   std::vector<std::string> clipboard_;
   bool clipboard_cut_ = false;
-  CopyJob job_;
+  FileJob job_;
   Size size_{40, 12};
   Host* host_ = nullptr;
 };

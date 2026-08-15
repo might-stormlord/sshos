@@ -202,11 +202,18 @@ std::string Files::drop_target(const MouseEvent& e,
   return here;
 }
 
-const std::vector<Files::MenuItem>& Files::menu_items() {
+std::vector<Files::MenuItem> Files::menu_items() const {
   // L'ORDRE EST CELUI DE L'USAGE : ce qu'on fait le plus souvent en haut.
   // Une séparation vide n'a pas sa place ici -- elle coûterait une ligne
   // sur une fenêtre de seize, et le regroupement se lit déjà.
-  static const std::vector<MenuItem> kItems = {
+  std::vector<MenuItem> items;
+  // ARRÊTER PASSE EN TÊTE, et n'apparaît QUE pendant un travail : c'est
+  // alors la seule chose qu'on vienne y chercher, et une entrée inerte les
+  // trois quarts du temps use la confiance qu'on met dans les autres.
+  if (job_.active()) {
+    items.push_back({Cmd::StopJob, "Arreter le travail", "Echap"});
+  }
+  const MenuItem kItems[] = {
       {Cmd::Open, "Ouvrir", "Entree"},
       {Cmd::NewDir, "Nouveau dossier", "F7"},
       {Cmd::NewFile, "Nouveau fichier", "Maj+F7"},
@@ -226,18 +233,20 @@ const std::vector<Files::MenuItem>& Files::menu_items() {
       {Cmd::SortSize, "Trier par taille", ""},
       {Cmd::SortTime, "Trier par date", ""},
   };
-  return kItems;
+  for (const MenuItem& it : kItems) items.push_back(it);
+  return items;
 }
 
 void Files::open_menu(int x, int y) {
+  menu_shown_ = menu_items();
   int widest = 0;
-  for (const MenuItem& it : menu_items()) {
+  for (const MenuItem& it : menu_shown_) {
     widest = std::max(widest,
                       text_cells(it.label) + 2 + text_cells(it.keys));
   }
   const int w = std::min(std::max(1, size_.w), widest + 4);
   const int h = std::min(std::max(1, size_.h),
-                         static_cast<int>(menu_items().size()) + 2);
+                         static_cast<int>(menu_shown_.size()) + 2);
   // IL TIENT DANS LA FENÊTRE. Ouvert près d'un bord, il déborderait et la
   // `View` le couperait : on ne verrait plus les dernières entrées, et
   // c'est justement là que sont le tri et les bascules.
@@ -256,10 +265,10 @@ void Files::draw_menu(View v) const {
 
   const int x = menu_rect_.x + 1;
   const int room = menu_rect_.w - 2;
-  for (size_t i = 0; i < menu_items().size(); ++i) {
+  for (size_t i = 0; i < menu_shown_.size(); ++i) {
     const int y = menu_rect_.y + 1 + static_cast<int>(i);
     if (y >= menu_rect_.y + menu_rect_.h - 1) break;
-    const MenuItem& it = menu_items()[i];
+    const MenuItem& it = menu_shown_[i];
     v.text(x, y, elide_right(it.label, room), st);
     // Le raccourci calé à DROITE : c'est une colonne, pas une glose, et
     // une colonne se lit d'un coup d'œil.
@@ -329,6 +338,7 @@ void Files::run_menu(Cmd c) {
     case Cmd::SortName: sort_on(SortBy::Name); return;
     case Cmd::SortSize: sort_on(SortBy::Size); return;
     case Cmd::SortTime: sort_on(SortBy::Time); return;
+    case Cmd::StopJob: stop_job(); return;
   }
 }
 
@@ -742,6 +752,17 @@ void Files::commit_create() {
   settle();
 }
 
+void Files::stop_job() {
+  if (!job_.active()) return;
+  const int faits = job_.done();
+  job_.cancel();
+  // CE QUI RESTE EST TOUJOURS LÀ : arrêter, c'est arrêter. On le dit, parce
+  // qu'un travail à moitié fait dont on ne sait rien est pire qu'un
+  // travail qui n'a pas commencé.
+  reload();
+  pane().status = "arrete apres " + std::to_string(faits) + " elements";
+}
+
 void Files::take_clipboard(bool cut) {
   const std::vector<std::string> names = targets();
   if (names.empty()) return;
@@ -762,10 +783,22 @@ void Files::paste_clipboard() {
     return;
   }
   job_.start(clipboard_, pane().listing.path,
-             clipboard_cut_ ? CopyKind::Move : CopyKind::Copy);
+             clipboard_cut_ ? FileOp::Move : FileOp::Copy);
   // Un déplacement se consomme : recoller après coup chercherait des
   // fichiers qui ne sont plus là.
   if (clipboard_cut_) clipboard_.clear();
+}
+
+CloseCheck Files::can_close() const {
+  // UN TRAVAIL EN COURS RETIENT LA FENÊTRE. Le Terminal pose la question
+  // pour un shell vivant ; une copie ou une suppression en cours vaut au
+  // moins autant, et la tuer en silence est la pire des surprises --
+  // surtout une suppression, qui ne se rattrape pas.
+  if (job_.active()) {
+    return CloseCheck::ask("Un travail sur les fichiers est en cours. "
+                           "Fermer quand meme ?");
+  }
+  return CloseCheck::allow();
 }
 
 int Files::refresh_ms() const {
@@ -804,41 +837,21 @@ void Files::on_refresh() {
 void Files::commit_delete() {
   const std::vector<std::string> victims = targets();
   mode_ = Mode::Normal;
-  if (victims.empty()) return;
+  if (victims.empty() || job_.active()) return;
 
-  pane().status.clear();
-  int failed = 0;
-  std::string first_error;
+  // LA SUPPRESSION PASSE PAR LE MÊME TRAVAIL QUE LA COPIE, et pour la même
+  // raison : le démon est mono-thread, et descendre une arborescence de
+  // cent mille fichiers d'un seul appel gèlerait toutes les fenêtres et
+  // tous les clients. Elle est donc RÉCURSIVE -- un dossier non vide était
+  // insupprimable depuis l'application, ce qui obligeait à sortir dans un
+  // terminal -- mais par tranches, et arrêtable d'une touche.
+  std::vector<std::string> chemins;
+  chemins.reserve(victims.size());
   for (const std::string& name : victims) {
-    const std::string victim = join_path(pane().listing.path, name);
-    // Pas de suppression RÉCURSIVE : `rmdir` refuse un dossier non vide, et
-    // c'est exactement ce qu'on veut. Effacer une arborescence entière sur
-    // une touche est le genre de fonction qu'on regrette une seule fois.
-    // `unlink` d'abord et `rmdir` en repli plutôt que de relire le type :
-    // la liste peut dater, le disque non.
-    int rc = ::unlink(victim.c_str());
-    if (rc != 0 && (errno == EISDIR || errno == EPERM)) {
-      rc = ::rmdir(victim.c_str());
-    }
-    if (rc != 0) {
-      ++failed;
-      if (first_error.empty()) first_error = std::strerror(errno);
-    }
+    chemins.push_back(join_path(pane().listing.path, name));
   }
-  // RELIRE D'ABORD, DIRE ENSUITE : `reload()` repose `pane().status` sur l'erreur
-  // de lecture du répertoire -- vide quand tout va bien -- et effacerait
-  // donc le message qu'on vient d'écrire.
-  reload();
-  // ON CONTINUE APRÈS UN ÉCHEC, et on dit combien : s'arrêter au premier
-  // laisserait une sélection à moitié traitée dont l'utilisateur ne
-  // saurait pas où elle en est.
-  if (failed > 0) {
-    pane().status = failed == 1 && victims.size() == 1
-                  ? "suppression impossible : " + first_error
-                  : std::to_string(failed) + " sur " +
-                        std::to_string(victims.size()) +
-                        " n'ont pas pu etre supprimes : " + first_error;
-  }
+  pane().status.clear();
+  job_.start(chemins, std::string(), FileOp::Delete);
 }
 
 void Files::on_key(const KeyEvent& k) {
@@ -1041,9 +1054,18 @@ void Files::on_key(const KeyEvent& k) {
       mode_ = Mode::Confirming;
       return;
     case Key::Escape:
-      // L'échappement RÉTABLIT, du plus récent au plus ancien : le filtre
-      // d'abord, la sélection ensuite. Il ne ferme jamais la fenêtre -- on
-      // perdrait le répertoire courant pour une frappe de trop.
+      // L'échappement RÉTABLIT, du plus récent au plus ancien : le travail
+      // en cours d'abord, le filtre ensuite, la sélection en dernier. Il
+      // ne ferme jamais la fenêtre -- on perdrait le répertoire courant
+      // pour une frappe de trop.
+      //
+      // ARRÊTER LE TRAVAIL PASSE AVANT TOUT : une suppression lancée par
+      // erreur sur une arborescence de dix mille fichiers ne s'arrêtait
+      // qu'en fermant la fenêtre, et elle est irréversible.
+      if (job_.active()) {
+        stop_job();
+        return;
+      }
       if (!pane().filter.empty()) {
         pane().filter.clear();
         refilter();
@@ -1089,9 +1111,9 @@ void Files::on_mouse(const MouseEvent& m) {
     if (m.action != MouseAction::Press) return;
     const int row = m.y - menu_rect_.y - 1;
     if (m.x > menu_rect_.x && m.x < menu_rect_.x + menu_rect_.w - 1 &&
-        row >= 0 && static_cast<size_t>(row) < menu_items().size() &&
+        row >= 0 && static_cast<size_t>(row) < menu_shown_.size() &&
         row < menu_rect_.h - 2) {
-      run_menu(menu_items()[static_cast<size_t>(row)].cmd);
+      run_menu(menu_shown_[static_cast<size_t>(row)].cmd);
       return;
     }
     menu_open_ = false;
@@ -1160,7 +1182,7 @@ void Files::on_mouse(const MouseEvent& m) {
     if (dest.empty() || job_.active()) return;
     // DÉPLACER, c'est ce qu'on veut d'un glissement : copier se demande, se
     // glisser se range.
-    job_.start(taken, dest, CopyKind::Move);
+    job_.start(taken, dest, FileOp::Move);
     return;
   }
 
@@ -1451,12 +1473,18 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
     status_style.fg = Color::indexed(1);
     // COMBIEN, PAS SEULEMENT « quoi ». « supprimer ? » sur une sélection de
     // trente fichiers ne dit pas ce qu'on s'apprête à perdre.
+    // LA QUESTION DIT QUE C'EST RÉCURSIF. « supprimer plein ? » ne prépare
+    // pas à perdre une arborescence entière, et c'est le seul geste
+    // irréversible du projet.
+    const bool un_dossier =
+        !pn.visible.empty() && pn.sel < pn.visible.size() &&
+        pn.visible[pn.sel].kind == EntryKind::Dir && pn.marked.empty();
     bottom = pn.marked.empty()
                  ? "supprimer " +
                        (pn.visible.empty() ? std::string() : pn.visible[pn.sel].name) +
-                       " ? (o/n)"
+                       (un_dossier ? " + contenu" : "") + " ? (o/n)"
                  : "supprimer " + std::to_string(pn.marked.size()) +
-                       " elements ? (o/n)";
+                       " elements + contenu ? (o/n)";
   } else if (!pn.status.empty()) {
     status_style.fg = Color::indexed(1);
     bottom = pn.status;
@@ -1477,9 +1505,11 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
     // l'écran passe pour un blocage, et l'utilisateur tue la fenêtre.
     status_style.attrs = attr::Bold;
     status_style.fg = Color::indexed(4);
-    bottom = std::string(job_.kind() == CopyKind::Move ? "deplacement" : "copie") +
-             " : " + job_.current() + " (" + std::to_string(job_.done()) +
-             " faits)";
+    const char* quoi = job_.kind() == FileOp::Move      ? "deplacement"
+                       : job_.kind() == FileOp::Delete  ? "suppression"
+                                                        : "copie";
+    bottom = std::string(quoi) + " : " + job_.current() + " (" +
+             std::to_string(job_.done()) + " faits, Echap pour arreter)";
   } else if (!pn.marked.empty()) {
     // COMBIEN, ET COMBIEN ÇA PÈSE. Une sélection qu'on ne voit pas est une
     // sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.

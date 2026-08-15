@@ -777,14 +777,17 @@ jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
 Établi en relisant `src/apps/files/` face à Dolphin, et filtré : ce qui n'a pas de
 sens en mode texte (vignettes, aperçus graphiques) est écarté.
 
-**Quatre sont des DÉFAUTS, pas des manques** — à traiter en premier :
+**Deux sont des DÉFAUTS, pas des manques** — à traiter en premier :
 
 | Défaut | Ce qu'il coûte | Taille |
 |---|---|---|
-| **Rien n'annule une copie en cours** : `CopyJob::cancel()` n'est atteint qu'à la fin du travail et par le destructeur | Une copie de 2 Go ne s'arrête qu'en fermant la fenêtre — et `can_close()` n'est pas implémenté, donc elle meurt **sans un mot** | petit |
-| **Un dossier non vide est insupprimable** depuis l'application : `rmdir` le refuse, et il n'y a pas de suppression récursive | On sort dans un terminal pour la moitié du ménage. Une pile comme celle de `CopyJob` suffirait — et **par tranches**, même contrainte | petit |
 | **Un lien symbolique vers un dossier part dans l'Éditeur** : `EntryKind::Link` n'est pas suivi, et la cible n'est jamais montrée | Un `~/Documents -> /data/docs` est inutilisable | petit |
 | **La bascule des fichiers cachés ne touche que le panneau actif** : `reload()` ignore l'autre | En vue scindée, un panneau reste périmé jusqu'à ce qu'on y navigue | petit |
+
+**Soldé le 15 août 2026** (commit `job_`) : la **suppression récursive**, l'**arrêt
+d'un travail** (`Échap`, et une entrée de menu qui n'apparaît que pendant), et la
+**question à la fermeture** quand un travail court. Le moteur s'appelle désormais
+`FileJob` — il fait les trois opérations, et `CopyJob` mentait sur ce qu'il faisait.
 
 **Puis, par valeur pour un bureau en mode texte :**
 

@@ -24,13 +24,18 @@ namespace sshos {
 // c'est assumé -- l'avancement se compte en éléments traités, pas en
 // pourcentage d'un tout qu'il faudrait payer un parcours entier pour
 // connaître.
-enum class CopyKind : uint8_t { Copy, Move };
+// Les trois opérations partagent la MÊME machinerie, et ce n'est pas de
+// l'économie : elles ont le même problème. Un déplacement descend une
+// arborescence, une suppression aussi ; l'une comme l'autre doit rendre la
+// main entre deux éléments, sans quoi elle gèle le bureau.
+enum class FileOp : uint8_t { Copy, Move, Delete };
 
-class CopyJob {
+class FileJob {
  public:
-  // `sources` sont des chemins absolus, `dest` le répertoire d'arrivée.
+  // `sources` sont des chemins absolus, `dest` le répertoire d'arrivée --
+  // vide pour une suppression, qui ne va nulle part.
   void start(std::vector<std::string> sources, std::string dest,
-             CopyKind kind);
+             FileOp kind);
 
   bool active() const { return active_; }
   // Avance d'au plus `budget` octets, ou d'un geste de répertoire. Rend
@@ -46,21 +51,33 @@ class CopyJob {
   // l'utilisateur ne saurait pas où elle en est.
   const std::string& error() const { return error_; }
   int failed() const { return failed_; }
-  CopyKind kind() const { return kind_; }
+  FileOp kind() const { return kind_; }
 
  private:
   struct Item {
     std::string from;
     std::string to;
+    // « Il ne reste qu'à ôter ce répertoire, son contenu est parti. »
+    // C'était un `to` vide, puis un `to` valant « . » -- deux sentinelles
+    // qu'un fichier ordinaire pouvait porter, et le marqueur repassait
+    // alors par la branche « répertoire », qui réempilait ses enfants et
+    // se réempilait lui-même : boucle infinie.
+    bool rmdir_only = false;
   };
 
-  // Ouvre le prochain élément. Rend false quand la pile est vide.
+  // Traite UN élément : un `rmdir`, un `mkdir` et son `readdir`, un
+  // `rename`, un `unlink`, ou l'ouverture d'un fichier à copier. Rend
+  // false, et seulement alors, quand la pile est vide.
+  //
+  // UN ÉLÉMENT PAR APPEL, jamais plus : enchaîner tous les répertoires
+  // d'une arborescence en une fois ferait exactement ce que le découpage
+  // en tranches existe pour éviter.
   bool take_next();
   void fail(const std::string& what);
   void finish_current();
 
   bool active_ = false;
-  CopyKind kind_ = CopyKind::Copy;
+  FileOp kind_ = FileOp::Copy;
   std::vector<Item> pending_;
   std::string current_;
   std::string current_from_;

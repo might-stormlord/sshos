@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "apps/files/copy.hpp"
+#include "apps/files/job.hpp"
 #include "harness.hpp"
 
-using sshos::CopyJob;
-using sshos::CopyKind;
+using sshos::FileJob;
+using sshos::FileOp;
 
 namespace {
 
@@ -88,7 +88,7 @@ bool exists(const std::string& p) {
 
 // Fait tourner le travail jusqu'au bout, en comptant les tranches. Bornée :
 // un travail qui n'avance pas doit faire échouer le cas, pas le figer.
-int run_to_end(CopyJob& job, size_t budget) {
+int run_to_end(FileJob& job, size_t budget) {
   int steps = 0;
   while (job.step(budget) && steps < 100000) ++steps;
   return steps;
@@ -102,8 +102,8 @@ TEST(copy_moves_the_bytes_of_a_file) {
   t.file("source", "bonjour");
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/source"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/source"}, t.root() + "/cible", FileOp::Copy);
   run_to_end(job, 1024);
 
   CHECK_EQ(read_all(t.root() + "/cible/source"), std::string("bonjour"));
@@ -121,8 +121,8 @@ TEST(copy_never_moves_more_than_its_budget_in_one_step) {
   t.file("gros", std::string(50000, 'x'));
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/gros"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/gros"}, t.root() + "/cible", FileOp::Copy);
   // Une tranche ouvre le fichier, la suivante en copie 1000 octets : après
   // deux tranches, il en reste largement à faire.
   job.step(1000);
@@ -143,8 +143,8 @@ TEST(copy_walks_a_whole_tree) {
   t.file("arbre/branche/b", "deux");
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/arbre"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/arbre"}, t.root() + "/cible", FileOp::Copy);
   run_to_end(job, 4096);
 
   CHECK_EQ(read_all(t.root() + "/cible/arbre/a"), std::string("un"));
@@ -165,8 +165,8 @@ TEST(copy_moves_a_file_without_copying_it_when_it_can) {
   t.file("source", "contenu");
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/source"}, t.root() + "/cible", CopyKind::Move);
+  FileJob job;
+  job.start({t.root() + "/source"}, t.root() + "/cible", FileOp::Move);
   // UNE SEULE tranche suffit : `rename()` ne copie rien.
   job.step(1);
   job.step(1);
@@ -184,8 +184,8 @@ TEST(copy_refuses_to_overwrite_and_says_so) {
   t.dir("cible");
   t.file("cible/source", "ancien");
 
-  CopyJob job;
-  job.start({t.root() + "/source"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/source"}, t.root() + "/cible", FileOp::Copy);
   run_to_end(job, 1024);
 
   CHECK_EQ(read_all(t.root() + "/cible/source"), std::string("ancien"));
@@ -203,9 +203,9 @@ TEST(copy_keeps_going_after_one_of_them_fails) {
   t.dir("cible");
   t.file("cible/a", "deja la");
 
-  CopyJob job;
+  FileJob job;
   job.start({t.root() + "/a", t.root() + "/b"}, t.root() + "/cible",
-            CopyKind::Copy);
+            FileOp::Copy);
   run_to_end(job, 1024);
 
   CHECK_EQ(job.failed(), 1);
@@ -219,8 +219,8 @@ TEST(copy_reports_a_source_that_vanished) {
   REQUIRE(t.valid());
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/jamais-existe"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/jamais-existe"}, t.root() + "/cible", FileOp::Copy);
   run_to_end(job, 1024);
 
   CHECK_EQ(job.failed(), 1);
@@ -235,8 +235,8 @@ TEST(copy_stops_dead_when_it_is_cancelled) {
   t.file("gros", std::string(50000, 'x'));
   t.dir("cible");
 
-  CopyJob job;
-  job.start({t.root() + "/gros"}, t.root() + "/cible", CopyKind::Copy);
+  FileJob job;
+  job.start({t.root() + "/gros"}, t.root() + "/cible", FileOp::Copy);
   job.step(100);
   job.step(100);
   REQUIRE(job.active());
@@ -258,9 +258,9 @@ TEST(copy_counts_what_it_has_done) {
   t.file("b", "deux");
   t.dir("cible");
 
-  CopyJob job;
+  FileJob job;
   job.start({t.root() + "/a", t.root() + "/b"}, t.root() + "/cible",
-            CopyKind::Copy);
+            FileOp::Copy);
   CHECK_EQ(job.done(), 0);
   run_to_end(job, 1024);
   CHECK_EQ(job.done(), 2);
@@ -274,9 +274,9 @@ TEST(copy_names_the_file_it_is_working_on) {
   t.file("le-gros-fichier", std::string(50000, 'x'));
   t.dir("cible");
 
-  CopyJob job;
+  FileJob job;
   job.start({t.root() + "/le-gros-fichier"}, t.root() + "/cible",
-            CopyKind::Copy);
+            FileOp::Copy);
   job.step(100);
 
   CHECK_EQ(job.current(), std::string("le-gros-fichier"));
@@ -304,8 +304,8 @@ TEST(copy_moves_across_a_mount_point_by_copying_then_deleting) {
   const char* dest = ::mkdtemp(tpl);
   REQUIRE(dest != nullptr);
 
-  CopyJob job;
-  job.start({t.root() + "/voyageur"}, dest, CopyKind::Move);
+  FileJob job;
+  job.start({t.root() + "/voyageur"}, dest, FileOp::Move);
   run_to_end(job, 1024);
 
   const std::string arrived = std::string(dest) + "/voyageur";
@@ -326,9 +326,9 @@ TEST(copy_keeps_going_after_a_source_that_does_not_exist) {
   t.file("present", "la");
   t.dir("cible");
 
-  CopyJob job;
+  FileJob job;
   job.start({t.root() + "/absent", t.root() + "/present"}, t.root() + "/cible",
-            CopyKind::Copy);
+            FileOp::Copy);
   run_to_end(job, 1024);
 
   CHECK_EQ(job.failed(), 1);
@@ -357,12 +357,119 @@ TEST(copy_gives_its_descriptors_back_when_cancelled) {
   REQUIRE(before > 0);
 
   for (int i = 0; i < 8; ++i) {
-    CopyJob job;
-    job.start({t.root() + "/gros"}, t.root() + "/cible", CopyKind::Copy);
+    FileJob job;
+    job.start({t.root() + "/gros"}, t.root() + "/cible", FileOp::Copy);
     job.step(100);
     job.cancel();
     ::unlink((t.root() + "/cible/gros").c_str());
   }
 
   CHECK_EQ(open_fds(), before);
+}
+
+// ------------------------------------------------- la suppression recursive
+
+// UN DOSSIER PLEIN SE SUPPRIME. `rmdir` le refuse, et il n'y avait pas de
+// descente : un dossier non vide était **insupprimable** depuis
+// l'application, ce qui obligeait à sortir dans un terminal pour la moitié
+// du ménage.
+TEST(job_deletes_a_whole_tree) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("arbre");
+  t.dir("arbre/branche");
+  t.file("arbre/a", "un");
+  t.file("arbre/branche/b", "deux");
+
+  FileJob job;
+  job.start({t.root() + "/arbre"}, std::string(), FileOp::Delete);
+  run_to_end(job, 4096);
+
+  CHECK(!exists(t.root() + "/arbre"));
+  CHECK_EQ(job.failed(), 0);
+}
+
+// ELLE AVANCE PAR TRANCHES, comme la copie et pour la même raison : le
+// démon est mono-thread, et effacer une arborescence de cent mille fichiers
+// d'un seul appel gèlerait toutes les fenêtres et tous les clients.
+TEST(job_deletes_lazily_without_walking_everything_first) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gros");
+  for (int i = 0; i < 40; ++i) {
+    t.file("gros/f" + std::to_string(i), "x");
+  }
+
+  FileJob job;
+  job.start({t.root() + "/gros"}, std::string(), FileOp::Delete);
+  // Une tranche ne traite qu'un élément : après deux, il reste tout le
+  // reste, et le dossier est donc toujours là.
+  job.step(4096);
+  job.step(4096);
+  CHECK(job.active());
+  CHECK(exists(t.root() + "/gros"));
+
+  run_to_end(job, 4096);
+  CHECK(!exists(t.root() + "/gros"));
+}
+
+// LE DOSSIER PART APRÈS SON CONTENU. L'ordre inverse ferait échouer chaque
+// `rmdir` sur un dossier encore plein, et rendrait « N ont echoue » sur une
+// arborescence pourtant parfaitement supprimable.
+TEST(job_removes_a_directory_after_what_it_holds) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("nid");
+  t.dir("nid/dedans");
+  t.file("nid/dedans/oeuf", "x");
+
+  FileJob job;
+  job.start({t.root() + "/nid"}, std::string(), FileOp::Delete);
+  run_to_end(job, 4096);
+
+  CHECK(!exists(t.root() + "/nid"));
+  CHECK_EQ(job.failed(), 0);
+}
+
+// UN ÉCHEC N'ARRÊTE PAS LE RESTE, et il se compte : c'est la même règle que
+// la copie, et un droit refusé au milieu d'une arborescence ne doit pas
+// laisser le travail à moitié fait sans que personne sache où.
+TEST(job_keeps_deleting_after_one_of_them_fails) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("present", "la");
+
+  FileJob job;
+  job.start({t.root() + "/absent", t.root() + "/present"}, std::string(),
+            FileOp::Delete);
+  run_to_end(job, 4096);
+
+  CHECK_EQ(job.failed(), 1);
+  CHECK(!exists(t.root() + "/present"));
+}
+
+// UNE SUPPRESSION NE COPIE RIEN : elle n'ouvre aucun descripteur, donc une
+// arborescence de deux gigaoctets s'efface aussi vite qu'une vide.
+TEST(job_opens_nothing_while_deleting) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("gros", std::string(50000, 'x'));
+
+  const auto open_fds = []() {
+    int n = 0;
+    DIR* d = ::opendir("/proc/self/fd");
+    if (d == nullptr) return -1;
+    while (::readdir(d) != nullptr) ++n;
+    ::closedir(d);
+    return n;
+  };
+  const int before = open_fds();
+  REQUIRE(before > 0);
+
+  FileJob job;
+  job.start({t.root() + "/gros"}, std::string(), FileOp::Delete);
+  run_to_end(job, 4096);
+
+  CHECK_EQ(open_fds(), before);
+  CHECK(!exists(t.root() + "/gros"));
 }

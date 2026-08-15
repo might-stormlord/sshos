@@ -996,6 +996,7 @@ TEST(files_deletes_only_after_an_explicit_yes) {
   f.on_key(key(Key::Down));
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
   CHECK(!exists(a));
   CHECK(f.mode_for_tests() == Files::Mode::Normal);
@@ -1033,10 +1034,14 @@ TEST(files_cancels_a_delete_on_escape) {
   CHECK(f.mode_for_tests() == Files::Mode::Normal);
 }
 
-// Pas de suppression RÉCURSIVE en v1 : un dossier non vide se refuse, avec
-// un message. Effacer une arborescence entière sur une touche est le genre
-// de fonction qu'on regrette une seule fois.
-TEST(files_refuses_to_delete_a_directory_that_is_not_empty) {
+// UN DOSSIER NON VIDE S'EFFACE AVEC SON CONTENU -- et ce cas disait
+// l'inverse jusqu'au 15 août 2026. La v1 refusait la descente : « effacer
+// une arborescence entière sur une touche est le genre de fonction qu'on
+// regrette une seule fois ». Le risque était réel, mais un dossier plein
+// insupprimable obligeait à sortir dans un terminal pour la moitié du
+// ménage. Il est désormais récursif, ET arrêtable d'une touche, ET la
+// question prévient. C'est la prudence qui a changé de place, pas de camp.
+TEST(files_deletes_a_directory_with_everything_it_holds) {
   Tree t;
   REQUIRE(t.valid());
   const std::string d = t.dir("plein");
@@ -1048,10 +1053,11 @@ TEST(files_refuses_to_delete_a_directory_that_is_not_empty) {
   REQUIRE_EQ(selected_name(f), std::string("plein"));
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
-  CHECK(exists(d));
-  CHECK(exists(inside));
-  CHECK(!f.status_for_tests().empty());
+  CHECK(!exists(inside));
+  CHECK(!exists(d));
+  CHECK(f.status_for_tests().empty());
 }
 
 TEST(files_refuses_to_delete_the_parent_entry) {
@@ -1080,6 +1086,7 @@ TEST(files_reloads_the_listing_after_a_delete) {
   f.on_key(key(Key::Down));
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
   CHECK_EQ(names(f), std::string("..|bbb"));
 }
@@ -1207,6 +1214,7 @@ TEST(files_deletes_an_empty_directory) {
   REQUIRE_EQ(selected_name(f), std::string("vide"));
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
   CHECK(!exists(d));
   CHECK_EQ(f.status_for_tests(), std::string(""));
@@ -1414,6 +1422,7 @@ TEST(files_deletes_everything_that_is_marked) {
   f.on_key(key(Key::Delete));
   REQUIRE(f.mode_for_tests() == Files::Mode::Confirming);
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
   CHECK(!exists(d.root() + "/un"));
   CHECK(!exists(d.root() + "/deux"));
@@ -1435,6 +1444,7 @@ TEST(files_falls_back_to_the_line_under_the_cursor) {
 
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
   CHECK(!exists(d.root() + "/cible"));
   CHECK(exists(d.root() + "/voisin"));
@@ -1465,20 +1475,22 @@ TEST(files_keeps_deleting_after_one_of_them_refuses) {
   REQUIRE(t.valid());
   // « a » avant « b » : la sélection est un ensemble ordonné par nom, donc
   // celui qui échoue passe en premier.
-  t.dir("a-plein");
-  t.file("a-plein/dedans");
+  t.file("a-disparu");
   t.file("b-simple");
   Files f(t.root());
   f.on_resize(Size{40, 10});
   f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
   REQUIRE_EQ(f.marked_for_tests().size(), size_t{2});
 
+  // LA LISTE PEUT DATER, LE DISQUE NON : un autre programme efface le
+  // premier entre le choix et la confirmation. C'est le cas d'échec qui
+  // reste après que la suppression est devenue récursive.
+  ::unlink((t.root() + "/a-disparu").c_str());
+
   f.on_key(key(Key::Delete));
   f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
 
-  // Le dossier non vide résiste -- pas de suppression récursive ici --
-  // mais le fichier d'après est bel et bien parti.
-  CHECK(exists(t.root() + "/a-plein"));
   CHECK(!exists(t.root() + "/b-simple"));
   CHECK(f.status_for_tests().find("1 sur 2") != std::string::npos);
 }
@@ -2958,4 +2970,158 @@ TEST(files_puts_its_caret_in_the_pane_that_has_the_hand) {
   // Le panneau de droite commence après le liseré, sa cloison, le panneau
   // de gauche et la sienne.
   CHECK(p.x > sshos::kPlacesWidth);
+}
+
+// --------------------------------------- supprimer un dossier non vide
+
+// UN DOSSIER PLEIN SE SUPPRIME DEPUIS L'APPLICATION. `rmdir` le refusait et
+// il n'y avait pas de descente : il fallait sortir dans un terminal pour la
+// moitié du ménage.
+TEST(files_deletes_a_directory_that_is_not_empty) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("plein");
+  t.file("plein/dedans");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("plein"));
+
+  f.on_key(key(Key::Delete));
+  REQUIRE(f.mode_for_tests() == Files::Mode::Confirming);
+  f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  CHECK(!exists(t.root() + "/plein"));
+  CHECK(f.status_for_tests().empty());
+}
+
+// LA QUESTION DIT QUE C'EST RÉCURSIF. « supprimer plein ? » ne prépare pas
+// à perdre une arborescence entière — et c'est le seul geste irréversible
+// du projet.
+TEST(files_warns_that_a_directory_goes_with_its_contents) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("plein");
+  t.file("plein/dedans");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+
+  const std::string screen = painted(f, 60, 12);
+  CHECK(screen.find("contenu") != std::string::npos);
+}
+
+// `ÉCHAP` ARRÊTE UN TRAVAIL EN COURS. Sans lui, une suppression lancée par
+// erreur sur une arborescence de dix mille fichiers ne s'arrête qu'en
+// fermant la fenêtre — et c'est irréversible.
+TEST(files_stops_a_running_job_on_escape) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gros");
+  for (int i = 0; i < 30; ++i) t.file("gros/f" + std::to_string(i));
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+  f.on_tick_for_tests();
+  REQUIRE(f.job_active_for_tests());
+
+  f.on_key(key(Key::Escape));
+
+  CHECK(!f.job_active_for_tests());
+  // Ce qui restait est TOUJOURS LÀ : arrêter, c'est arrêter.
+  CHECK(exists(t.root() + "/gros"));
+  CHECK(!f.status_for_tests().empty());
+}
+
+// FERMER PENDANT UN TRAVAIL POSE LA QUESTION. Le Terminal la pose pour un
+// shell vivant ; une copie ou une suppression en cours vaut au moins
+// autant, et la tuer en silence est la pire des surprises.
+TEST(files_asks_before_closing_on_a_running_job) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gros");
+  for (int i = 0; i < 30; ++i) t.file("gros/f" + std::to_string(i));
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  CHECK(f.can_close().allowed);
+
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+  f.on_tick_for_tests();
+  REQUIRE(f.job_active_for_tests());
+
+  const sshos::CloseCheck c = f.can_close();
+  CHECK(!c.allowed);
+  CHECK(!c.question.empty());
+}
+
+// LE MENU CONTEXTUEL LE PROPOSE AUSSI : l'utilisateur pilote à la souris,
+// et un travail qu'on ne peut arrêter qu'au clavier n'est pas arrêtable.
+TEST(files_offers_to_stop_the_job_in_its_menu) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gros");
+  for (int i = 0; i < 30; ++i) t.file("gros/f" + std::to_string(i));
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+  f.on_tick_for_tests();
+  REQUIRE(f.job_active_for_tests());
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+  const std::string screen = painted(f, 60, 16);
+  CHECK(screen.find("Arreter") != std::string::npos);
+}
+
+// « ARRÊTER » N'EST PAS PROPOSÉ QUAND IL N'Y A RIEN À ARRÊTER. Une entrée
+// inerte les trois quarts du temps use la confiance qu'on met dans les
+// autres — et elle coûte une ligne à un menu qui déborde déjà d'une
+// fenêtre de seize.
+TEST(files_offers_no_stop_when_nothing_is_running) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{60, 16});
+
+  f.on_mouse(MouseEvent{MouseAction::Press, 2, 4, 3, 0});
+
+  CHECK(painted(f, 60, 16).find("Arreter") == std::string::npos);
+}
+
+// UN SECOND TRAVAIL N'ÉCRASE PAS LE PREMIER. `start()` annule ce qui
+// courait : lancer une suppression pendant qu'une autre tourne
+// abandonnerait la première à mi-chemin, sans que rien ne le dise — et
+// c'est une suppression.
+TEST(files_refuses_to_start_a_job_while_one_is_running) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("gros");
+  for (int i = 0; i < 30; ++i) t.file("gros/f" + std::to_string(i));
+  t.file("intact");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("gros"));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+  f.on_tick_for_tests();
+  REQUIRE(f.job_active_for_tests());
+
+  // On en demande une seconde pendant que la première court.
+  f.on_key(key(Key::End));
+  f.on_key(key(Key::Delete));
+  f.on_key(ch(U'o'));
+  for (int i = 0; i < 400 && f.job_active_for_tests(); ++i) f.on_tick_for_tests();
+
+  // La première est allée jusqu'au bout ; la seconde n'a jamais commencé.
+  CHECK(!exists(t.root() + "/gros"));
+  CHECK(exists(t.root() + "/intact"));
 }
