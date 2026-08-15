@@ -13,9 +13,12 @@ std::unique_ptr<App> make_editor() { return std::make_unique<Editor>(); }
 
 }  // namespace
 
-// Ce fichier inclut apps/bloc.hpp, donc app/ dépend ici de apps/. C'est la
-// seule entorse à la règle de dépendance du projet, et elle est
-// délibérée : le catalogue est par définition la liste de ce qui existe.
+// Ce fichier inclut les en-têtes de `apps/`, donc `app/` dépend ici de
+// `apps/`. C'est la seule entorse à la règle de dépendance du projet, et
+// elle est délibérée : le catalogue est par définition la liste de ce qui
+// existe. (Il a longtemps nommé `apps/bloc.hpp`, disparu au commit
+// `f119b26` quand les applications de démonstration sont devenues des
+// doublures de test.)
 // Le contrat lui-même (app/app.hpp) reste totalement ignorant de ses
 // implémentations.
 const std::vector<CatalogEntry>& catalog() {

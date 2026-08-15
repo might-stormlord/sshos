@@ -140,9 +140,12 @@ class Session : public ChildSink {
   // help_delay_ms() : le demon la replie dans le delai de son epoll_wait,
   // et marque la trame sale a l'echeance.
   //
-  // C'EST ICI que se joue « un moniteur minimise ne consomme rien » : une
-  // fenetre Minimized n'entre pas dans le calcul, donc son delai ne
-  // reveille personne et son dessin n'a jamais lieu.
+  // UNE FENETRE MINIMISEE COMPTE QUAND MEME depuis le 14 aout 2026, et le
+  // commentaire d'avant disait l'inverse. La regle d'origine l'excluait
+  // pour qu'un moniteur reduit ne force pas un repeint par seconde ; mais
+  // une application ne demande pas l'horloge pour DESSINER, elle la
+  // demande pour TRAVAILLER -- une copie de fichiers qui s'arrete parce
+  // qu'on a reduit sa fenetre serait un piege. Voir session.cpp.
   int refresh_delay_ms() const;
 
   // L'echeance du rafraichissement periodique est arrivee. Marquer

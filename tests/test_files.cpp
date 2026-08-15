@@ -2936,3 +2936,26 @@ TEST(files_says_what_it_is_dragging) {
   CHECK(screen.find("attrape-moi") != std::string::npos);
   CHECK(screen.find("deplacer") != std::string::npos);
 }
+
+// LE CARET SE POSE DANS LE PANNEAU ACTIF, pas dans le coin de la fenêtre.
+// Il rendait la colonne 0 en dur : avec le liseré des raccourcis, il
+// tombait dessus ; en vue scindée sur le panneau de droite, il restait à
+// gauche. Le défaut ne se voyait pas tant que le bureau n'affichait aucun
+// curseur -- il est devenu visible le jour où le caret a enfin traversé.
+TEST(files_puts_its_caret_in_the_pane_that_has_the_hand) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F9));   // le liseré prend les 12 premières colonnes
+  f.on_key(key(Key::F3));   // et la scission coupe ce qui reste
+  f.on_key(key(Key::Tab));  // la main passe à droite
+  REQUIRE_EQ(f.active_pane_for_tests(), size_t{1});
+
+  sshos::Pos p{};
+  REQUIRE(f.wants_cursor(p));
+  // Le panneau de droite commence après le liseré, sa cloison, le panneau
+  // de gauche et la sienne.
+  CHECK(p.x > sshos::kPlacesWidth);
+}

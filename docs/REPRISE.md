@@ -492,6 +492,52 @@ peine d'être conservés :
 
 ---
 
+## 8 bis. Le rythme réel depuis le jalon 3, et la campagne de mutation
+
+Le mode « un sous-agent frais par tâche » du §8 est celui du jalon 1. **Depuis le
+jalon 3, le rythme est direct et invariant :**
+
+1. **Les tests d'abord, et le rouge est CONSTATÉ**, pas supposé. Un cas qui passe du
+   premier coup ne prouve rien : il faut l'avoir vu échouer pour la bonne raison.
+2. Le code minimal qui le fait passer.
+3. **Campagne de mutation** sur ce que la tâche vient d'écrire.
+4. **Chaque survivante devient un cas**, ou une équivalence **déclarée sur place**
+   dans un commentaire qui dit pourquoi elle est inobservable.
+5. Un commit par tâche, message en français **sans accents** (le corps du code, lui,
+   est accentué — cf. `ssh-os-2-conventions-de-code`).
+
+### La campagne de mutation — la recette et ses pièges
+
+Un script Python remplace une ligne du code de production par une variante fausse,
+recompile, relance la suite filtrée, restaure, recommence. Une mutation « morte » est
+une mutation qu'un test a mordue ; une « survivante » est presque toujours **un trou
+de test**, pas une équivalence — 2 sur 246 seulement l'étaient au jalon 3.
+
+Les exemplaires de ces campagnes sont dans le scratchpad de session (`mutate_tNN.py`).
+Cinq règles, toutes payées comptant :
+
+1. **Commiter AVANT.** La sauvegarde n'est fiable que si l'arbre est propre.
+2. **Sauvegarde fraîche et complète** de tous les fichiers mutés, refaite à chaque
+   campagne — pas celle de la campagne d'avant.
+3. **Restaurer par `shutil.copyfile` + `os.utime`, jamais `copy2`** : `copy2`
+   préserve la `mtime`, `make` ne recompile pas, et le binaire testé **reste muté**.
+4. **Ne rien lire d'autre dans `src/` pendant la campagne** : le fichier y est faux.
+5. **Vérifier le filtre de tests.** Une campagne dont `FILTERS` ne couvre pas les cas
+   qui mordent rend « 8 survivantes » qui n'en sont pas — arrivé le 14 août avec un
+   filtre `["files_"]` qui ne voyait pas `copy_`.
+
+> Et : **tuer les campagnes orphelines après tout redémarrage.** Un travail de fond
+> survit à une coupure et continue de muter `src/` sous les doigts. Vérifier avec
+> `pgrep -af mutate` **avant** de croire un échec de test.
+
+### Deux mutations sur trois ne compilent pas pour rien
+
+`-Werror` refuse une variable devenue inutilisée. Une mutation qui retire le seul
+usage d'un paramètre ne compile pas et n'est **pas** une survivante : c'est une
+mutation invalide, à compter comme telle et non comme un succès.
+
+---
+
 ## 9. Pièges d'environnement — faux positifs récurrents
 
 Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heures.
@@ -577,6 +623,26 @@ Les accesseurs suffixés `_for_tests` sont des faux positifs légitimes — **d'
 suffixe, à mettre systématiquement** sur toute méthode qui n'existe que pour les
 tests. C'est ce qui rend le balayage exploitable.
 
+**Deux faux positifs structurels du script, à connaître :**
+
+- `return foo(x);` ressemble à une déclaration (`return` passe pour un type de
+  retour) et masque un vrai appel. Parade : une liste de mots-clés d'instruction
+  (`return`, `case`, `else`, `throw`…) qui disqualifie le préfixe.
+- Les **constructeurs sont inanalysables** : `Type x{args};` et `Type x;` sont
+  syntaxiquement identiques à une déclaration. Six remontent toujours
+  (`Differ`, `FrameClock`, `LeaderDispatch`, `OutQueue`, `Parser`, `Scrollback`)
+  et sont tous appelés. Les écarter à la main.
+- Une signature étalée sur plusieurs lignes n'est pas capturée du tout si l'on
+  n'accepte que les lignes finissant par `;`. Parade : parenthèse restée ouverte
+  = signature valide.
+
+**Passage du 15 août 2026 :** 464 noms déclarés, 27 candidats bruts, **4 vraies
+orphelines** après vérification manuelle — `Screen::autowrap()`, `Files::other()`
+(privée, donc même pas atteignable par un test), `LeaderDispatch::phase()` et
+`Menu::query()`. Toutes retirées au commit `e32f09c`. Les 13 restantes sont des
+**API de test légitimes** appelées depuis `tests/` ; c'est la raison d'être du
+suffixe `_for_tests`, qu'elles n'ont pas encore.
+
 **Et le filet qui attrape ce que le balayage ne voit pas :** une sonde bout-en-bout
 qui pilote le **vrai démon** sous pty et lance de **vrais programmes**. Les défauts
 3, 4, 5 et 10 n'ont été vus que comme ça.
@@ -659,6 +725,37 @@ documentation des gestes sans accord, les taquets de tabulation `HTS`/`TBC`, le
 menu contextuel du gestionnaire de fichiers, **l'Éditeur enfin branché** — le
 message « l'editeur arrive au jalon 6 » traînait depuis *avant* la livraison du
 jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
+
+### Le carnet du gestionnaire de fichiers — audité le 15 août 2026
+
+Établi en relisant `src/apps/files/` face à Dolphin, et filtré : ce qui n'a pas de
+sens en mode texte (vignettes, aperçus graphiques) est écarté.
+
+**Trois sont des DÉFAUTS, pas des manques** — à traiter en premier :
+
+| Défaut | Ce qu'il coûte | Taille |
+|---|---|---|
+| **Un dossier non vide est insupprimable** depuis l'application : `rmdir` le refuse, et il n'y a pas de suppression récursive | On sort dans un terminal pour la moitié du ménage. Une pile comme celle de `CopyJob` suffirait — et **par tranches**, même contrainte | petit |
+| **Un lien symbolique vers un dossier part dans l'Éditeur** : `EntryKind::Link` n'est pas suivi, et la cible n'est jamais montrée | Un `~/Documents -> /data/docs` est inutilisable | petit |
+| **La bascule des fichiers cachés ne touche que le panneau actif** : `reload()` ignore l'autre | En vue scindée, un panneau reste périmé jusqu'à ce qu'on y navigue | petit |
+
+**Puis, par valeur pour un bureau en mode texte :**
+
+| Manque | Pourquoi ça compte | Taille |
+|---|---|---|
+| **Annuler une copie en cours** — `CopyJob::cancel()` existe et **aucun geste ne l'appelle** | Une copie de 2 Go ne s'arrête qu'en fermant la fenêtre | petit |
+| **`can_close()` pendant une copie** | Fermer la fenêtre tue la copie sans un mot ; le Terminal, lui, pose la question | petit |
+| **Conflit de noms** : `O_EXCL` échoue en silence (« N ont echoue ») | Il manque Écraser / Renommer / Ignorer / Tout | moyen |
+| **Permissions et propriétaire** — le `stat()` est **déjà payé**, `DirEntry` jette `st_mode`, `uid`, `gid` | C'est l'information la plus attendue en mode texte (`ls -l`) | petit |
+| **Copier au glisser** (`Ctrl` enfoncé) | Le lâcher déplace toujours | petit |
+| **Rafraîchir** (`F5`) | La liste ne se relit qu'au changement de répertoire | petit |
+| **Chemin éditable** (`Ctrl+L`) | On n'atteint un chemin qu'en cliquant niveau par niveau | petit |
+| **Corbeille** (`~/.local/share/Trash`) | Tout est irréversible aujourd'hui | moyen |
+| **Ouvrir un terminal ici** (`F4`) | `PtySpawn` n'a pas de champ « répertoire de travail » | moyen |
+| Onglets, recherche récursive, signets modifiables, propriétés | Confort | moyen |
+| Annuler (`Ctrl+Z`) sur copie / déplacement / renommage | Le plus gros, et le plus rentable à long terme | gros |
+
+---
 
 Ce que les sept jalons ont appris, et qui vaut pour la suite :
 

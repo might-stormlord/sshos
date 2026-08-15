@@ -1270,7 +1270,15 @@ void Files::on_mouse(const MouseEvent& m) {
 
 bool Files::wants_cursor(Pos& out) const {
   if (pane().visible.empty()) return false;
-  out = Pos{0, 2 + static_cast<int>(pane().sel - pane().top)};
+  // LA COLONNE DU PANNEAU ACTIF, pas celle de la fenêtre. Le liseré des
+  // raccourcis décale, la scission décale encore : un caret posé en zéro
+  // tombe sur le liseré, ou reste à gauche pendant qu'on travaille à
+  // droite. Le défaut ne se voyait pas tant que le bureau n'affichait
+  // aucun curseur -- il est devenu visible le jour où le caret a enfin
+  // traversé jusqu'au client.
+  int x = places_ ? kPlacesWidth + 1 : 0;
+  if (split_ && active_ == 1) x += pane_width() + 1;
+  out = Pos{x, 2 + static_cast<int>(pane().sel - pane().top)};
   return true;
 }
 
