@@ -1,3 +1,33 @@
+# Repertoires de compilation (build/, build-release/, build-debug/, build-dbg/...)
 build*/
 compile_commands.json
+
+# Outillage de session : le ledger SDD, les worktrees d'agents, les instantanes
+# de conversation. Rien de tout cela n'a sa place dans le depot.
+# ATTENTION : docs/sessions/ contient des transcriptions brutes de conversation.
+# La regle ci-dessous est la SEULE protection versionnee -- ne pas la retirer.
 .superpowers/
+.claude/
+docs/sessions/
+
+# Python (tools/sonde.py, tools/mutation.py)
+__pycache__/
+*.pyc
+*.pyo
+
+# Artefacts de compilation et de profilage
+*.o
+*.a
+*.so
+a.out
+core
+core.*
+perf.data*
+callgrind.out.*
+massif.out.*
+
+# Editeurs
+.vscode/
+.idea/
+.cache/
+*.swp
