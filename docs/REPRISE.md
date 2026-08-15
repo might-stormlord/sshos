@@ -4,9 +4,10 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `e59573f`.
-> **1121 tests au vert** en `Release` (~19 s) comme sous ASan/UBSan (~47 s),
-> 0 avertissement. Arbre de travail propre. **194 commits** depuis `main`.
+> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `e6e5fcc`.
+> **1146 tests au vert** en `Release` (~20 s) comme sous ASan/UBSan (~48 s),
+> 0 avertissement. Arbre de travail propre. **199 commits** depuis `main`.
+> 41 535 lignes sur 162 fichiers.
 > **Les SEPT jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'usage par l'utilisateur. Le §3 donne la position exacte.
 >
@@ -16,6 +17,7 @@
 > **§4** ce qui n'est pas négociable · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
 > **§9 bis** le défaut qui revient dix fois dans ce projet, et son balayage ·
+> **§9 ter** ce qu'un audit adversarial a trouvé — et ce qu'il a manqué ·
 > **§10** le carnet de ce qui reste à faire.
 > Le reste (§5 à §7, §8, §9) se lit à la demande.
 >
@@ -193,8 +195,8 @@ d'abord (le rouge est constaté, pas supposé), commit `wip(...) avant campagne 
 mutation`, campagne, tests ajoutés pour chaque survivante, commit
 `feat(...) (jalon N, tache M)`, puis `docs(mN): tache M cochee`.
 
-**Volume réel au 15 août 2026 : 40 777 lignes sur 162 fichiers** — `src/` en compte
-16 568 sur 108, `tests/` 24 209 sur 54. L'estimation d'origine (12 000 à 15 000) est
+**Volume réel au 15 août 2026 : 41 535 lignes sur 162 fichiers** — `src/` en compte
+16 736 sur 108, `tests/` 24 799 sur 54. L'estimation d'origine (12 000 à 15 000) est
 dépassée d'un facteur trois, et le rapport tests/code d'environ 1,5 pour 1 n'est pas
 une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
@@ -695,6 +697,33 @@ qui pilote le **vrai démon** sous pty et lance de **vrais programmes**. Les dé
 
 ---
 
+## 9 ter. Ce qu'un audit adversarial a trouvé — et ce qu'il a manqué
+
+Le 15 août 2026, sept lecteurs indépendants ont été lâchés sur le dépôt pour écrire
+ce dossier : l'historique, la suite de tests, le balayage des orphelines, la
+comparaison à Dolphin, la carte d'architecture, l'audit de ce document, puis une
+critique de l'ensemble. **Ils ont trouvé neuf choses que je n'avais pas vues**, dont
+cinq étaient du code à réparer et non de la documentation à écrire :
+
+| Trouvé par | Quoi |
+|---|---|
+| balayage | Quatre accesseurs morts (`Screen::autowrap()`, `Files::other()` — **privée**, donc pas même atteignable par un test —, `LeaderDispatch::phase()`, `Menu::query()`) |
+| carte d'archi | Deux **commentaires en capitales qui mentaient**, dans un projet où ils passent pour des invariants testés |
+| audit Dolphin | Le caret posé colonne 0 de la fenêtre, donc sur le liseré ; et quatre défauts fonctionnels du gestionnaire de fichiers |
+| audit du doc | « 189 cas » au §2 — un contexte neuf aurait cru avoir tout cassé |
+| critique | **Le projet n'existe que sur ce disque** ; les outils vivaient dans un scratchpad ; le tableau des gestes était entièrement au clavier dans un projet « souris d'abord » |
+
+**Et ce que la critique a manqué, ce qui vaut autant :** elle a déclaré les quatre
+orphelines inexistantes — elle les avait cherchées **après** leur retrait, et en
+concluait que le balayage mentait. Le rapport était affirmatif, sourcé, et faux.
+
+> **La règle qui en sort, et elle s'applique à tout rapport, humain ou non :** un
+> constat n'est acquis qu'après l'avoir vérifié soi-même, sur l'état courant, sans
+> troncature. Prendre un audit pour argent comptant coûte exactement ce que coûte
+> de ne pas en faire.
+
+---
+
 ## 10. Où l'on en est, et ce qui reste
 
 **Les sept jalons sont livrés.** Il n'y a **pas de plan en cours** : le travail se
@@ -777,20 +806,28 @@ jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
 Établi en relisant `src/apps/files/` face à Dolphin, et filtré : ce qui n'a pas de
 sens en mode texte (vignettes, aperçus graphiques) est écarté.
 
-**Un seul est un DÉFAUT, pas un manque** — à traiter en premier :
+**Il ne reste aucun DÉFAUT connu dans cette famille.** Les quatre qu'un audit
+adversarial avait trouvés le 15 août ont tous été corrigés le jour même — la liste
+est juste en dessous. Ce qui suit est du MANQUE, pas de la casse.
 
-| Défaut | Ce qu'il coûte | Taille |
-|---|---|---|
-| **La bascule des fichiers cachés ne touche que le panneau actif** : `reload()` ignore l'autre | En vue scindée, un panneau reste périmé jusqu'à ce qu'on y navigue | petit |
+**Soldé le 15 août 2026, les quatre défauts du carnet :**
 
-**Soldé le 15 août 2026 :** la **suppression récursive** — par tranches, arrêtable
-d'une touche, avec une question qui prévient et une confirmation à la fermeture ;
-l'**arrêt d'un travail** ; et les **liens symboliques**, qui se descendent au lieu
-de partir dans l'Éditeur, se rangent avec les dossiers, disent leur cible en ligne
-d'état, montrent la taille de ce qu'ils désignent, et **s'effacent sans emporter la
-cible** (`lstat`, jamais `stat` — le pire dégât qu'un gestionnaire puisse faire).
-Le moteur s'appelle désormais `FileJob` : il fait les trois opérations, et
-`CopyJob` mentait sur ce qu'il faisait.
+1. **La suppression récursive** — un dossier non vide était insupprimable depuis
+   l'application. Elle est récursive, **mais** par tranches, **mais** arrêtable
+   d'une touche (`Échap`, et une entrée de menu qui n'apparaît que pendant),
+   **mais** la question prévient (« + contenu »), **et** fermer la fenêtre pendant
+   le travail demande confirmation. La prudence a changé de place, pas de camp.
+2. **L'arrêt d'un travail** — `cancel()` existait sans aucun geste pour l'appeler.
+3. **Les liens symboliques** — ils partaient dans l'Éditeur. Ils se descendent, se
+   rangent avec les dossiers, disent leur cible en ligne d'état, montrent la taille
+   de ce qu'ils désignent, et **s'effacent sans emporter la cible** (`lstat`,
+   jamais `stat` : le pire dégât qu'un gestionnaire de fichiers puisse faire).
+4. **Les deux panneaux se relisent ensemble** — la bascule des cachés et les
+   créations ne prenaient que d'un côté.
+
+Le moteur s'appelle désormais **`FileJob`** : il fait les trois opérations, et
+`CopyJob` mentait sur ce qu'il faisait. `refilter()` et `settle()` prennent un
+panneau ; `reload()` les applique aux deux.
 
 **Puis, par valeur pour un bureau en mode texte :**
 
