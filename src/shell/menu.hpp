@@ -40,7 +40,6 @@ class Menu {
 
   const std::vector<MenuItem>& visible() const { return shown_; }
   const MenuItem* selected() const;
-  const std::string& query() const { return query_; }
   int selection() const { return sel_; }
 
   // La géométrie pure, sans effet de bord. layout() la mémorise pour que

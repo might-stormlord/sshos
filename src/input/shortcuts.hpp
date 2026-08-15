@@ -106,7 +106,6 @@ class LeaderDispatch {
 
   LeaderResult feed(const KeyEvent& k);
 
-  LeaderPhase phase() const { return phase_; }
   bool armed() const { return phase_ == LeaderPhase::Armed; }
   bool repeating() const { return phase_ == LeaderPhase::Repeating; }
 

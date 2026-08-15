@@ -82,7 +82,6 @@ class Screen {
   Charset charset() const { return charset_; }
   void set_charset(Charset c) { charset_ = c; }
 
-  bool autowrap() const { return autowrap_; }
   void set_autowrap(bool on) { autowrap_ = on; }
 
   // L'ÉCRAN ALTERNÉ (mode 1049). Entrer sauve le curseur ET le style, met

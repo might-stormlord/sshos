@@ -1,18 +1,23 @@
 # ssh_os 2.0 — dossier de reprise
 
 > Document destiné à un contexte neuf. Il suppose zéro connaissance préalable de la
-> conversation qui a produit le jalon 1. Tout ce qui suit a été vérifié, pas supposé :
+> conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 14 août 2026, branche `m1-noyau`, **1104 tests au vert**
-> en `Release` comme sous ASan/UBSan.
-> **Les six jalons sont livrés**, et le travail qui a suivi est demandé au fil de
-> l'eau par l'utilisateur. Le §3 ci-dessous donne la position exacte.
+> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `81fc657`.
+> **1120 tests au vert** en `Release` (19,4 s) comme sous ASan/UBSan (46,7 s),
+> 0 avertissement. Arbre de travail propre. 193 commits depuis `main`.
+> **Les SEPT jalons sont livrés**, et le travail qui a suivi est demandé au fil de
+> l'usage par l'utilisateur. Le §3 donne la position exacte.
 >
-> ⚠️ Les §4 à §9 (contraintes, harnais, décisions, pièges d'environnement) ont été
-> écrits au jalon 1 et restent **entièrement valides** — ils ne parlent pas
-> d'avancement. Le §6, en revanche, ne décrit que le contenu du jalon 1 : pour les
-> jalons 2 à 6, la source de vérité est leur plan respectif dans
+> **Par où commencer :** §2 pour compiler et lancer, §3 pour savoir où l'on en est,
+> §3 bis pour la carte du code, §4 pour ce qui n'est pas négociable, et **§9 bis pour
+> le défaut qui revient dix fois dans ce projet**. Le reste se lit à la demande.
+>
+> ⚠️ Les §4, §8 et §9 (contraintes, méthode, pièges d'environnement) ont été écrits au
+> jalon 1 et restent **entièrement valides**. Le §5 décrit un harnais toujours exact,
+> mais ses repères chiffrés sont d'époque. Le §6 ne décrit que le contenu du jalon 1 :
+> pour les jalons 2 à 7, la source de vérité est leur plan respectif dans
 > `docs/superpowers/plans/`, dont les cases cochées portent le commit, le nombre de
 > tests et le nombre de mutations de chaque tâche.
 
@@ -55,14 +60,18 @@ complet.
 ```bash
 cd /home/storm/dev/ssh_os_2.0
 
-# Release
 cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release -j"$(nproc)"
 
-# Debug (ASan + UBSan)
-cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-dbg -j"$(nproc)"
+# Debug = ASan + UBSan (CMakeLists.txt les ajoute lui-même sur ce type)
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-debug -j"$(nproc)"
 ```
+
+> ⚠️ **Il traîne un `build-dbg/` sur cette machine**, vestige du jalon 1 et plus
+> reconstruit depuis le 13 août. La documentation d'avant y renvoyait. **Le
+> répertoire de travail est `build-debug/`** ; `build-dbg/` peut être effacé sans
+> rien perdre.
 
 ```bash
 ./build-release/sshos              # lance le bureau (démarre le démon si besoin)
@@ -72,28 +81,27 @@ cmake --build build-dbg -j"$(nproc)"
 ```
 
 ```bash
-./build-release/sshos_tests                    # rapide
-UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ./build-dbg/sshos_tests   # armé
-./build-dbg/sshos_tests diff                   # filtre par sous-chaîne du nom
+./build-release/sshos_tests            # ~19 s
+./build-debug/sshos_tests              # ~47 s (ASan + UBSan, facteur 2,4)
+./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `189 cas, 0 en echec, 0 assertions echouees`,** en Release comme en Debug,
-avec 0 avertissement de compilation.
+**Attendu : `1120 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
-> Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise plusieurs
-> fois.
+> Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
+> plusieurs fois.
 
-### Vérifier la persistance à la main
+### Le geste de vérification à la main
 
-1. `./build-release/sshos`, cliquer quelques fois dans la boîte (le compteur monte).
-2. **Fermer la fenêtre du terminal.** Il n'y a pas de raccourci de détachement :
-   fermer *est* le détachement.
-3. Relancer `./build-release/sshos` → le compteur et l'horloge sont intacts.
+1. `./build-release/sshos`
+2. `Ctrl+A` puis `Espace` ouvre le menu ; filtrer au clavier, `Entrée` lance.
+3. Dans un Terminal, poser une marque : `MARQUE=persiste`.
+4. **Fermer la fenêtre du terminal** — ou `Ctrl+Q`, qui détache explicitement.
+5. Relancer `./build-release/sshos` → `echo $MARQUE` répond `persiste`.
 
-Vérifié de bout en bout sous pty au commit `ebd79d8` : 3 clics injectés, terminal tué par
-`kill -9`, `--status` répond « demon actif », client neuf affiche `clics: 3`.
-
----
+`Ctrl+Q` **détache** et ne détruit rien ; détruire la session pour de bon se demande
+par l'entrée « Fermer la session » du menu, qui pose une confirmation.
 
 ## 3. Où en est le projet dans la feuille de route
 
@@ -172,8 +180,10 @@ d'abord (le rouge est constaté, pas supposé), commit `wip(...) avant campagne 
 mutation`, campagne, tests ajoutés pour chaque survivante, commit
 `feat(...) (jalon N, tache M)`, puis `docs(mN): tache M cochee`.
 
-Volume total estimé : 12 000 à 15 000 lignes. Le jalon 1 en représente **10 287** (52
-fichiers `src/` + `tests/`), soit l'essentiel de la plomberie.
+**Volume réel au 15 août 2026 : 40 777 lignes sur 162 fichiers** — `src/` en compte
+16 568 sur 108, `tests/` 24 209 sur 54. L'estimation d'origine (12 000 à 15 000) est
+dépassée d'un facteur trois, et le rapport tests/code d'environ 1,5 pour 1 n'est pas
+une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 > **Point d'attention relationnel.** À la livraison du jalon 1, l'utilisateur a été déçu :
 > « aucun changement sur l'app c'est encore que des click de souris qui augmente ». C'est
@@ -181,6 +191,39 @@ fichiers `src/` + `tests/`), soit l'essentiel de la plomberie.
 > l'application : la plus petite chose prouvant qu'une entrée souris traverse le parseur,
 > modifie l'état du démon, repasse par le diffeur et survit à la mort du terminal. Mais
 > **il faut le dire avant, pas après.** Le jalon 2 est celui qui produit du visible.
+
+---
+
+## 3 bis. La carte du code
+
+~16 500 lignes dans `src/`, ~24 200 dans `tests/`. **Le rapport n'est pas une
+coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+campagnes de mutation possibles.
+
+| Module | Ce qu'il fait | À savoir avant d'y toucher |
+|---|---|---|
+| `src/common/` | Descripteurs, sockets UNIX abstraits, file de sortie, protocole, UTF-8, horloge de trame | `OutQueue` a un plafond ; son dépassement se classe *Clean* ou *Dirty* et la réaction diffère (A7) |
+| `src/render/` | `Surface` (grille de cellules), `View` (sous-rectangle clippé), `Differ` (trames ANSI), thème, largeurs Unicode | Une application ne reçoit **jamais** autre chose qu'une `View` — elle ne peut pas peindre hors de sa fenêtre |
+| `src/input/` | Machine à états du clavier et de la souris, table des accords `<leader>` | `\033` seul est ambigu : le démon arme un délai de 50 ms. Sans lui, `vim` est inutilisable |
+| `src/vt/` | Émulation VT : parseur DEC, écran, historique, SGR, modes, réponses, jeux de caractères | `Screen` est pure : ni descripteur, ni horloge. C'est ce qui la rend fuzzable |
+| `src/pty/` | Pseudo-terminal, environnement de l'enfant | `Pty::shutdown()` porte **toute** la politique de fermeture (SIGHUP, maître, SIGKILL) : le destructeur et la fermeture d'onglet l'appellent tous deux |
+| `src/wm/` | Fenêtres, pile, décorations, hit-test, ancrage, rangement | `hit_window()` est l'inverse exact de `draw_decor()` ; les deux lisent la **même** géométrie |
+| `src/shell/` | Panneau, menu, modale, aide, horloge, moniteur de fond, assistance à l'ancrage | Chaque composant calcule sa géométrie **une fois** dans `layout()`, et `draw()` comme `hit()` la relisent |
+| `src/daemon/` | Boucle `epoll`, session, hôte applicatif, démonisation, récolte | `Session::render()` compose **toute** la géométrie ; `Session::on_mouse()` route les gestes |
+| `src/app/` | Le contrat `App` / `Host`, le catalogue du menu | Tout est virtuel avec un défaut utilisable : une application qui ne sait que dessiner n'écrit qu'une méthode |
+| `src/apps/` | Terminal (à onglets), Fichiers (façon Dolphin), Éditeur | Chacune ne connaît que `View`, `Host` et les événements |
+
+### Ce qu'une application a le droit de demander (`src/app/app.hpp`)
+
+`set_title`, `request_close`, `invalidate`, `watch`/`unwatch` (un jeton opaque, jamais
+l'epoll), `watch_child` (la récolte est globale au démon), et **`open_app`** — « ouvre
+ça dans sa propre fenêtre », par quoi Fichiers ouvre l'Éditeur sans rien savoir du
+bureau.
+
+Côté `App` : `attach`, `render`, `on_key`, `on_mouse`, `on_resize`, `on_io`,
+`on_child_exit`, `wants_cursor`, `min_size`, `can_close`, `refresh_ms` et
+**`on_refresh`** — le travail périodique **hors du rendu**, puisque `render()` ne doit
+toucher ni au disque ni au réseau.
 
 ---
 
@@ -232,16 +275,34 @@ deux sémaphores POSIX anonymes en `mmap(MAP_SHARED|MAP_ANONYMOUS)`, `sem_timedw
 un balayage par tranches de 50 ms avec `waitpid(WNOHANG)`. Objectif : un test qui se bloque
 ou qui plante n'immobilise pas la suite.
 
-Mesures de référence : coût nominal négligeable (7,02 / 7,08 / 6,97 s sans garde contre
-7,11 / 7,18 / 7,04 s avec) ; un `SIGSEGV` injecté coûtait 38 s avant l'optimisation par
-tranches, **7 380 ms après**. Deux cas expirent volontairement ; le cas légitime le plus
-lent prend **4 295 ms**.
+Mesures de référence **du jalon 1** : coût nominal négligeable (7,02 / 7,08 / 6,97 s sans
+garde contre 7,11 / 7,18 / 7,04 s avec) ; un `SIGSEGV` injecté coûtait 38 s avant
+l'optimisation par tranches, **7 380 ms après**. Deux cas expirent volontairement.
+
+> La suite entière prend **19,4 s en Release** et **46,7 s sous ASan/UBSan** au
+> 15 août 2026 (1120 cas). L'essentiel de ce temps est de l'attente délibérée :
+> `user+sys` ne fait que 3,9 s des 19,4 s de mur, donc **80 % du temps est passé à
+> attendre des sous-processus** — pseudo-terminaux, démons, copies — et non à
+> calculer.
+
+**Ajouter un fichier de tests ne demande rien** : `CMakeLists.txt` fait un
+`GLOB tests/test_*.cpp`. Le nom du fichier n'a pas d'importance, mais le **préfixe
+des `TEST(...)` sert de filtre** en ligne de commande — d'où `files_`, `copy_`,
+`terminal_`, `session_`, `daemon_`, `dir_`, `snapassist_`…
+
+> ⚠️ **Tous les cas tournent dans le MÊME processus**, et ceux de `test_daemon.cpp`
+> appellent `reap_children()`, qui fait `waitpid(-1, WNOHANG)`. Un cas qui `fork()`
+> doit donc **récolter ses propres pids avant de rendre la main**, même ceux qu'il
+> vient de tuer : un zombie oublié est ramassé par le premier cas de démon qui passe,
+> et le `try_reap()` qui l'attendait reçoit `ECHILD` pour toujours. Mesuré : un échec
+> **sur quatre lancements**, sur un cas que personne n'avait touché.
 
 ---
 
 ## 6. Ce que contient le jalon 1
 
-13 tâches, toutes livrées, relues et fusionnées. **70 commits** depuis `main`.
+13 tâches, toutes livrées, relues et fusionnées. **70 commits** depuis `main` —
+*à l'époque du jalon 1 seul* ; la branche en porte **193** au 15 août 2026.
 
 | Fichier | Responsabilité |
 |---|---|
@@ -350,7 +411,12 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
   désormais dans l'arbre, et garder un diff « en suspens » déjà appliqué induit en erreur.
   Il reste récupérable dans l'historique git.
 
-### 7.2 — Points reportés au jalon 2
+### 7.2 — Points reportés au jalon 2 — **et toujours ouverts après le jalon 7**
+
+> Le titre d'origine disait « reportés au jalon 2 ». Ils n'ont été traités ni au
+> jalon 2 ni aux suivants : ils sont encore là. Vérifié le 15 août 2026 —
+> `struct Hello` (`src/common/proto.hpp`) ne porte toujours aucun champ de fuseau,
+> et `src/apps/files/files.cpp` répète le même défaut pour la colonne « Date ».
 
 | Point | Détail |
 |---|---|
@@ -365,6 +431,29 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
 - Le plan `docs/superpowers/plans/2026-08-10-ssh-os-m1-noyau.md` porte **6 marqueurs
   `PERIME`** sur des blocs dont le code a divergé (dont `class Decoder` l. 1891 et
   l'éviction à l'`accept` l. 4315). Les lire comme tels.
+
+---
+
+### 7.4 — L'état au 15 août 2026
+
+Ce qui suit remplace toute lecture d'avancement faite ailleurs. Les §7.1 à 7.3
+ci-dessus datent du jalon 1 : 7.1 est **soldé**, 7.2 et 7.3 restent **vrais**.
+
+| Point | État | Ce qu'il coûte aujourd'hui |
+|---|---|---|
+| Rétention mémoire par client (~41 Mio) | ouvert, §7.2 | Acceptable à un client ; à revoir quand il y en aura plusieurs |
+| Fuseau horaire du démon, pas du client | ouvert, §7.2 | L'horloge du panneau **et** la colonne « Date » de Fichiers mentent pour un client distant. Le `Hello` devra porter le fuseau |
+| Garde A2 non discriminable | ouvert, §7.3 | Conservée et déclarée ; aucun cas ne la distingue |
+| `~DaemonHandle` tue un pid recyclable | ouvert, §7.3 | *Minor* |
+| 6 marqueurs `PERIME` dans le plan du jalon 1 | ouvert, §7.3 | À lire comme tels |
+| Menu contextuel du clic droit sur la **barre des tâches** | ouvert | Il agit directement (nouvelle instance) sans rien proposer. Le gestionnaire de fichiers, lui, en a un depuis le 15 août |
+| Semis de points du fond d'écran | retiré volontairement | Il rendait chaque repeint complet **27 % plus gros** (mesuré), ce qui faisait basculer `daemon_dirty_overflow_closes_the_connection` du rejet *Dirty* au rejet *Clean*. Le commentaire qui dit pourquoi est resté là où il se rebrancherait |
+| `Pty::saw_eof()` sans lecteur | documenté sur place | Sous Linux un maître dont le dernier esclave s'est fermé rend `EIO`, pas 0 : `note_eof()` n'est atteinte que dans des cas de bord |
+| `set_cloexec()` sans appelant | documenté sur place | Chaque descripteur naît déjà `CLOEXEC` en un seul appel système, ce qui est le motif **sûr** |
+
+**Il n'y a aucune dette cachée connue au-delà de cette table.** Le balayage des
+méthodes sans appelant (§9 bis) a été passé le 15 août : ses candidats restants sont
+tous vérifiés à la main et légitimes.
 
 ---
 
@@ -418,25 +507,110 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ---
 
-## 10. Prochaine étape
+## 9 bis. Le défaut signature du projet — et comment le trouver en deux minutes
 
-**Les six jalons sont livrés et la v1 est complète.** Le travail se fait désormais
-à la demande, un geste à la fois.
+**Dix fois**, du code a existé sans aucun appelant en production. Aucune suite de
+tests ne l'a jamais signalé, parce que ce qui manque n'est pas la couverture : c'est
+**l'appel**. Un test unitaire ne peut pas le voir. Une campagne de mutation non plus —
+muter du code mort ne casse rien, et la mutation se déclare « équivalente ».
+
+| # | Ce qui n'était pas branché | Ce que ça coûtait |
+|---|---|---|
+| 1 | `Decoder::failed()` | Trouvé en revue |
+| 2 | La garde A2 | Jamais discriminée |
+| 3 | `InputParser::timeout()` | **`vim` inutilisable** : `Échap` ne quittait jamais le mode insertion. 732 tests au vert |
+| 4 | `App::refresh_ms()` | Le moniteur ne se rafraîchissait pas |
+| 5 | `App::wants_cursor()` | **Aucun curseur nulle part** dans le bureau. Mesuré : 6 `?25l` envoyés, 0 `?25h` |
+| 6 | `Pty::kill_now()` | Un shell qui refuse SIGHUP survivait à la fermeture de sa fenêtre, pour des semaines |
+| 7 | `snap_opposite()` | L'assistance à l'ancrage, écrite ET testée, sans appelant pendant des jours |
+| 8 | `Screen::set_tab()` et sa famille | `ESC H` et `CSI g` non traités : `tabs -4` ne faisait rien |
+| 9 | `Files::display_label()` | Devenue une duplication silencieuse de la règle de nommage |
+| 10 | **Les mouvements de souris** | `Session::on_mouse` : *« au-delà de cette ligne, tout est un appui »*. Aucune application n'a jamais reçu un mouvement. Tout un glisser-déposer écrit au-dessus d'un canal inexistant |
+
+**Le n° 10 est le plus instructif.** Ses six cas unitaires appelaient
+`files.on_mouse(Motion…)` **directement**. Ils prouvaient que le gestionnaire réagit
+bien à un mouvement ; ils ne prouvaient rien sur le fait que quelqu'un lui en envoie.
+**Un test qui appelle la méthode lui-même ne teste jamais son appelant.**
+
+### Le balayage, à repasser après tout gros ajout
+
+```python
+# Toutes les fonctions declarees dans src/**.hpp, sans appelant dans src/.
+import re, os, io
+bodies, decl_lines, decls = [], set(), {}
+for root, _, files in os.walk("src"):
+    for f in sorted(files):
+        if not f.endswith((".cpp", ".hpp")): continue
+        text = io.open(os.path.join(root, f), encoding="utf-8").read()
+        bodies.append(text)                      # les .hpp AUSSI : beaucoup
+        if not f.endswith(".hpp"): continue      # d'appels sont en ligne
+        for line in text.split("\n"):
+            t = line.strip()
+            if t.startswith("//") or t.startswith("*"): continue
+            m = re.match(r"^[A-Za-z_][\w:<>,&\* ]*\s[\*&]?([a-z_][a-z0-9_]*)\s*\(", t)
+            if m and t.rstrip().endswith(";"):
+                decls.setdefault(m.group(1), os.path.join(root, f))
+                decl_lines.add((m.group(1), t))
+whole = "\n".join(bodies)
+for name, where in sorted(decls.items()):
+    if name.endswith("_for_tests"): continue
+    calls = 0
+    for line in whole.split("\n"):
+        t = line.strip()
+        if t.startswith("//") or (name, t) in decl_lines: continue
+        if re.match(r"^[A-Za-z_][\w:<>,&\* ]*\s[\*&]?(\w+::)?%s\s*\(" % name, t):
+            continue                             # sa definition
+        calls += len(re.findall(r"(?<![\w])%s\s*\(" % name, line))
+    if calls == 0: print("  %-26s %s" % (name, where))
+```
+
+**Trois pièges du script, tous rencontrés :**
+
+1. **Ne lire que les `.cpp`** rate les appels faits depuis les définitions en ligne
+   des `.hpp`.
+2. **Une borne `[^\w:]` devant le nom** exclut tout appel qualifié
+   `Classe::methode()` et fait passer la moitié du projet pour orpheline.
+3. **Un `head -N` sur le `grep` de vérification** fait passer une méthode appelée pour
+   une orpheline. Vérifier chaque candidat **sans troncature**.
+
+Les accesseurs suffixés `_for_tests` sont des faux positifs légitimes — **d'où le
+suffixe, à mettre systématiquement** sur toute méthode qui n'existe que pour les
+tests. C'est ce qui rend le balayage exploitable.
+
+**Et le filet qui attrape ce que le balayage ne voit pas :** une sonde bout-en-bout
+qui pilote le **vrai démon** sous pty et lance de **vrais programmes**. Les défauts
+3, 4, 5 et 10 n'ont été vus que comme ça.
+
+---
+
+## 10. Où l'on en est, et ce qui reste
+
+**Les sept jalons sont livrés.** Il n'y a **pas de plan en cours** : le travail se
+fait à la demande, un geste à la fois, en réaction à l'usage réel.
 
 ### Le jalon 7 — ce qu'il change, et la contrainte qui l'a décidé
 
 Plan : `docs/superpowers/plans/2026-08-14-ssh-os-m7-dolphin.md`. Neuf tâches,
-120 mutations.
+120 mutations pour le jalon, **21 de plus** pour le lot souris qui a suivi.
 
-| Geste | Ce qu'il fait |
-|---|---|
-| `F3` | Scinde en deux panneaux indépendants ; `Tab` passe de l'un à l'autre |
-| `F9` | Le liseré des raccourcis — Racine, Maison, Temporaire, Etc |
-| `Espace`, `Ctrl+A`, `Maj+flèches`, `Ctrl`/`Maj`+clic | La sélection multiple |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copier, couper, coller — destination : le panneau qui a la main |
-| `F7` / `Maj+F7` | Un dossier, un fichier vide |
-| `Alt+←` / `Alt+→` | L'historique ; le fil d'Ariane se clique aussi |
-| Clic sur l'en-tête | Trie par nom, taille ou date ; recliquer inverse |
+**LA SOURIS D'ABORD — c'est la règle du projet, et elle a dû être redite.** Le
+jalon a d'abord été livré au clavier ; l'utilisateur a demandé « **toutes** les
+fonctions au bouton droit ». Le tableau ci-dessous se lit donc dans cet ordre : le
+geste souris est le chemin principal, le raccourci en est le doublon.
+
+| À la souris | Au clavier | Ce que ça fait |
+|---|---|---|
+| **Bouton droit, n'importe où dans le panneau** | — | **Le menu contextuel : 18 entrées**, chacune avec son raccourci écrit en face. Il s'ouvre aussi sur le vide et sur la ligne d'état — c'est justement là qu'on veut « Nouveau dossier » ou « Coller » |
+| **Glisser un fichier vers l'autre panneau, ou sur un dossier** | — | **Le déplace.** Un clic n'est pas un glissement : c'est le mouvement qui décide |
+| Clic sur le liseré de gauche | `F9` | Les raccourcis — Racine, Maison, Temporaire, Etc |
+| Clic sur l'en-tête d'une colonne | — | Trie par nom, taille ou date ; recliquer inverse |
+| Clic sur un segment du fil d'Ariane | `Alt+←` / `Alt+→` | Y monter ; l'historique au clavier |
+| `Ctrl`+clic, `Maj`+clic | `Espace`, `Ctrl+A`, `Maj+flèches` | La sélection multiple |
+| Clic, puis re-clic sur la même ligne | `Entrée` | Ouvrir — un dossier se descend, **un fichier s'ouvre dans l'Éditeur** |
+| — | `F3` | Scinde en deux panneaux indépendants ; `Tab` passe de l'un à l'autre |
+| — | `F7` / `Maj+F7` | Un dossier, un fichier vide |
+| — | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copier, couper, coller — destination : le panneau qui a la main |
+| — | `F2`, `Suppr` | Renommer, supprimer (une seule question pour toute la sélection) |
 
 **LA CONTRAINTE QUI DÉCIDE DE TOUT :** le démon est mono-thread. Copier deux
 gigaoctets d'un `read`/`write` en boucle gèlerait toutes les fenêtres et tous
@@ -451,10 +625,26 @@ puisque `render()` ne doit toucher ni au disque ni au réseau. Et une fenêtre
 réduite qui a demandé l'horloge la garde — une application ne la demande pas
 pour dessiner, elle la demande pour travailler.
 
-**Ce qui reste ouvert :**
+**Deux canaux ont dû être ouverts dans le bureau pour que tout cela existe :**
 
-1. **Un vrai menu contextuel** sur le clic droit de la barre des tâches : il agit
-   aujourd'hui directement (nouvelle instance), sans rien proposer.
+- **`Host::open_app()`** (`src/app/app.hpp`, `src/daemon/host.cpp`) — une
+  application ne sait pas ouvrir de fenêtre, mais elle sait fabriquer une autre
+  application. La session la prend **au tour suivant** : ouvrir au milieu du
+  traitement d'un clic ferait bouger la pile sous les pieds de celui qui l'a
+  demandé. C'est par là que Fichiers ouvre l'Éditeur.
+- **La prise de souris** (`Session::mouse_grab_`) — un appui dans le corps d'une
+  fenêtre lui donne aussi les **mouvements** et le **relâchement**. Avant, le
+  bureau ne livrait **que des appuis**, et le glisser-déposer était
+  structurellement impossible. Mais pas les appuis suivants : le terminal n'est
+  pas fiable sur les relâchements, et une prise qui ne se rendrait jamais rendrait
+  tout le bureau incliquable.
+
+**Ce qui reste ouvert** (la table complète est au §7.4) **:**
+
+1. **Un vrai menu contextuel sur la barre des tâches.** Le clic droit y agit
+   aujourd'hui directement — nouvelle instance — sans rien proposer.
+   ⚠️ À ne pas confondre : le **gestionnaire de fichiers** a le sien depuis le
+   15 août, avec 18 entrées.
 2. **Le semis de points du fond d'écran.** Il fonctionnait, mais rendait chaque
    repeint complet **27 % plus gros** (mesuré), ce qui faisait basculer
    `daemon_dirty_overflow_closes_the_connection` du rejet *Dirty* au rejet
@@ -463,36 +653,19 @@ pour dessiner, elle la demande pour travailler.
 3. **Rétention mémoire par connexion** (~41 Mio) et **le fuseau horaire du
    démon plutôt que celui du client** : §7.2, inchangés depuis le jalon 1.
 
-**Soldé le 14 août 2026 :** l'assistance à l'ancrage (elle donne enfin un
+**Soldé les 14 et 15 août 2026 :** l'assistance à l'ancrage (elle donne enfin un
 appelant à `snap_opposite()`), le caret, le SIGKILL au groupe à la fermeture, la
-documentation des gestes sans accord, et trois méthodes sans lecteur.
+documentation des gestes sans accord, les taquets de tabulation `HTS`/`TBC`, le
+menu contextuel du gestionnaire de fichiers, **l'Éditeur enfin branché** — le
+message « l'editeur arrive au jalon 6 » traînait depuis *avant* la livraison du
+jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
 
-Ce que les six jalons ont appris, et qui vaut pour la suite :
+Ce que les sept jalons ont appris, et qui vaut pour la suite :
 
-1. **Une méthode née sans appelant ne se signale qu'en faisant tourner le vrai
-   logiciel — ou en la cherchant exprès.** **Sept fois** à ce jour :
-   `Decoder::failed()`, la garde `A2`, `InputParser::timeout()` (qui rendait
-   `vim` inutilisable), `App::refresh_ms()`, `App::wants_cursor()` (aucun caret
-   nulle part dans le bureau), `Pty::kill_now()` et `snap_opposite()`.
-
-   **Le balayage systématique marche et coûte deux minutes** : lister les
-   fonctions déclarées dans `src/**.hpp`, compter leurs appels dans **tout**
-   `src/`. Il a sorti `App::wants_cursor()`, `Pty::kill_now()`,
-   `snap_opposite()`, la famille `set_tab()`/`clear_tab()`/`clear_all_tabs()`
-   — d'où `ESC H` et `CSI g` n'étaient pas traités, et `tabs -4` ne faisait
-   rien — puis `display_label()`, dupliquée sans qu'on s'en aperçoive.
-
-   **Trois pièges du script, tous rencontrés :** ne lire que les `.cpp` rate
-   les appels faits depuis les définitions en ligne des `.hpp` ; une borne
-   `[^\w:]` devant le nom exclut tout appel qualifié `Classe::methode()` et
-   fait passer la moitié du projet pour orpheline ; un `head -N` sur le
-   `grep` de vérification fait passer une méthode appelée pour une orpheline.
-   Les accesseurs `*_for_tests` sont des faux positifs légitimes — d'où le
-   suffixe, à mettre systématiquement.
-
-   Après la passe : **14 candidates sur 263**, toutes vérifiées à la main,
-   toutes légitimes (API de test, ou `set_cloexec()` dont le commentaire dit
-   maintenant pourquoi personne ne l'appelle).
+1. **Du code né sans appelant ne se signale qu'en faisant tourner le vrai
+   logiciel — ou en le cherchant exprès. Dix fois à ce jour.** La liste, le
+   script de balayage et ses trois pièges sont au **§9 bis**, qui est la section
+   la plus rentable de ce dossier.
 2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
    tâches du jalon 3 ont débordé de leur périmètre annoncé, toujours pour cette
    raison. Le prévoir en écrivant le plan du jalon 4.

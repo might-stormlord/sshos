@@ -115,7 +115,6 @@ class Files : public App {
   // barre de chemin et la ligne d'état.
   Pane& pane() { return panes_[active_]; }
   const Pane& pane() const { return panes_[active_]; }
-  Pane& other() { return panes_[1 - active_]; }
   // La largeur d'un panneau : toute la fenêtre, ou sa moitié moins la
   // cloison qui les sépare.
   int pane_width() const;
