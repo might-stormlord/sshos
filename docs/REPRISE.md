@@ -4,9 +4,10 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`, HEAD `e6e5fcc`.
-> **1146 tests au vert** en `Release` (~20 s) comme sous ASan/UBSan (~48 s),
-> 0 avertissement. Arbre de travail propre. **199 commits** depuis `main`.
+> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`. Tout ce qui suit a été
+> mesuré sur le commit `e6d013d`.
+> **1146 tests au vert** en `Release` (19,6 s) comme sous ASan/UBSan (47,3 s),
+> 0 avertissement. Arbre de travail propre. **200 commits** depuis `main`.
 > 41 535 lignes sur 162 fichiers.
 > **Les SEPT jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'usage par l'utilisateur. Le §3 donne la position exacte.
@@ -14,19 +15,25 @@
 > **Par où commencer, dans cet ordre :**
 > **§2** compiler et lancer — *et l'avertissement en tête : le projet n'existe que
 > sur ce disque* · **§3** où l'on en est · **§3 bis** la carte du code ·
-> **§4** ce qui n'est pas négociable · **§8 bis** le rythme de travail et la campagne
+> **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
+> jalon, les 108 de `src/` · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
-> **§9 bis** le défaut qui revient dix fois dans ce projet, et son balayage ·
+> **§9 bis** le défaut qui revient quatorze fois dans ce projet, et son balayage ·
 > **§9 ter** ce qu'un audit adversarial a trouvé — et ce qu'il a manqué ·
 > **§10** le carnet de ce qui reste à faire.
 > Le reste (§5 à §7, §8, §9) se lit à la demande.
 >
 > ⚠️ Les §4, §8 et §9 (contraintes, méthode, pièges d'environnement) ont été écrits au
-> jalon 1 et restent **entièrement valides**. Le §5 décrit un harnais toujours exact,
-> mais ses repères chiffrés sont d'époque. Le §6 ne décrit que le contenu du jalon 1 :
-> pour les jalons 2 à 7, la source de vérité est leur plan respectif dans
-> `docs/superpowers/plans/`, dont les cases cochées portent le commit, le nombre de
-> tests et le nombre de mutations de chaque tâche.
+> jalon 1 et restent **entièrement valides**. Le **§6** ne décrit que le jalon 1 ; le
+> **§6 bis** couvre les jalons 2 à 7, fichier par fichier. Les plans de
+> `docs/superpowers/plans/` restent la source de vérité de chaque tâche — sauf celui du
+> jalon 2, qui n'a jamais été annoté (§6 bis).
+>
+> ✅ **Passe de vérification du 15 août 2026.** Tous les chiffres de ce dossier ont été
+> re-mesurés sur `e6d013d` et les écarts corrigés — trois comptes de commits divergents,
+> un total de tests périmé au §2 et au §5, la rétention mémoire par client, et surtout
+> **le script de balayage du §9 bis, qui était incapable de trouver ce qu'on lui
+> attribuait** (la démonstration est dans le §9 bis).
 
 ---
 
@@ -64,13 +71,14 @@ complet.
 
 ## 2. Compiler, lancer, tester
 
-> 🔴 **LE PROJET N'EXISTE QUE SUR CE DISQUE.** `git remote -v` est **vide**, et
-> `main` pointe encore sur `0c1e7b9` — le plan du jalon 1. Les **194 commits** du
-> produit, sept jalons compris, vivent tous sur la branche locale `m1-noyau`.
-> Un `rm -rf` de ce répertoire, ou une panne de disque, **détruit le projet**.
-> Deux décisions attendent l'utilisateur : fusionner `m1-noyau` dans `main`, et
-> pousser vers un dépôt distant. Aucune n'a été prise ; aucune n'est à prendre sans
-> lui.
+> 🟠 **LE PROJET EST EN COURS DE PREMIÈRE PUBLICATION.** Il a vécu ses 200 premiers
+> commits **sur ce seul disque**, sans aucun dépôt distant. Le 15 août 2026, deux
+> décisions ont été prises : `main` a été avancée sur `m1-noyau` (un fast-forward
+> pur, `main` en étant un ancêtre), et le dépôt privé
+> `https://github.com/gtix2/sshos.git` a été déclaré comme `origin`.
+> **Tant que le premier `git push` n'a pas abouti, ce disque reste l'unique copie**
+> et un `rm -rf` détruit le projet. Vérifier où l'on en est :
+> `git remote -v` et `git log --oneline origin/main -1`.
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
@@ -96,16 +104,22 @@ cmake --build build-debug -j"$(nproc)"
 ```
 
 ```bash
-./build-release/sshos_tests            # ~19 s
-./build-debug/sshos_tests              # ~47 s (ASan + UBSan, facteur 2,4)
+./build-release/sshos_tests            # 19,6 s
+./build-debug/sshos_tests              # 47,3 s (ASan + UBSan, facteur 2,4)
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1120 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1146 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
 > plusieurs fois.
+
+> ⚠️ **Ce total périme à chaque commit qui ajoute un cas, et il a déjà menti deux
+> fois** — « 189 cas » puis « 1120 cas », chaque fois assez longtemps pour qu'un
+> contexte neuf puisse croire avoir tout cassé. Le compter plutôt que le croire :
+> `grep -c '^TEST(' tests/*.cpp | awk -F: '{s+=$2} END {print s}'` doit rendre le
+> même nombre que la ligne de bilan de `sshos_tests`.
 
 ### Le geste de vérification à la main
 
@@ -142,7 +156,7 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | Retirer `Bloc` et `Battement` | Ils deviennent des doublures de test (`tests/fake_apps.hpp`) ; le catalogue ne les propose plus. La session amorce désormais par une **fabrique** injectable (`set_seed_factory_for_tests`) | `f119b26` |
 | Repositionnement intelligent | Entrée de menu « ranger les fenêtres » : grille en colonnes, reste aux premières (`src/wm/tile.cpp`) | `8b7cebd` |
 | Deux sorties qu'on ne confond plus | `Ctrl+Q` détache (la session survit) ; « Fermer la session » détruit, **avec confirmation** | `8b7cebd` |
-| Le moniteur devient un widget | L'application disparaît ; le fond d'écran porte quatre sections encadrées (CPU, mémoire, réseau, charge, processus), jauges vertes/jaunes/rouges, signature « SSH OS » centrée | `444bac6`, `3919486`, `1600142` |
+| Le moniteur devient un widget | L'application disparaît ; le fond d'écran porte **cinq** sections encadrées (CPU, mémoire, réseau, charge, processus — `counter_box()` en dessine deux, puis trois appels directs à `frame()` aux l. 261, 265 et 282 de `src/shell/sysinfo.cpp` ; `grep -c 'frame('` en rend 5 parce qu'il compte aussi la définition l. 57), jauges vertes/jaunes/rouges, signature « SSH OS » centrée | `444bac6`, `3919486`, `1600142` |
 | Ouvrir deux fois la même application | Le menu et le **clic droit** sur la barre des tâches ouvrent une **nouvelle instance** ; le clic gauche garde le rappel | `a0924ec` |
 | Ancrage façon Windows | `Ctrl+flèche` ancre la fenêtre active sur une moitié d'écran, **sans passer par l'accord** — trois touches pour un geste qu'on répète était inutilisable | `1d5e3ff`, `7987cc6` |
 | Onglets du terminal | Chaque onglet a son PTY, sa grille, son historique et ses modes. Barre cliquable toujours visible (`+` pour ouvrir, `×` pour fermer, **re-cliquer l'onglet actif le renomme**), et `Alt+t` / `Alt+w` / `Alt+flèches` / `F2` au clavier | `80eda0d`, `d818249`, `3daa305` |
@@ -211,8 +225,8 @@ une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 ## 3 bis. La carte du code
 
-~16 500 lignes dans `src/`, ~24 200 dans `tests/`. **Le rapport n'est pas une
-coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+16 736 lignes dans `src/` sur 108 fichiers, 24 799 dans `tests/` sur 54. **Le rapport
+n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
 campagnes de mutation possibles.
 
 | Module | Ce qu'il fait | À savoir avant d'y toucher |
@@ -294,9 +308,10 @@ Mesures de référence **du jalon 1** : coût nominal négligeable (7,02 / 7,08 
 garde contre 7,11 / 7,18 / 7,04 s avec) ; un `SIGSEGV` injecté coûtait 38 s avant
 l'optimisation par tranches, **7 380 ms après**. Deux cas expirent volontairement.
 
-> La suite entière prend **19,4 s en Release** et **46,7 s sous ASan/UBSan** au
-> 15 août 2026 (1120 cas). L'essentiel de ce temps est de l'attente délibérée :
-> `user+sys` ne fait que 3,9 s des 19,4 s de mur, donc **80 % du temps est passé à
+> La suite entière prend **19,6 s en Release** et **47,3 s sous ASan/UBSan**
+> (re-mesuré le 15 août 2026 sur `e6d013d`, 1146 cas, facteur 2,41). L'essentiel de
+> ce temps est de l'attente délibérée : `user+sys` ne fait que **4,2 s** des 19,6 s
+> de mur (1,17 s d'utilisateur, 3,03 s de système), donc **79 % du temps est passé à
 > attendre des sous-processus** — pseudo-terminaux, démons, copies — et non à
 > calculer.
 
@@ -317,7 +332,9 @@ des `TEST(...)` sert de filtre** en ligne de commande — d'où `files_`, `copy_
 ## 6. Ce que contient le jalon 1
 
 13 tâches, toutes livrées, relues et fusionnées. **70 commits** depuis `main` —
-*à l'époque du jalon 1 seul* ; la branche en porte **193** au 15 août 2026.
+*à l'époque du jalon 1 seul*, et le chiffre se recalcule :
+`git rev-list --count main..cfce3cf^` rend bien 70, `cfce3cf` étant le commit qui a
+écrit cette phrase. La branche en porte **200** au 15 août 2026.
 
 | Fichier | Responsabilité |
 |---|---|
@@ -336,10 +353,10 @@ des `TEST(...)` sert de filtre** en ligne de commande — d'où `files_`, `copy_
 | `src/input/events.hpp` | `KeyEvent`, `MouseEvent`, `PasteEvent`, `FocusEvent` |
 | `src/input/parser.*` | Octets → événements : CSI, souris `Cb`, collage, `ESC` isolé |
 | `src/client/tty_guard.*` | Mode brut, restauration, filet de sécurité sur crash |
-| `src/client/client.cpp` | Boucle client |
+| `src/client/client.*` | Boucle client |
 | `src/daemon/daemonize.*` | Détachement (double `fork`, `setsid`) |
 | `src/daemon/session.*` | État de session, composition de l'écran |
-| `src/daemon/daemon.cpp` | Boucle `epoll` du démon |
+| `src/daemon/daemon.*` | Boucle `epoll` du démon |
 | `src/main.cpp` | Aiguillage des modes |
 
 ### Décisions dont le *pourquoi* ne se devine pas
@@ -371,6 +388,80 @@ Ces points ont coûté cher à établir. Ne pas les défaire sans relire la mesu
 
 ---
 
+## 6 bis. Ce qu'ont ajouté les jalons 2 à 7
+
+Le §6 ci-dessus ne couvre que le jalon 1 — ses 36 fichiers. Voici les 72 autres,
+**fichier par fichier** : les deux sections réunies couvrent les **108 fichiers de
+`src/`**, sans trou. La carte se recalcule intégralement :
+
+```bash
+for f in $(git ls-files 'src/*'); do
+  git log --diff-filter=A --format="%h %ad $f" --date=short -1 -- "$f"
+done | sort -k2
+```
+
+Elle ne rend que les fichiers **présents à `HEAD`** : rien pour le `copy.*` du jalon 7,
+renommé et supprimé le 15 août, ni pour les six fichiers retirés — voir les deux
+paragraphes sous le tableau. Elle rend aussi les 36 fichiers du jalon 1, qui sont au
+§6. Et elle date `shell/help.*` du 12 août, ce qui ne veut pas dire « jalon 3 » : lire
+le piège signalé plus bas.
+
+Les totaux de cas et de mutations sont ceux du **« Bilan du jalon »** de chaque plan,
+qui reste la source de vérité déclarée. Lire d'abord l'avertissement du §6 ter : deux
+de ces bilans ne s'accordent pas avec les cases du plan qui les porte.
+
+| Jalon | Plan | Tâches | Cas au bilan | Mutations | Fichiers de `src/` nés pendant |
+|---|---|---|---|---|---|
+| **2** — WM, panneau, menu | `2026-08-11-…-m2-wm.md` | 11 | — | — | `render/theme.*` · `app/app.hpp` · `app/catalog.*` · `wm/window.*` · `wm/decor.*` · `wm/hittest.*` · `wm/manager.*` · `wm/layout.*` · `daemon/host.*` · `shell/panel.*` · `shell/clock.*` · `shell/menu.*` · `shell/modal.*` · `input/shortcuts.*` |
+| **3** — Terminal | `2026-08-12-…-m3-terminal.md` | 14 | 733 | 246 | `pty/pty.*` · `pty/env.*` · `vt/parser.*` · `vt/sink.hpp` · `vt/screen.*` · `vt/attrs.*` · `vt/modes.*` · `vt/scrollback.*` · `vt/reply.*` · `vt/charset.*` · `input/encode.*` · `daemon/reap.*` · `apps/terminal.*` |
+| **4** — Fichiers | `2026-08-13-…-m4-fichiers.md` | 5 | 818 | 105 | `apps/files/dir.*` · `apps/files/files.*` |
+| **5** — Moniteur | `2026-08-13-…-m5-moniteur.md` | 3 | 858 | 47 | `apps/monitor/procstat.*` |
+| **6** — Éditeur | `2026-08-13-…-m6-editeur.md` | 3 | 909 | 52 | `apps/editor/buffer.*` · `apps/editor/editor.*` |
+| **7** — Dolphin | `2026-08-14-…-m7-dolphin.md` | 9 | 1104 | 120 | `apps/files/copy.*` — le 15 août (`0d5bb09`), `copy.hpp` est **renommé `apps/files/job.hpp`** (git le détecte à 63 % de similarité) tandis que `copy.cpp` est **supprimé** et remplacé par un `apps/files/job.cpp` neuf |
+
+**Cinq entrées de `src/` ne viennent d'aucun plan** — aucun des sept ne les nomme :
+
+- `shell/help.*` (l'aide de découvrabilité, `e8878b8`). Attention au piège : elle naît
+  le 12 août, **avant** le plan du jalon 3 (`a8e0bfd`, deux commits plus loin), dans la
+  foulée du jalon 2. La dater par le calendrier la rangerait à tort au jalon 3.
+- `wm/tile.*` (ranger les fenêtres, `8b7cebd`).
+- `shell/sysinfo.*` (le moniteur devenu widget de fond, `444bac6`).
+- `shell/snapassist.*` (l'assistance à l'ancrage, `b888ec5`).
+- `apps/files/job.cpp` (`0d5bb09`) — le fichier est neuf. Son en-tête `job.hpp`, lui,
+  descend du `copy.hpp` du jalon 7 par renommage, et n'est donc pas hors plan.
+
+**Trois fichiers ont été retirés du produit**, et il faut le savoir avant de les
+chercher : `apps/bloc.*` et `apps/battement.*`, les deux applications factices du
+jalon 2, sont devenues des doublures de test dans `tests/fake_apps.hpp` au commit
+`f119b26` ; `apps/monitor/monitor.*` a disparu au commit `444bac6`, quand le moniteur
+est devenu un widget du fond d'écran.
+
+### 6 ter. Trois choses que ces plans ne disent pas d'eux-mêmes
+
+1. **Le plan du jalon 2 n'a jamais été annoté.** Il porte 11 `### Task` et **82 cases,
+   toutes vides** — c'est le seul des six dans ce cas. Ses tâches n'ont ni hash, ni
+   nombre de tests, ni nombre de mutations. Le rattachement de ses fichiers au plan est
+   donc **reconstruit depuis `git log`** — où le 11 août porte **douze** commits
+   `feat(...)`, et non onze : les onze premiers, de `6418e61` à `c75f8ee`,
+   correspondent un pour un et dans l'ordre aux onze tâches ; le douzième, `3c4190e`,
+   arrive après la revue de jalon. Aucune case ne le confirme. C'est aussi cohérent
+   avec le §8 bis : **la campagne de mutation systématique ne commence qu'au jalon 3.**
+2. **Deux bilans ne s'accordent pas avec les cases de leur propre plan — mais lire
+   d'abord le périmètre qu'ils annoncent.** Le jalon 3 écrit « **246 mutations** jouées
+   **sur les tâches 5 à 13** » : la somme des cases de ces neuf tâches-là fait **267**
+   (celle des quatorze fait 411, hors périmètre). Le jalon 7 écrit « **120 mutations**
+   jouées sur les huit tâches de code », et la somme de ces huit cases fait **101**.
+   Restent deux écarts réels, **21** et **19**, non reconstituables après coup — une
+   campagne ne se rejoue pas sur un code qui a changé. Ce dossier cite les **bilans**,
+   et cette note existe pour qu'un contexte neuf qui referait l'addition ne croie pas
+   avoir trouvé un mensonge.
+3. **Le total des mutations des jalons 3 à 6 est cohérent, lui :** 246 + 105 + 47 + 52
+   = **450**, et le plan du jalon 6 écrit « plus de 450 mutations sur les jalons 3
+   à 6 » (l. 64). Les bilans s'accordent donc entre eux ; ce sont les cases internes
+   des plans 3 et 7 qui divergent.
+
+---
+
 ## 7. Dette ouverte
 
 ### 7.1 — Round `EPOLLHUP` / drainage : **soldé** ✅ (11 août 2026)
@@ -397,7 +488,9 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
   | `daemon_keeps_clicks_sent_just_before_the_client_closes` | 3 clics puis fermeture : un client neuf lit `clics: 3` (le symptôme utilisateur) |
   | `daemon_honours_a_hello_coalesced_with_its_senders_closure` | branche `pending` : un Hello coalescé avec la fermeture de son expéditeur est honoré (le client en place reçoit `Detached`) |
 
-  Sortie exacte contre le code d'avant :
+  Sortie exacte contre le code d'avant, **telle qu'elle a été relevée le 11 août
+  2026** — les numéros de ligne et le total de cas sont ceux d'alors ; les trois cas
+  vivent aujourd'hui aux lignes **2609, 2683 et 2831** de `tests/test_session.cpp` :
 
   ```
   FAIL tests/test_session.cpp:1476  REQUIRE(exited)
@@ -420,7 +513,9 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
   mesure **194 jiffies / 2 s** — cohérent avec les 201 jiffies/2 s du défaut de boucle
   active documenté au §6.
 - **Restauration du code de production vérifiée par `sha256sum`** après la mutation :
-  `b8964e6ed7d59eb66217258573af5a24dc1d0dcfce8507b7fa9d880adf463909`.
+  `b8964e6ed7d59eb66217258573af5a24dc1d0dcfce8507b7fa9d880adf463909`. **Cette
+  empreinte se recalcule** — c'est celle de `src/daemon/daemon.cpp` au commit du
+  round : `git show 4aa774f:src/daemon/daemon.cpp | sha256sum`.
 - **Brief d'origine :** `docs/hup-drain-brief.md` (conservé comme trace du round). Le
   fichier `docs/hup-drain-correctif-en-suspens.diff` a été **supprimé** : le correctif est
   désormais dans l'arbre, et garder un diff « en suspens » déjà appliqué induit en erreur.
@@ -435,7 +530,7 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
 
 | Point | Détail |
 |---|---|
-| **Rétention mémoire par connexion** | ~8 Mio (`OutQueue`) + ~33 Mio (`Decoder`) retenus par client. Acceptable à un client, à revoir quand il y en aura plusieurs. |
+| **Rétention mémoire par connexion** | **~34 Mio par client en régime nominal, ~67 Mio au pire — dans les deux cas, pas les ~41 Mio qu'annonçait ce dossier.** Le `Decoder` ne rend sa capacité que si son tampon est entièrement drainé *et* que la capacité atteint `kReleaseCapacityThreshold = kMaxBufferBytes` = 32 Mio + 5 o + 1 Mio ≈ **33 Mio** (`src/common/proto.cpp:123`). Mais `feed()` ne borne que les octets **non consommés**, et `compact()` ne décale qu'à partir de `pos_ * 2 >= buf_.size()` : `buf_.size()` peut donc atteindre **~2× `kMaxBufferBytes` ≈ 66 Mio** avant le premier décalage. Ce facteur 2 n'est pas une fuite, c'est le prix assumé d'une compaction à coût amorti linéaire — le commentaire de `kMaxBufferBytes` (`src/common/proto.hpp:91-99`) l'écrit noir sur blanc, et `proto_decoder_releases_capacity_once_fully_drained_past_threshold` (`tests/test_proto.cpp:394`) le couvre. L'`OutQueue`, elle, ne retient qu'environ **1 Mio** : son seuil de libération de 8 Mio (`src/common/outqueue.cpp:41`) est une garde de la classe réutilisable, **hors d'atteinte dans le démon**, où chaque client construit sa file avec `kBackpressureCeiling = 1 Mo` (`src/daemon/daemon.cpp:33`) et où `push()` rejette *avant* de faire grossir le tampon. Acceptable à un client ; **c'est le pire cas, pas le nominal, qui dimensionne le multi-client.** |
 | **« Le fuseau de qui ? »** | Le démon affiche *son* fuseau. Avec un client distant dans un autre fuseau, c'est faux. Le message `Hello` devra porter le fuseau du client. |
 
 ### 7.3 — Points mineurs connus
@@ -444,8 +539,9 @@ Le dernier élément inachevé du jalon 1. **Il n'y a plus de dette ouverte sur 
   distingue. Constaté honnêtement à deux reprises plutôt que maquillé par un test complaisant.
 - **`~DaemonHandle`** tue un pid qui pourrait avoir été recyclé (*Minor*).
 - Le plan `docs/superpowers/plans/2026-08-10-ssh-os-m1-noyau.md` porte **6 marqueurs
-  `PERIME`** sur des blocs dont le code a divergé (dont `class Decoder` l. 1891 et
-  l'éviction à l'`accept` l. 4315). Les lire comme tels.
+  `PERIME`** sur des blocs dont le code a divergé — l. **1890** (`class Decoder`),
+  2199, 2284, 4314 (signatures de `net.hpp`), **4320** (l'éviction à l'`accept`) et
+  4465 (`read_boot_id()` peut désormais lever). Les lire comme tels.
 
 ---
 
@@ -456,7 +552,7 @@ ci-dessus datent du jalon 1 : 7.1 est **soldé**, 7.2 et 7.3 restent **vrais**.
 
 | Point | État | Ce qu'il coûte aujourd'hui |
 |---|---|---|
-| Rétention mémoire par client (~41 Mio) | ouvert, §7.2 | Acceptable à un client ; à revoir quand il y en aura plusieurs |
+| Rétention mémoire par client (**~34 Mio nominal, ~67 Mio au pire** — pas 41) | ouvert, §7.2 | Acceptable à un client ; le détail du calcul est au §7.2. Deux choses y sont contre-intuitives : le seuil de 8 Mio de l'`OutQueue` n'est jamais atteint dans le démon, et le tampon du `Decoder` peut doubler avant sa première compaction |
 | Fuseau horaire du démon, pas du client | ouvert, §7.2 | L'horloge du panneau **et** la colonne « Date » de Fichiers mentent pour un client distant. Le `Hello` devra porter le fuseau |
 | Garde A2 non discriminable | ouvert, §7.3 | Conservée et déclarée ; aucun cas ne la distingue |
 | `~DaemonHandle` tue un pid recyclable | ouvert, §7.3 | *Minor* |
@@ -466,11 +562,14 @@ ci-dessus datent du jalon 1 : 7.1 est **soldé**, 7.2 et 7.3 restent **vrais**.
 | `Pty::saw_eof()` sans lecteur | documenté sur place | Sous Linux un maître dont le dernier esclave s'est fermé rend `EIO`, pas 0 : `note_eof()` n'est atteinte que dans des cas de bord |
 | `set_cloexec()` sans appelant | documenté sur place | Chaque descripteur naît déjà `CLOEXEC` en un seul appel système, ce qui est le motif **sûr** |
 
-**Cette table est la dette d'ARCHITECTURE.** Les **défauts fonctionnels** connus du
-gestionnaire de fichiers sont listés à part, au §10 (« Le carnet du gestionnaire de
-fichiers ») : un dossier non vide insupprimable, un lien symbolique qui part dans
-l'Éditeur, la bascule des cachés qui n'atteint qu'un panneau, et une copie que rien
-n'annule. **Ne pas lire cette section comme « il n'y a rien d'autre ».**
+**Cette table est la dette d'ARCHITECTURE.** Ce qui manque au gestionnaire de fichiers
+est listé à part, au §10 (« Le carnet du gestionnaire de fichiers ») : le conflit de
+noms, les permissions, la corbeille, et surtout l'annulation, que rien n'offre
+aujourd'hui. **Les quatre défauts fonctionnels** qu'un audit y avait trouvés le 15 août
+— dossier non vide insupprimable, lien symbolique qui part dans l'Éditeur, bascule des
+cachés qui n'atteint qu'un panneau, travail qu'aucun geste n'arrête — **ont tous été
+corrigés le jour même** ; le §10 en porte le détail. **Ne pas lire cette section comme
+« il n'y a rien d'autre ».**
 
 Le balayage des méthodes sans appelant (§9 bis) a été passé le 15 août : quatre
 orphelines retirées, les candidates restantes toutes vérifiées à la main.
@@ -482,9 +581,9 @@ orphelines retirées, les candidates restantes toutes vérifiées à la main.
 L'utilisateur a choisi le **mode 1** : *un sous-agent frais par tâche, revue entre chaque*
 (SDD — subagent-driven development).
 
-> ⚠️ **`.superpowers/` est ignoré par git** (`.gitignore:3`). Le ledger, les 20 briefs et les
-> ~20 diffs de revue **n'existent que sur le disque de cette machine** et disparaissent à un
-> `clone`. Ce qu'un contexte neuf doit absolument avoir a donc été recopié dans `docs/`.
+> ⚠️ **`.superpowers/` est ignoré par git** (`.gitignore:3`). Le ledger, les 20 briefs,
+> les 9 rapports de tâche et les **17** diffs de revue **n'existent que sur le disque de
+> cette machine** et disparaissent à un `clone`. Ce qu'un contexte neuf doit absolument avoir a donc été recopié dans `docs/`.
 
 - **Ledger :** `.superpowers/sdd/2026-08-10-ssh-os-m1-noyau/progress.md` *(non versionné)*.
 - **Plan :** `docs/superpowers/plans/2026-08-10-ssh-os-m1-noyau.md`.
@@ -507,7 +606,7 @@ peine d'être conservés :
    `193045a` → 1 échec ; contre `54019f9` → échec de compilation).
 2. **Une garde qu'aucun test ne discrimine doit être déclarée telle**, pas couverte par un
    test qui passerait de toute façon. Vérifié par mutation : seul `CHECK(unblocked)`
-   (`test_daemonize.cpp:498`) discriminait ; `CHECK(elapsed_ms >= 3500)` (`:477`) passait
+   (`test_daemonize.cpp:519`) discriminait ; `CHECK(elapsed_ms >= 3500)` (`:498`) passait
    même sous la mutation.
 
 ---
@@ -597,10 +696,17 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 9 bis. Le défaut signature du projet — et comment le trouver en deux minutes
 
-**Dix fois**, du code a existé sans aucun appelant en production. Aucune suite de
+**Quatorze fois**, du code a existé sans aucun appelant en production. Aucune suite de
 tests ne l'a jamais signalé, parce que ce qui manque n'est pas la couverture : c'est
 **l'appel**. Un test unitaire ne peut pas le voir. Une campagne de mutation non plus —
 muter du code mort ne casse rien, et la mutation se déclare « équivalente ».
+
+Les dix premières sont ci-dessous, chacune ayant coûté quelque chose. Les **quatre
+suivantes** sont les accesseurs morts retirés au commit `e32f09c` le 15 août
+(`Screen::autowrap()`, `Files::other()`, `LeaderDispatch::phase()`, `Menu::query()`) :
+ils ne coûtaient rien à l'exécution, seulement à la lecture. *(Le message de `e32f09c`
+les numérote « onzieme a treizieme » — trois ordinaux pour quatre objets ; c'est le
+message du commit qui compte mal, pas la liste.)*
 
 | # | Ce qui n'était pas branché | Ce que ça coûtait |
 |---|---|---|
@@ -625,31 +731,52 @@ bien à un mouvement ; ils ne prouvaient rien sur le fait que quelqu'un lui en e
 ```python
 # Toutes les fonctions declarees dans src/**.hpp, sans appelant dans src/.
 import re, os, io
-bodies, decl_lines, decls = [], set(), {}
-for root, _, files in os.walk("src"):
-    for f in sorted(files):
-        if not f.endswith((".cpp", ".hpp")): continue
-        text = io.open(os.path.join(root, f), encoding="utf-8").read()
-        bodies.append(text)                      # les .hpp AUSSI : beaucoup
-        if not f.endswith(".hpp"): continue      # d'appels sont en ligne
-        for line in text.split("\n"):
-            t = line.strip()
-            if t.startswith("//") or t.startswith("*"): continue
-            m = re.match(r"^[A-Za-z_][\w:<>,&\* ]*\s[\*&]?([a-z_][a-z0-9_]*)\s*\(", t)
-            if m and t.rstrip().endswith(";"):
-                decls.setdefault(m.group(1), os.path.join(root, f))
-                decl_lines.add((m.group(1), t))
-whole = "\n".join(bodies)
-for name, where in sorted(decls.items()):
+KW = ("return", "case", "else", "throw", "if", "for", "while", "switch",
+      "do", "delete", "new", "goto")          # parade 1 : `return foo(x);`
+DECL = re.compile(r"^([A-Za-z_][\w:<>,&\*\s]*?)\s[\*&]*(?:\w+::)*([a-z_][a-z0-9_]*)\s*\(")
+
+def decl(t):                                   # rend le nom declare, ou None
+    t = t.split("//")[0].rstrip()              # parade 4 : `void set_tab();  // HTS`
+    m = DECL.match(t)
+    if not m or m.group(1).split()[0] in KW: return None
+    # parade 2 : `T nom() const { ... }` en ligne -- c'est la forme des QUATRE
+    # orphelines du 15 aout ; parade 3 : parenthese ouverte = signature etalee
+    if t.rstrip().endswith((";", "{", "}")) or t.count("(") > t.count(")"):
+        return m.group(2)
+    return None
+
+def lignes(rac):
+    out = []
+    for root, _, fs in os.walk(rac):
+        for f in sorted(fs):
+            if f.endswith((".cpp", ".hpp")):    # les .hpp AUSSI : beaucoup
+                p = os.path.join(root, f)       # d'appels sont en ligne
+                for i, l in enumerate(io.open(p, encoding="utf-8"), 1):
+                    out.append((p, i, l.rstrip("\n")))
+    return out
+
+src, tst = lignes("src"), lignes("tests")
+decls = {}
+for p, i, l in src:
+    if not p.endswith(".hpp"): continue
+    t = l.strip()
+    if t.startswith(("//", "*", "/*")): continue
+    n = decl(t)
+    if n: decls.setdefault(n, "%s:%d" % (p, i))
+
+def compte(ls, name):
+    pat = re.compile(r"(?<![\w])%s\s*\(" % re.escape(name)); n = 0
+    for p, i, l in ls:
+        t = l.strip()
+        if t.startswith(("//", "*")) or decl(t) == name: continue
+        n += len(pat.findall(t.split("//")[0]))
+    return n
+
+print("%d noms declares" % len(decls))
+for name in sorted(decls):
     if name.endswith("_for_tests"): continue
-    calls = 0
-    for line in whole.split("\n"):
-        t = line.strip()
-        if t.startswith("//") or (name, t) in decl_lines: continue
-        if re.match(r"^[A-Za-z_][\w:<>,&\* ]*\s[\*&]?(\w+::)?%s\s*\(" % name, t):
-            continue                             # sa definition
-        calls += len(re.findall(r"(?<![\w])%s\s*\(" % name, line))
-    if calls == 0: print("  %-26s %s" % (name, where))
+    if compte(src, name) == 0:                  # zero appelant de PRODUCTION
+        print("  %-26s src=0 tests=%-4d %s" % (name, compte(tst, name), decls[name]))
 ```
 
 **Trois pièges du script, tous rencontrés :**
@@ -665,18 +792,30 @@ Les accesseurs suffixés `_for_tests` sont des faux positifs légitimes — **d'
 suffixe, à mettre systématiquement** sur toute méthode qui n'existe que pour les
 tests. C'est ce qui rend le balayage exploitable.
 
-**Deux faux positifs structurels du script, à connaître :**
+**Quatre pièges structurels, et les quatre parades sont DANS le script ci-dessus.**
+C'est ce qui le distingue de la version qu'a portée ce dossier jusqu'au 15 août 2026.
+**Le premier fabrique un faux positif** — une méthode appelée passe pour orpheline.
+**Les trois autres fabriquent un faux négatif** — une vraie orpheline n'est même pas
+examinée, et c'est celui-là qui a coûté :
 
 - `return foo(x);` ressemble à une déclaration (`return` passe pour un type de
-  retour) et masque un vrai appel. Parade : une liste de mots-clés d'instruction
+  retour) et masque un vrai appel. Parade : la liste `KW` de mots-clés d'instruction
   (`return`, `case`, `else`, `throw`…) qui disqualifie le préfixe.
-- Les **constructeurs sont inanalysables** : `Type x{args};` et `Type x;` sont
-  syntaxiquement identiques à une déclaration. Six remontent toujours
-  (`Differ`, `FrameClock`, `LeaderDispatch`, `OutQueue`, `Parser`, `Scrollback`)
-  et sont tous appelés. Les écarter à la main.
-- Une signature étalée sur plusieurs lignes n'est pas capturée du tout si l'on
-  n'accepte que les lignes finissant par `;`. Parade : parenthèse restée ouverte
-  = signature valide.
+- **Une définition en ligne — `T nom() const { return n_; }` — n'était pas capturée
+  du tout**, parce que l'ancien script n'enregistrait que les lignes finissant par
+  `;`. C'est **la forme exacte des quatre orphelines du 15 août**, et donc le défaut
+  qui comptait. Parade : accepter aussi `{` et `}` en fin de ligne.
+- Une signature étalée sur plusieurs lignes échappe au même filtre. Parade :
+  parenthèse restée ouverte = signature valide.
+- **Un commentaire en fin de ligne masque le `;`** : `void set_tab();  // HTS` n'était
+  pas capturé — c'est-à-dire, précisément, le défaut n° 8 du tableau ci-dessus, que le
+  script était donc incapable de retrouver. Parade : couper la ligne au `//` avant de
+  tester sa fin. Elle fait passer le balayage de 423 à **452 noms analysés**.
+
+**Les constructeurs ne sont pas analysés du tout**, et c'est délibéré : le groupe de
+capture exige une initiale minuscule (`[a-z_][a-z0-9_]*`), or tous les types du projet
+sont capitalisés. Élargir le motif aux majuscules ferait remonter les constructions
+locales, parce que `Type x{args};` est syntaxiquement identique à une déclaration.
 
 > **La sortie du script n'est JAMAIS une conclusion.** Un candidat n'est un défaut
 > qu'après un `grep -rn "\bnom\b" src/ tests/` **sans troncature**, lu à la main.
@@ -684,12 +823,44 @@ tests. C'est ce qui rend le balayage exploitable.
 > les avait cherchées *après* leur retrait, et en concluait que le balayage mentait.
 > **Ne jamais prendre un rapport d'agent pour argent comptant : vérifier soi-même.**
 
-**Passage du 15 août 2026 :** 464 noms déclarés, 27 candidats bruts, **4 vraies
-orphelines** après vérification manuelle — `Screen::autowrap()`, `Files::other()`
-(privée, donc même pas atteignable par un test), `LeaderDispatch::phase()` et
-`Menu::query()`. Toutes retirées au commit `e32f09c`. Les 13 restantes sont des
-**API de test légitimes** appelées depuis `tests/` ; c'est la raison d'être du
-suffixe `_for_tests`, qu'elles n'ont pas encore.
+> 🔴 **Le script publié ici jusqu'au 15 août 2026 ne pouvait pas trouver ce qu'on lui
+> attribuait, et c'est démontré.** Il n'enregistrait une déclaration que si la ligne
+> finissait par `;` — or les quatre orphelines retirées ce jour-là sont **toutes** des
+> définitions en ligne finissant par `}` :
+> `bool autowrap() const { return autowrap_; }`, `Pane& other() { return panes_[1 - active_]; }`,
+> `LeaderPhase phase() const { return phase_; }`, `const std::string& query() const { return query_; }`.
+> Rejoué sur l'arbre d'avant leur retrait (`git archive e32f09c^ src tests`),
+> **l'ancien script rend 13 candidats et n'en trouve aucune** — et 291 noms déclarés,
+> chiffre qu'il faut aller chercher en lui ajoutant un `print(len(decls))`, car tel
+> qu'il était publié il n'imprimait aucun total. Le script ci-dessus rend, sur ce même
+> arbre, **452 noms / 21 candidats, et les trouve toutes les quatre** à
+> `src=0 tests=0`. Les chiffres « 464 noms, 27 candidats » qu'annonçait ce dossier
+> n'étaient reproductibles par aucune des deux versions. La leçon vaut au-delà de ce
+> script : **un outil de vérification doit lui-même être vérifié contre un cas dont on
+> connaît la réponse.**
+
+**Passage du 15 août 2026, rejoué sur `e6d013d` avec le script ci-dessus :**
+**452 noms déclarés, 17 candidats bruts.** Ils se répartissent ainsi, chacun tranché à
+la main :
+
+- **`Pty::saw_eof()`** — aucun appelant, nulle part, ni dans `src/` ni dans `tests/`.
+  Déjà documenté sur place et au §7.4 : sous Linux un maître dont le dernier esclave
+  s'est fermé rend `EIO`, pas 0.
+- **Les 16 autres n'ont aucun appelant de production et sont appelées depuis
+  `tests/`** — `ambiguous_wide`, `bound_actions`, `charset`, `choices`, `dirty`,
+  `line_text`, `question`, `release`, `scroll_bottom`, `scroll_top`, `selection`,
+  `set_cloexec`, `state`, `text_row`, `valid`, `wrap_pending`. **Quatorze sont de
+  vraies API de test** et devraient toutes porter le suffixe `_for_tests` — aucune ne
+  le porte, et c'est le travail qui reste sur ce point : sans le suffixe, chaque
+  passage du balayage les fait remonter et coûte le même tri manuel. **Les deux
+  dernières ne sont pas des API de test** et ne doivent pas être renommées :
+  `set_cloexec()` est gardée exprès (§7.4), et `ambiguous_wide()` est un getter que la
+  production court-circuite en lisant directement le global `g_ambiguous_wide`
+  (`src/render/width.cpp:58`).
+
+Les **4 vraies orphelines** trouvées ce jour-là — `Screen::autowrap()`,
+`Files::other()` (privée, donc même pas atteignable par un test),
+`LeaderDispatch::phase()` et `Menu::query()` — ont été retirées au commit `e32f09c`.
 
 **Et le filet qui attrape ce que le balayage ne voit pas :** une sonde bout-en-bout
 qui pilote le **vrai démon** sous pty et lance de **vrais programmes**. Les défauts
@@ -741,7 +912,7 @@ geste souris est le chemin principal, le raccourci en est le doublon.
 
 | À la souris | Au clavier | Ce que ça fait |
 |---|---|---|
-| **Bouton droit, n'importe où dans le panneau** | — | **Le menu contextuel : 18 entrées**, chacune avec son raccourci écrit en face. Il s'ouvre aussi sur le vide et sur la ligne d'état — c'est justement là qu'on veut « Nouveau dossier » ou « Coller » |
+| **Bouton droit dans la liste, sur le vide ou sur la ligne d'état** | — | **Le menu contextuel : 18 entrées** — 19 pendant un travail, « Arreter le travail » passant en tête — chacune avec son raccourci écrit en face. Il s'ouvre bien sur le vide et sur la ligne d'état, c'est justement là qu'on veut « Nouveau dossier » ou « Coller ». **Mais pas sur les deux lignes du haut :** dans `Files::on_mouse`, la branche du fil d'Ariane (`e.y == 0`) et celle de l'en-tête de colonnes (`e.y == 1`) rendent la main avant le test `e.button == 2` |
 | **Glisser un fichier vers l'autre panneau, ou sur un dossier** | — | **Le déplace.** Un clic n'est pas un glissement : c'est le mouvement qui décide |
 | Clic sur le liseré de gauche | `F9` | Les raccourcis — Racine, Maison, Temporaire, Etc |
 | Clic sur l'en-tête d'une colonne | — | Trie par nom, taille ou date ; recliquer inverse |
@@ -755,7 +926,7 @@ geste souris est le chemin principal, le raccourci en est le doublon.
 
 **LA CONTRAINTE QUI DÉCIDE DE TOUT :** le démon est mono-thread. Copier deux
 gigaoctets d'un `read`/`write` en boucle gèlerait toutes les fenêtres et tous
-les clients pendant la copie. `CopyJob` avance donc **par tranches d'un
+les clients pendant la copie. `FileJob` avance donc **par tranches d'un
 mégaoctet**, une par réveil, et l'arborescence est parcourue **paresseusement**
 — un `readdir()` quand on y arrive, jamais un parcours complet avant de
 commencer. Mesuré à la sonde : **39 ms** de temps de réponse du bureau pendant
@@ -785,14 +956,15 @@ pour dessiner, elle la demande pour travailler.
 1. **Un vrai menu contextuel sur la barre des tâches.** Le clic droit y agit
    aujourd'hui directement — nouvelle instance — sans rien proposer.
    ⚠️ À ne pas confondre : le **gestionnaire de fichiers** a le sien depuis le
-   15 août, avec 18 entrées.
+   15 août, avec 18 entrées — 19 pendant un travail.
 2. **Le semis de points du fond d'écran.** Il fonctionnait, mais rendait chaque
    repeint complet **27 % plus gros** (mesuré), ce qui faisait basculer
    `daemon_dirty_overflow_closes_the_connection` du rejet *Dirty* au rejet
    *Clean*. Retiré ; le commentaire qui dit pourquoi est resté à l'endroit où il
    se rebrancherait.
-3. **Rétention mémoire par connexion** (~41 Mio) et **le fuseau horaire du
-   démon plutôt que celui du client** : §7.2, inchangés depuis le jalon 1.
+3. **Rétention mémoire par connexion** (~34 Mio en nominal, ~67 Mio au pire — le
+   détail du calcul est au §7.2) et **le fuseau horaire du démon plutôt que celui du
+   client** : §7.2, inchangés depuis le jalon 1.
 
 **Soldé les 14 et 15 août 2026 :** l'assistance à l'ancrage (elle donne enfin un
 appelant à `snap_opposite()`), le caret, le SIGKILL au groupe à la fermeture, la
@@ -826,17 +998,18 @@ est juste en dessous. Ce qui suit est du MANQUE, pas de la casse.
    créations ne prenaient que d'un côté.
 
 Le moteur s'appelle désormais **`FileJob`** : il fait les trois opérations, et
-`CopyJob` mentait sur ce qu'il faisait. `refilter()` et `settle()` prennent un
-panneau ; `reload()` les applique aux deux.
+`CopyJob` mentait sur ce qu'il faisait. `refilter(Pane&)` et `settle_pane(Pane&)`
+prennent un panneau — les surcharges nues `refilter()` et `settle()` agissent sur le
+panneau actif ; `reload()` boucle sur les deux.
 
 **Puis, par valeur pour un bureau en mode texte :**
 
 | Manque | Pourquoi ça compte | Taille |
 |---|---|---|
-| **Conflit de noms** : `O_EXCL` échoue en silence (« N ont echoue ») | Il manque Écraser / Renommer / Ignorer / Tout | moyen |
+| **Conflit de noms** : `O_EXCL` refuse, et le travail ne sait que compter — « N sur M ont echoue : … File exists », posé en rouge sur la ligne d'état du panneau actif, et **seulement à la fin** du travail | Il manque Écraser / Renommer / Ignorer / Tout, et un signalement au moment du conflit | moyen |
 | **Permissions et propriétaire** — le `stat()` est **déjà payé**, `DirEntry` jette `st_mode`, `uid`, `gid` | C'est l'information la plus attendue en mode texte (`ls -l`) | petit |
 | **Copier au glisser** (`Ctrl` enfoncé) | Le lâcher déplace toujours | petit |
-| **Rafraîchir** (`F5`) | La liste ne se relit qu'au changement de répertoire | petit |
+| **Rafraîchir** (`F5`) | La liste ne se relit que sur un geste de l'application — changement de répertoire, création, renommage, bascule des cachés, fin ou arrêt d'un travail. **Rien ne la relit quand le disque bouge tout seul**, et `Key::F5` n'est branchée nulle part dans `src/apps/files/` | petit |
 | **Chemin éditable** (`Ctrl+L`) | On n'atteint un chemin qu'en cliquant niveau par niveau | petit |
 | **Corbeille** (`~/.local/share/Trash`) | Tout est irréversible aujourd'hui | moyen |
 | **Ouvrir un terminal ici** (`F4`) | `PtySpawn` n'a pas de champ « répertoire de travail » | moyen |
@@ -848,7 +1021,7 @@ panneau ; `reload()` les applique aux deux.
 Ce que les sept jalons ont appris, et qui vaut pour la suite :
 
 1. **Du code né sans appelant ne se signale qu'en faisant tourner le vrai
-   logiciel — ou en le cherchant exprès. Dix fois à ce jour.** La liste, le
+   logiciel — ou en le cherchant exprès. Quatorze fois à ce jour.** La liste, le
    script de balayage et ses trois pièges sont au **§9 bis**, qui est la section
    la plus rentable de ce dossier.
 2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
