@@ -473,3 +473,48 @@ TEST(job_opens_nothing_while_deleting) {
   CHECK_EQ(open_fds(), before);
   CHECK(!exists(t.root() + "/gros"));
 }
+
+// SUPPRIMER UN LIEN N'EFFACE PAS SA CIBLE. C'est le pire dégât qu'un
+// gestionnaire de fichiers puisse faire : un `~/Documents -> /data/docs`
+// effacé « pour faire de la place » emporterait /data/docs tout entier.
+// La garde est `lstat`, jamais `stat` : le premier voit le LIEN, le second
+// voit à travers.
+TEST(job_deletes_a_symlink_without_following_it) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("precieux");
+  t.file("precieux/tresor", "a garder");
+  const std::string lien = t.root() + "/raccourci";
+  REQUIRE_EQ(::symlink((t.root() + "/precieux").c_str(), lien.c_str()), 0);
+
+  FileJob job;
+  job.start({lien}, std::string(), FileOp::Delete);
+  run_to_end(job, 4096);
+
+  CHECK(!exists(lien));
+  CHECK_EQ(job.failed(), 0);
+  // LA CIBLE EST INTACTE, contenu compris.
+  CHECK(exists(t.root() + "/precieux"));
+  CHECK_EQ(read_all(t.root() + "/precieux/tresor"), std::string("a garder"));
+}
+
+// ET LE DÉPLACER NE LE DÉRÉFÉRENCE PAS non plus : c'est le lien qui bouge,
+// pas ce qu'il désigne.
+TEST(job_moves_a_symlink_as_a_symlink) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.dir("cible");
+  t.dir("ailleurs");
+  const std::string lien = t.root() + "/raccourci";
+  REQUIRE_EQ(::symlink((t.root() + "/cible").c_str(), lien.c_str()), 0);
+
+  FileJob job;
+  job.start({lien}, t.root() + "/ailleurs", FileOp::Move);
+  run_to_end(job, 4096);
+
+  struct stat st {};
+  REQUIRE_EQ(::lstat((t.root() + "/ailleurs/raccourci").c_str(), &st), 0);
+  CHECK(S_ISLNK(st.st_mode));
+  CHECK(exists(t.root() + "/cible"));
+  ::unlink((t.root() + "/ailleurs/raccourci").c_str());
+}

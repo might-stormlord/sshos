@@ -480,3 +480,94 @@ TEST(dir_reads_the_size_of_a_file_and_leaves_a_directory_at_zero) {
   CHECK_EQ(plein, uint64_t{10});
   CHECK_EQ(dossier, uint64_t{0});
 }
+
+// ------------------------------------------------- les liens symboliques
+
+// UN LIEN VERS UN DOSSIER SE SAIT. Le `stat()` qui donne la taille et la
+// date SUIT déjà le lien : la réponse est là, gratuite, et on la jetait --
+// si bien qu'un `~/Documents -> /data/docs` partait dans l'éditeur.
+TEST(dir_marks_a_symlink_that_points_to_a_directory) {
+  TempDir d;
+  REQUIRE(d.valid());
+  d.dir("cible");
+  d.file("fichier");
+  REQUIRE_EQ(::symlink((d.path() + "/cible").c_str(),
+                       (d.path() + "/vers-dossier").c_str()), 0);
+  REQUIRE_EQ(::symlink((d.path() + "/fichier").c_str(),
+                       (d.path() + "/vers-fichier").c_str()), 0);
+
+  const DirListing l = sshos::read_dir(d.path(), false);
+  bool vu_dossier = false;
+  bool vu_fichier = false;
+  for (const auto& e : l.entries) {
+    if (e.name == "vers-dossier") {
+      vu_dossier = true;
+      CHECK(e.kind == EntryKind::Link);   // il reste un LIEN, pour la couleur
+      CHECK(e.links_to_dir);
+    }
+    if (e.name == "vers-fichier") {
+      vu_fichier = true;
+      CHECK(!e.links_to_dir);
+    }
+  }
+  CHECK(vu_dossier);
+  CHECK(vu_fichier);
+  ::unlink((d.path() + "/vers-dossier").c_str());
+  ::unlink((d.path() + "/vers-fichier").c_str());
+}
+
+// UN LIEN CASSÉ NE POINTE NULLE PART, et ce n'est pas un dossier. Le
+// `stat()` échoue ; ne rien conclure est la seule réponse honnête.
+TEST(dir_leaves_a_broken_symlink_alone) {
+  TempDir d;
+  REQUIRE(d.valid());
+  REQUIRE_EQ(::symlink((d.path() + "/jamais-existe").c_str(),
+                       (d.path() + "/casse").c_str()), 0);
+
+  const DirListing l = sshos::read_dir(d.path(), false);
+  for (const auto& e : l.entries) {
+    if (e.name != "casse") continue;
+    CHECK(e.kind == EntryKind::Link);
+    CHECK(!e.links_to_dir);
+  }
+  ::unlink((d.path() + "/casse").c_str());
+}
+
+// IL SE RANGE AVEC LES DOSSIERS. C'est ce qu'il est pour qui navigue, et
+// le laisser au milieu des fichiers le rend introuvable dans un répertoire
+// qui en compte deux cents.
+TEST(dir_sorts_a_link_to_a_directory_among_the_directories) {
+  std::vector<DirEntry> v = {
+      {"zzz-fichier", EntryKind::File, 0, 0, false},
+      {"aaa-lien", EntryKind::Link, 0, 0, true},
+      {"mmm-dossier", EntryKind::Dir, 0, 0, false},
+  };
+  sshos::sort_entries(v, SortBy::Name, false);
+  CHECK_EQ(v[0].name, std::string("aaa-lien"));
+  CHECK_EQ(v[1].name, std::string("mmm-dossier"));
+  CHECK_EQ(v[2].name, std::string("zzz-fichier"));
+}
+
+// UN LIEN VERS UN FICHIER MONTRE LA TAILLE DE SA CIBLE. Il affichait
+// « 0 o » : la taille n'était lue que pour un `EntryKind::File`, alors que
+// le `stat()` suit déjà le lien et connaît la réponse. Zéro octet sur un
+// fichier de sept est un mensonge, pas une absence.
+TEST(dir_reads_the_size_behind_a_symlink_to_a_file) {
+  TempDir d;
+  REQUIRE(d.valid());
+  d.file("vrai");
+  const int fd = ::open((d.path() + "/vrai").c_str(), O_WRONLY | O_CLOEXEC);
+  REQUIRE(fd >= 0);
+  REQUIRE_EQ(::write(fd, "0123456", 7), ssize_t{7});
+  ::close(fd);
+  REQUIRE_EQ(::symlink((d.path() + "/vrai").c_str(),
+                       (d.path() + "/alias").c_str()), 0);
+
+  const DirListing l = sshos::read_dir(d.path(), false);
+  uint64_t alias = 999;
+  for (const auto& e : l.entries) {
+    if (e.name == "alias") alias = e.size;
+  }
+  CHECK_EQ(alias, uint64_t{7});
+  ::unlink((d.path() + "/alias").c_str());
+}

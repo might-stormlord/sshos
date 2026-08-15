@@ -19,6 +19,14 @@ struct DirEntry {
   // coûterait un `stat()` par entrée pendant le rendu -- l'endroit précis
   // où ce projet s'interdit de toucher au disque.
   uint64_t mtime = 0;
+  // CE LIEN MÈNE-T-IL À UN DOSSIER ? La question ne coûte RIEN : le
+  // `stat()` qui donne la taille et la date suit déjà le lien, et on
+  // jetait sa réponse -- si bien qu'un « ~/Documents -> /data/docs »
+  // partait dans l'éditeur au lieu de s'ouvrir.
+  //
+  // Le `kind` reste `Link` : c'est ce qui lui garde sa couleur propre. Ce
+  // drapeau dit ce qu'il FAIT, pas ce qu'il EST.
+  bool links_to_dir = false;
   bool operator==(const DirEntry&) const = default;
 };
 
@@ -47,6 +55,11 @@ struct DirListing {
 // `..` est TOUJOURS en tête, sauf à la racine -- où il n'existe pas, et où
 // l'offrir ferait tourner en rond.
 DirListing read_dir(const std::string& path, bool show_hidden);
+
+// Un dossier POUR QUI NAVIGUE : un vrai, ou un lien qui y mène. C'est le
+// prédicat que le tri, l'ouverture et la colonne des tailles partagent --
+// trois copies de la même règle finiraient par diverger.
+bool is_dir_like(const DirEntry& e);
 
 // Le tri. DOSSIERS D'ABORD, `..` toujours en tête -- l'inversion ne le
 // renvoie PAS en bas, il est la sortie et non un résultat de tri.

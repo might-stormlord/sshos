@@ -597,7 +597,11 @@ void Files::go_up() {
 void Files::activate() {
   if (pane().visible.empty()) return;
   const DirEntry& e = pane().visible[pane().sel];
-  if (e.kind != EntryKind::Dir) {
+  // UN LIEN VERS UN DOSSIER SE DESCEND. Il partait dans l'Éditeur, qui
+  // ouvrait un tampon vide sur un répertoire : un « ~/Documents ->
+  // /data/docs » était inutilisable. `is_dir_like()` porte la règle, et
+  // c'est le même prédicat qui range et qui ouvre.
+  if (!is_dir_like(e)) {
     // OUVRIR UN FICHIER, C'EST L'OUVRIR DANS L'ÉDITEUR. Cette branche a
     // dit « l'editeur arrive au jalon 6 » longtemps après que le jalon 6
     // eut été livré : la fonction existait, personne ne l'avait branchée.
@@ -1444,7 +1448,9 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
     // Un répertoire n'a pas de taille qui veuille dire quelque chose : celle
     // de son inode ne dit rien de ce qu'il contient, et l'afficher ferait
     // croire le contraire.
-    if (c.size_w > 0 && e.kind != EntryKind::Dir && e.name != "..") {
+    // Un lien vers un dossier n'a pas plus de taille à montrer qu'un
+    // dossier : celle de la cible ne dit rien de ce qu'elle contient.
+    if (c.size_w > 0 && !is_dir_like(e) && e.name != "..") {
       v.text(c.size_x, y, right_align(human_size(e.size), c.size_w), st);
     }
     if (c.date_w > 0 && e.name != "..") {
@@ -1510,6 +1516,19 @@ void Files::draw_pane(View v, const Pane& pn, bool focused) {
                                                         : "copie";
     bottom = std::string(quoi) + " : " + job_.current() + " (" +
              std::to_string(job_.done()) + " faits, Echap pour arreter)";
+  } else if (!pn.visible.empty() && pn.sel < pn.visible.size() &&
+             pn.visible[pn.sel].kind == EntryKind::Link) {
+    // OÙ MÈNE CE LIEN. Sans le dire, on ne sait pas ce qu'on s'apprête à
+    // ouvrir -- ni ce qu'on s'apprête à supprimer. `readlink` lit le
+    // CONTENU du lien, pas sa cible résolue : c'est ce que l'utilisateur a
+    // écrit, et c'est ce qu'il reconnaîtra.
+    char buf[512];
+    const std::string lien = join_path(pn.listing.path, pn.visible[pn.sel].name);
+    const ssize_t n = ::readlink(lien.c_str(), buf, sizeof buf - 1);
+    if (n > 0) {
+      status_style.attrs = attr::Dim;
+      bottom = std::string("-> ") + std::string(buf, static_cast<size_t>(n));
+    }
   } else if (!pn.marked.empty()) {
     // COMBIEN, ET COMBIEN ÇA PÈSE. Une sélection qu'on ne voit pas est une
     // sélection dont on ne se souvient plus au moment d'appuyer sur Suppr.

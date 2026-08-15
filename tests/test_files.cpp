@@ -3125,3 +3125,92 @@ TEST(files_refuses_to_start_a_job_while_one_is_running) {
   CHECK(!exists(t.root() + "/gros"));
   CHECK(exists(t.root() + "/intact"));
 }
+
+// ------------------------------------------------- les liens symboliques
+
+// UN LIEN VERS UN DOSSIER SE DESCEND. Il partait dans l'Éditeur, qui
+// ouvrait un tampon vide sur un répertoire : un « ~/Documents ->
+// /data/docs » était inutilisable.
+TEST(files_descends_into_a_symlink_to_a_directory) {
+  OpeningHost host;
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string cible = t.dir("cible");
+  t.file("cible/dedans");
+  REQUIRE_EQ(::symlink(cible.c_str(), (t.root() + "/raccourci").c_str()), 0);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.attach(host);
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("cible"));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("raccourci"));
+
+  f.on_key(key(Key::Enter));
+
+  CHECK(host.opened.empty());
+  CHECK_EQ(f.path_for_tests(), t.root() + "/raccourci");
+  ::unlink((t.root() + "/raccourci").c_str());
+}
+
+// UN LIEN VERS UN FICHIER S'OUVRE TOUJOURS DANS L'ÉDITEUR : c'est un
+// fichier, et le suivre est exactement ce qu'on attend.
+TEST(files_still_opens_a_symlink_to_a_file_in_the_editor) {
+  OpeningHost host;
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string vrai = t.file("vrai.txt");
+  REQUIRE_EQ(::symlink(vrai.c_str(), (t.root() + "/alias.txt").c_str()), 0);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.attach(host);
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("alias.txt"));
+
+  f.on_key(key(Key::Enter));
+
+  CHECK_EQ(host.opened.size(), size_t{1});
+  ::unlink((t.root() + "/alias.txt").c_str());
+}
+
+// UN LIEN VERS UN DOSSIER N'A PAS DE TAILLE À MONTRER, comme un dossier :
+// celle de la cible ne dit rien de ce qu'elle contient.
+TEST(files_shows_no_size_for_a_link_to_a_directory) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string cible = t.dir("cible");
+  REQUIRE_EQ(::symlink(cible.c_str(), (t.root() + "/raccourci").c_str()), 0);
+
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  const std::string row = painted_row(f, 60, 12, 4);
+  REQUIRE(row.find("raccourci") != std::string::npos);
+  CHECK(row.find(" o ") == std::string::npos);
+  CHECK(row.find("Ko") == std::string::npos);
+  ::unlink((t.root() + "/raccourci").c_str());
+}
+
+// LA LIGNE D'ÉTAT DIT OÙ MÈNE LE LIEN. Sans cela, on ne peut savoir ce
+// qu'on s'apprête à ouvrir -- ni ce qu'on s'apprête à supprimer.
+TEST(files_says_where_a_symlink_points) {
+  Tree t;
+  REQUIRE(t.valid());
+  const std::string cible = t.dir("la-cible");
+  REQUIRE_EQ(::symlink(cible.c_str(), (t.root() + "/raccourci").c_str()), 0);
+
+  Files f(t.root());
+  f.on_resize(Size{70, 12});
+  f.on_key(key(Key::Down));
+  f.on_key(key(Key::Down));
+  REQUIRE_EQ(selected_name(f), std::string("raccourci"));
+
+  // LA LIGNE D'ÉTAT, pas l'écran : « la-cible » est aussi le nom du
+  // dossier dans la liste et celui du chemin, donc le chercher n'importe
+  // où passerait même sans rien afficher du tout.
+  const std::string etat = painted_row(f, 70, 12, 11);
+  CHECK_EQ(etat.rfind("-> ", 0), size_t{0});
+  CHECK(etat.find("la-cible") != std::string::npos);
+  ::unlink((t.root() + "/raccourci").c_str());
+}

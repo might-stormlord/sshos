@@ -777,17 +777,20 @@ jalon 6 — le glisser-déposer, et la prise de souris qui le rendait possible.
 Établi en relisant `src/apps/files/` face à Dolphin, et filtré : ce qui n'a pas de
 sens en mode texte (vignettes, aperçus graphiques) est écarté.
 
-**Deux sont des DÉFAUTS, pas des manques** — à traiter en premier :
+**Un seul est un DÉFAUT, pas un manque** — à traiter en premier :
 
 | Défaut | Ce qu'il coûte | Taille |
 |---|---|---|
-| **Un lien symbolique vers un dossier part dans l'Éditeur** : `EntryKind::Link` n'est pas suivi, et la cible n'est jamais montrée | Un `~/Documents -> /data/docs` est inutilisable | petit |
 | **La bascule des fichiers cachés ne touche que le panneau actif** : `reload()` ignore l'autre | En vue scindée, un panneau reste périmé jusqu'à ce qu'on y navigue | petit |
 
-**Soldé le 15 août 2026** (commit `job_`) : la **suppression récursive**, l'**arrêt
-d'un travail** (`Échap`, et une entrée de menu qui n'apparaît que pendant), et la
-**question à la fermeture** quand un travail court. Le moteur s'appelle désormais
-`FileJob` — il fait les trois opérations, et `CopyJob` mentait sur ce qu'il faisait.
+**Soldé le 15 août 2026 :** la **suppression récursive** — par tranches, arrêtable
+d'une touche, avec une question qui prévient et une confirmation à la fermeture ;
+l'**arrêt d'un travail** ; et les **liens symboliques**, qui se descendent au lieu
+de partir dans l'Éditeur, se rangent avec les dossiers, disent leur cible en ligne
+d'état, montrent la taille de ce qu'ils désignent, et **s'effacent sans emporter la
+cible** (`lstat`, jamais `stat` — le pire dégât qu'un gestionnaire puisse faire).
+Le moteur s'appelle désormais `FileJob` : il fait les trois opérations, et
+`CopyJob` mentait sur ce qu'il faisait.
 
 **Puis, par valeur pour un bureau en mode texte :**
 

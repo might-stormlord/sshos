@@ -59,6 +59,10 @@ EntryKind kind_of(const std::string& full, unsigned char d_type) {
 
 }  // namespace
 
+bool is_dir_like(const DirEntry& e) {
+  return e.kind == EntryKind::Dir || e.links_to_dir;
+}
+
 std::string parent_path(const std::string& path) {
   // Pas de garde pour la racine ni pour le vide : les deux retombent sur
   // le `cut` ci-dessous, qui rend « / » dans les deux cas. Une garde en
@@ -108,12 +112,22 @@ DirListing read_dir(const std::string& path, bool show_hidden) {
     // UN SEUL `stat()` par entrée, et il sert aux deux : la taille et la
     // date. En demander un second au moment d'afficher ferait un appel
     // système par ligne et par trame.
+    // `stat` SUIT le lien -- c'est voulu : la taille et la date qui
+    // intéressent sont celles de la cible, et sa nature avec. Un lien
+    // CASSÉ le fait échouer, et ne rien conclure est alors la seule
+    // réponse honnête.
     struct stat st {};
     if (::stat(full.c_str(), &st) == 0) {
-      if (entry.kind == EntryKind::File) {
+      // LA TAILLE DE CE QU'ON OUVRIRAIT. Un lien vers un fichier montre
+      // celle de sa CIBLE : afficher « 0 o » sur un fichier de sept est un
+      // mensonge, pas une absence -- et `stat` a déjà suivi le lien. Un
+      // répertoire, lui, n'en a pas d'utile : celle de son inode ne dit
+      // rien de ce qu'il contient.
+      if (!S_ISDIR(st.st_mode)) {
         entry.size = static_cast<uint64_t>(st.st_size);
       }
       entry.mtime = static_cast<uint64_t>(st.st_mtime);
+      entry.links_to_dir = entry.kind == EntryKind::Link && S_ISDIR(st.st_mode);
     }
     out.entries.push_back(std::move(entry));
   }
@@ -138,8 +152,12 @@ void sort_entries(std::vector<DirEntry>& entries, SortBy by, bool descending) {
                      // Puis les dossiers, convention de tous les
                      // gestionnaires : mélanger les deux rend une
                      // arborescence profonde illisible.
-                     const bool da = a.kind == EntryKind::Dir;
-                     const bool db = b.kind == EntryKind::Dir;
+                     // Un lien vers un dossier se range AVEC les dossiers :
+                     // c'est ce qu'il est pour qui navigue, et le laisser
+                     // au milieu des fichiers le rend introuvable dans un
+                     // répertoire qui en compte deux cents.
+                     const bool da = is_dir_like(a);
+                     const bool db = is_dir_like(b);
                      if (da != db) return da;
                      // LA CLÉ DEMANDÉE D'ABORD, et elle seule porte
                      // l'inversion : le départage ci-dessous doit rester
