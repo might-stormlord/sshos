@@ -401,25 +401,33 @@ void Files::reload() {
   // prochaine action sur leurs homonymes ici, ce qui est le pire résultat
   // possible.
   pane().marked.clear();
-  pane().listing = read_dir(pane().listing.path, show_hidden_);
-  pane().status = pane().listing.error;
-  refilter();
+
+  // LES DEUX PANNEAUX, TOUJOURS. Ils montrent très souvent le même
+  // répertoire -- scinder l'ouvre là où l'on est -- et ne relire que celui
+  // qui a la main laissait l'autre périmé : un fichier créé n'apparaissait
+  // que d'un côté, et la bascule des cachés ne prenait qu'à moitié. Le
+  // second `readdir` ne coûte rien à côté d'une liste fausse.
+  for (Pane& p : panes_) {
+    p.listing = read_dir(p.listing.path, show_hidden_);
+    p.status = p.listing.error;
+    refilter(p);
+  }
 }
 
-void Files::refilter() {
+void Files::refilter(Pane& p) {
   // LA LIGNE CHOISIE SURVIT AU TRI. Elle change de rang, pas d'identité :
   // la retrouver ailleurs dans la liste est le minimum qu'on attende d'un
   // clic sur un en-tête.
   const std::string kept =
-      pane().sel < pane().visible.size() ? pane().visible[pane().sel].name : std::string();
+      p.sel < p.visible.size() ? p.visible[p.sel].name : std::string();
 
-  pane().visible = filter_entries(pane().listing.entries, pane().filter);
-  sort_entries(pane().visible, pane().sort_by, pane().sort_desc);
+  p.visible = filter_entries(p.listing.entries, p.filter);
+  sort_entries(p.visible, p.sort_by, p.sort_desc);
 
   if (!kept.empty()) {
-    for (size_t i = 0; i < pane().visible.size(); ++i) {
-      if (pane().visible[i].name == kept) {
-        pane().sel = i;
+    for (size_t i = 0; i < p.visible.size(); ++i) {
+      if (p.visible[i].name == kept) {
+        p.sel = i;
         break;
       }
     }
@@ -429,36 +437,38 @@ void Files::refilter() {
   // toujours au filtre -- c'est la sortie, pas un résultat de recherche --
   // et le curseur y restait : chercher un dossier puis valider REMONTAIT
   // d'un cran au lieu de l'ouvrir. Trouvé à la sonde, pas par un cas.
-  if (!pane().filter.empty() && pane().sel < pane().visible.size() &&
-      pane().visible[pane().sel].name == ".." && pane().visible.size() > 1) {
-    pane().sel = 1;
+  if (!p.filter.empty() && p.sel < p.visible.size() &&
+      p.visible[p.sel].name == ".." && p.visible.size() > 1) {
+    p.sel = 1;
   }
-  settle();
+  settle_pane(p);
 }
 
-void Files::settle() {
+void Files::refilter() { refilter(pane()); }
+
+void Files::settle_pane(Pane& p) {
   // La sélection D'ABORD : borner le défilement sur une sélection hors
   // bornes le poserait n'importe où, et la fenêtre montrerait une page qui
   // ne contient pas la ligne choisie.
-  if (pane().visible.empty()) {
+  if (p.visible.empty()) {
     // Remise à zéro DÉFENSIVE, et non discriminable aujourd'hui : la seule
     // façon d'avoir une liste vide est de partir d'un répertoire
     // illisible, et la sélection y vaut déjà zéro. Elle reste parce
     // qu'elle deviendra porteuse le jour où une liste non vide pourra le
     // devenir -- une suppression qui vide le dossier, par exemple.
-    pane().sel = 0;
-    pane().top = 0;
+    p.sel = 0;
+    p.top = 0;
     return;
   }
-  if (pane().sel >= pane().visible.size()) pane().sel = pane().visible.size() - 1;
+  if (p.sel >= p.visible.size()) p.sel = p.visible.size() - 1;
 
   const size_t rows = static_cast<size_t>(rows_for_list());
-  if (pane().sel < pane().top) pane().top = pane().sel;
-  if (pane().sel >= pane().top + rows) pane().top = pane().sel - rows + 1;
+  if (p.sel < p.top) p.top = p.sel;
+  if (p.sel >= p.top + rows) p.top = p.sel - rows + 1;
   // Et jamais de page vide en bas : quand la liste rétrécit sous le
   // défilement, celui-ci doit remonter.
-  if (pane().top + rows > pane().visible.size()) {
-    pane().top = pane().visible.size() > rows ? pane().visible.size() - rows : 0;
+  if (p.top + rows > p.visible.size()) {
+    p.top = p.visible.size() > rows ? p.visible.size() - rows : 0;
   }
 }
 
@@ -573,6 +583,8 @@ std::vector<Files::Segment> Files::path_segments(const Pane& pn, int w) const {
   }
   return kept;
 }
+
+void Files::settle() { settle_pane(pane()); }
 
 void Files::go_up() {
   const std::string up = parent_path(pane().listing.path);

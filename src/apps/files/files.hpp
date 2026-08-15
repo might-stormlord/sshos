@@ -111,6 +111,10 @@ class Files : public App {
   // Refait la liste visible depuis ce qui est déjà en mémoire. Appelée à
   // chaque frappe du filtre : elle ne relit RIEN.
   void refilter();
+  // Les deux memes, mais sur un panneau DONNE : la relecture touche les
+  // deux, et un panneau ne se refiltre pas tout seul.
+  void refilter(Pane& p);
+  void settle_pane(Pane& p);
   // Ramène la sélection dans la liste, puis le défilement sur la
   // sélection. L'ordre compte : borner le défilement sur une sélection
   // hors bornes le poserait n'importe où.

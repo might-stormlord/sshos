@@ -3214,3 +3214,72 @@ TEST(files_says_where_a_symlink_points) {
   CHECK(etat.find("la-cible") != std::string::npos);
   ::unlink((t.root() + "/raccourci").c_str());
 }
+
+// LES DEUX PANNEAUX SE RELISENT ENSEMBLE. La bascule des cachés ne
+// touchait que celui qui avait la main : l'autre restait périmé jusqu'à ce
+// qu'on y navigue, et montrait un répertoire qui n'existait plus tel quel.
+TEST(files_reloads_both_panes_when_hidden_files_are_toggled) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("visible");
+  t.file(".cache");
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+  REQUIRE_EQ(f.pane_for_tests(1).listing.path, t.root());
+
+  f.on_key(ch(U'.'));
+
+  // Le panneau de gauche a la main ; celui de droite doit avoir suivi.
+  CHECK_EQ(f.active_pane_for_tests(), size_t{0});
+  bool a_gauche = false;
+  bool a_droite = false;
+  for (const auto& e : f.pane_for_tests(0).visible) {
+    if (e.name == ".cache") a_gauche = true;
+  }
+  for (const auto& e : f.pane_for_tests(1).visible) {
+    if (e.name == ".cache") a_droite = true;
+  }
+  CHECK(a_gauche);
+  CHECK(a_droite);
+}
+
+// ET APRÈS UNE CRÉATION AUSSI : les deux panneaux montrent souvent le même
+// répertoire, et le neuf n'apparaissait que dans l'un des deux.
+TEST(files_reloads_both_panes_after_a_creation) {
+  Tree t;
+  REQUIRE(t.valid());
+  Files f(t.root());
+  f.on_resize(Size{80, 12});
+  f.on_key(key(Key::F3));
+
+  f.on_key(key(Key::F7));
+  for (char c : std::string("neuf")) f.on_key(ch(static_cast<char32_t>(c)));
+  f.on_key(key(Key::Enter));
+
+  bool a_droite = false;
+  for (const auto& e : f.pane_for_tests(1).visible) {
+    if (e.name == "neuf") a_droite = true;
+  }
+  CHECK(a_droite);
+  ::rmdir((t.root() + "/neuf").c_str());
+}
+
+// RELIRE OUBLIE LES MARQUES. Elles désignent des noms, et une relecture
+// arrive justement quand le répertoire a changé sous elles : agir sur une
+// marque qui ne désigne plus rien rendrait « N ont echoue » sur des noms
+// que l'utilisateur ne voit plus.
+TEST(files_drops_its_marks_when_the_listing_is_reread) {
+  Tree t;
+  REQUIRE(t.valid());
+  t.file("a");
+  t.file("b");
+  Files f(t.root());
+  f.on_resize(Size{60, 12});
+  f.on_key(KeyEvent{Key::Char, U'a', mod::Ctrl});
+  REQUIRE_EQ(f.marked_for_tests().size(), size_t{2});
+
+  f.on_key(ch(U'.'));  // la bascule des cachés relit
+
+  CHECK(f.marked_for_tests().empty());
+}
