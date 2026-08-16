@@ -13,8 +13,9 @@
 > l'usage par l'utilisateur. Le §3 donne la position exacte.
 >
 > **Par où commencer, dans cet ordre :**
-> **§2** compiler et lancer — *et l'avertissement en tête : le projet n'existe que
-> sur ce disque* · **§3** où l'on en est · **§3 bis** la carte du code ·
+> **§2** compiler et lancer · **§2 bis** ⚠️ *la publication sur GitHub, arrêtée en
+> cours d'exécution — à lire avant toute manipulation de git* · **§3** où l'on en
+> est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
 > jalon, les 108 de `src/` · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
@@ -71,14 +72,12 @@ complet.
 
 ## 2. Compiler, lancer, tester
 
-> 🟠 **LE PROJET EST EN COURS DE PREMIÈRE PUBLICATION.** Il a vécu ses 200 premiers
-> commits **sur ce seul disque**, sans aucun dépôt distant. Le 15 août 2026, deux
-> décisions ont été prises : `main` a été avancée sur `m1-noyau` (un fast-forward
-> pur, `main` en étant un ancêtre), et le dépôt privé
-> `https://github.com/gtix2/sshos.git` a été déclaré comme `origin`.
-> **Tant que le premier `git push` n'a pas abouti, ce disque reste l'unique copie**
-> et un `rm -rf` détruit le projet. Vérifier où l'on en est :
-> `git remote -v` et `git log --oneline origin/main -1`.
+> 🟠 **LE PROJET EST EN COURS DE PREMIÈRE PUBLICATION, ET ELLE N'EST PAS FINIE.**
+> Il a vécu ses 200 premiers commits **sur ce seul disque**, sans aucun dépôt
+> distant. **Tant que le premier `git push` n'a pas abouti, ce disque reste
+> l'unique copie** et un `rm -rf` détruit le projet. Le §2 bis dit exactement où
+> l'on en est et ce qu'il reste à faire — **le lire avant toute manipulation de
+> git**.
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
@@ -131,6 +130,100 @@ Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 `Ctrl+Q` **détache** et ne détruit rien ; détruire la session pour de bon se demande
 par l'entrée « Fermer la session » du menu, qui pose une confirmation.
+
+---
+
+## 2 bis. La publication sur GitHub — arrêtée en cours, le 15 août 2026
+
+Le projet part vers **`https://github.com/gtix2/sshos.git`**, en **dépôt privé**
+(choix de l'utilisateur). Le travail local est **terminé** ; il ne manque que
+l'authentification, qui ne peut venir que de l'utilisateur. **Rien n'a encore quitté
+la machine.**
+
+### Ce qui est fait
+
+- **`origin` est déclaré** vers cette URL (`git remote -v` le montre).
+- **`main` a été avancée sur `m1-noyau`** par fast-forward pur — `main` était un
+  ancêtre, rien n'a été réécrit pour cela. Les deux branches pointent sur le même
+  commit. C'est **`main` seule** qu'il faut pousser.
+- **Un audit de pré-publication a été passé** : aucun secret dans l'historique
+  (les 852 blobs de la base d'objets ouverts un par un), aucun blob de plus de
+  0,17 Mo, `.git` à ~1 Mo après `gc`.
+- **`docs/sessions/` est désormais exclu par `.gitignore`.** Il contient 930 Ko de
+  transcriptions de conversation brutes, et il n'était protégé que par
+  `.git/info/exclude` — un fichier **local, ni poussé ni cloné**, dont le motif ne
+  couvrait même que `_autosnapshot-*`. C'était le vrai risque de ce dépôt.
+- **`tools/__pycache__/sonde.cpython-314.pyc` a été purgé de l'historique.** Il était
+  suivi et gravait `/home/storm/dev/ssh_os_2.0` dans un blob binaire.
+  ⚠️ **Conséquence à connaître : les quatre derniers commits du 15 août ont été
+  réécrits** (`filter-branch` sur `398b6b6^..HEAD`). Leurs empreintes ont changé ; le
+  diff a été vérifié avant destruction de la sauvegarde et ne portait que ce fichier,
+  messages, auteurs et dates intacts. Les empreintes citées dans ce dossier ont été
+  mises à jour en conséquence.
+- **Un `README.md` a été écrit** : sans lui, le premier document ouvert par un
+  visiteur aurait été ce dossier-ci, un carnet de reprise interne de 54 Ko.
+
+### Ce qui bloque, et c'est la seule chose
+
+**Aucune authentification GitHub ne fonctionne depuis cette machine.**
+
+```
+$ ssh -T git@github.com          → Permission denied (publickey)
+$ git push -u origin main        → could not read Username for 'https://github.com'
+```
+
+Pas de `credential.helper`, et **`gh` n'est pas installé**. En revanche `apt-get` est
+disponible et le réseau vers GitHub fonctionne (`api.github.com` répond 200).
+
+La clé publique de cette machine, si l'on prend la voie SSH :
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO6ifLcE4BBEhn9p6yendPfLheh66GNtVAk1fVWpwqrM root@dockernx
+```
+
+**On ne sait pas si le dépôt distant existe déjà :** `https://api.github.com/repos/gtix2/sshos`
+répond **404** en anonyme, ce que GitHub renvoie aussi bien pour « privé » que pour
+« inexistant ». La question se tranchera en une commande une fois authentifié.
+
+### Les trois voies, à trancher avec l'utilisateur
+
+| Voie | Ce qu'elle demande |
+|---|---|
+| **`gh auth login`** *(la plus simple)* | `apt-get install gh` — **une installation système, donc l'accord explicite de l'utilisateur** (§4). Ensuite un code à huit caractères à coller dans un navigateur. Aucune clé ni jeton à manipuler, et `gh` sait dire si le dépôt existe et le créer sinon. |
+| **Clé SSH** | L'utilisateur colle la clé ci-dessus, soit sur le compte (`github.com/settings/keys` → *New SSH key*), soit sur le dépôt (`Settings` → *Security* → **Deploy keys** → *Add deploy key*, en cochant **« Allow write access »**). ⚠️ Il a cherché « SSH key » sur la page du dépôt sans la trouver : **elle s'y appelle « Deploy keys »**. Le dépôt doit déjà exister. Puis basculer `origin` en `git@github.com:gtix2/sshos.git`. |
+| **Jeton personnel (HTTPS)** | Portée `repo`. **Ne jamais le faire coller dans la conversation** — il resterait dans l'historique. L'utilisateur tape lui-même `git push` et saisit ses identifiants. |
+
+### Les pièges à ne pas commettre
+
+1. **Ne jamais pousser avec `--all` ni `--mirror`.** Le dépôt porte **25 branches
+   locales**, dont 14 nommées `worktree-agent-<hash>`. Vérifié : **aucune n'a le
+   moindre commit unique** (`git branch --no-merged m1-noyau` ne rend rien). Elles
+   n'apporteraient rien et transformeraient la page du dépôt en catalogue de
+   plomberie. Pousser explicitement `git push -u origin main`.
+2. **Si le dépôt distant est à créer, le créer VIDE** — sans « Add a README », sans
+   « Add .gitignore ». Un dépôt initialisé par GitHub a un commit sans ancêtre commun
+   avec le nôtre, et le push est alors refusé.
+3. **Ne pas relancer la purge du `.pyc`** : elle est faite, et le fichier ne peut plus
+   revenir (`__pycache__/` et `*.pyc` sont dans `.gitignore`).
+
+### Deux choses écartées, et c'est un choix de l'utilisateur
+
+- **Pas de `LICENSE`.** Sans elle le code reste « tous droits réservés » par défaut.
+  Sans conséquence sur un dépôt privé ; à reprendre le jour où il s'ouvrirait.
+- **Les 24 branches locales n'ont pas été supprimées.** Elles ne partiront pas
+  puisqu'on ne pousse que `main`. Pour faire le ménage plus tard : chacune est
+  verrouillée par un worktree, donc `git worktree remove <chemin>` **avant**
+  `git branch -D`. Attention, `.claude/worktrees/agent-aba4275accf38f581` porte 51
+  lignes non commitées dans `src/daemon/daemon.cpp` — un état très ancien et
+  largement dépassé par `m1-noyau`, mais à regarder avant tout `--force`.
+
+> **Un point non technique, et irréversible :** l'adresse `317721292+might-stormlord@users.noreply.github.com` figure
+> dans les métadonnées des 200 commits. Sur un dépôt privé c'est sans conséquence,
+> mais elle ne pourra plus en être retirée sans réécrire toute l'histoire le jour où
+> le dépôt s'ouvrirait. De même, **112 commits portent une ligne `Co-Authored-By`**
+> vers Claude. Rien de gênant, mais autant le savoir avant que ce soit public.
+
+---
 
 ## 3. Où en est le projet dans la feuille de route
 
