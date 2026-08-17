@@ -288,6 +288,9 @@ sh tools/install.sh --yes --source git # sans rien demander
 | `sh tools/update.sh --check\|--apply\|--rollback` | posé à l'installation sous `~/.local/libexec/sshos-update` |
 | `python3 tools/verif_isolation.py <HOME>` | **le test qui juge tout** : le binaire de dev ne doit ni voir ni tuer le bureau installé |
 | `python3 tools/sonde_update.py` | la sonde bout-en-bout, sur un faux dépôt git — 26 vérifications |
+| `python3 tools/verif_redemarrage.py` | un vrai redémarrage : l'ancien démon sort, un neuf prend sa place, le client se rattache seul |
+| `python3 tools/verif_repos.py` | le démon **détaché** ne doit consommer aucun CPU |
+| `python3 tools/verif_sortie.py` | « Fermer la session » tue toujours le démon — chemin qu'aucun test unitaire ne couvre |
 
 `SSHOS_PREFIX`, `SSHOS_STATE_DIR` et `SSHOS_REPO_URL` surchargent les chemins et l'URL :
 c'est ce qui permet à la sonde de ne pas écraser l'installation réelle. **`SSHOS_BOOT_ID`
