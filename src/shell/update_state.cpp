@@ -129,7 +129,7 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
       if (read_int64(value, v) && v > 0) parsed.pid = static_cast<pid_t>(v);
     } else if (key == "message") {
       parsed.message = std::string(value.substr(
-          0, std::min(value.size(), kMaxMessageBytes)));
+          0, std::min(value.size(), kMaxStateMessageBytes)));
     }
     // Toute autre clé est ignorée : le format peut gagner des champs sans
     // que les anciens lecteurs aient à s'en soucier.

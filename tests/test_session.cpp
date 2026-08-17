@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -26,6 +27,7 @@
 #include "common/platform.hpp"
 #include "common/proto.hpp"
 #include "daemon/daemon.hpp"
+#include "daemon/reap.hpp"
 #include "daemon/session.hpp"
 #include "harness.hpp"
 #include "input/events.hpp"
@@ -4261,4 +4263,264 @@ TEST(session_lets_a_new_press_out_of_a_stale_mouse_grab) {
     CHECK_EQ(app->seen.size(), size_t{1});
   }
   Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// ---------------------------------------------------------------------------
+// Le service de mise a jour, vu depuis la session.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Une installation jetable : XDG_DATA_HOME, un fichier d'etat, et un vrai
+// script sshos-update. La session lit ce chemin A LA CONSTRUCTION, donc la
+// variable doit etre posee AVANT de construire la Session.
+class UpdateFixture {
+ public:
+  UpdateFixture(const std::string& status, const std::string& script_body,
+                const std::string& extra = std::string()) {
+    std::random_device rd;
+    std::mt19937_64 rng(rd());
+    std::uniform_int_distribution<std::uint64_t> dist;
+    std::ostringstream os;
+    os << "/tmp/sshos-test-" << ::getpid() << '-' << std::hex << dist(rng)
+       << "-xdg";
+    dir_ = os.str();
+    ::mkdir(dir_.c_str(), 0700);
+    ::mkdir((dir_ + "/sshos").c_str(), 0700);
+    ::mkdir((dir_ + "/libexec").c_str(), 0700);
+
+    if (const char* v = ::getenv("XDG_DATA_HOME")) {
+      had_ = true;
+      old_ = v;
+    }
+    ::setenv("XDG_DATA_HOME", dir_.c_str(), 1);
+
+    write_state(status, extra);
+
+    const std::string sp = dir_ + "/libexec/sshos-update";
+    {
+      std::ofstream out(sp, std::ios::binary | std::ios::trunc);
+      out << script_body;
+    }
+    ::chmod(sp.c_str(), 0755);
+  }
+
+  void write_state(const std::string& status, const std::string& extra) const {
+    std::ofstream out(state_path(), std::ios::binary | std::ios::trunc);
+    out << "schema=1\nprefix=" << dir_ << "\nsource=git\nstatus=" << status
+        << "\n" << extra;
+  }
+
+  std::string state_path() const { return dir_ + "/sshos/state"; }
+  std::string dir() const { return dir_; }
+
+  ~UpdateFixture() {
+    if (had_) {
+      ::setenv("XDG_DATA_HOME", old_.c_str(), 1);
+    } else {
+      ::unsetenv("XDG_DATA_HOME");
+    }
+    ::remove(state_path().c_str());
+    ::remove((dir_ + "/libexec/sshos-update").c_str());
+    ::remove((dir_ + "/sshos/update.log").c_str());
+    ::rmdir((dir_ + "/libexec").c_str());
+    ::rmdir((dir_ + "/sshos").c_str());
+    ::rmdir(dir_.c_str());
+  }
+  UpdateFixture(const UpdateFixture&) = delete;
+  UpdateFixture& operator=(const UpdateFixture&) = delete;
+
+ private:
+  std::string dir_;
+  bool had_ = false;
+  std::string old_;
+};
+
+// Ouvre le menu du bureau au clavier : Ctrl+A puis Espace.
+void open_menu(Session& s) {
+  s.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  s.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+}
+
+// Trouve la pastille dans le panneau et rend sa position, ou {-1,-1}.
+sshos::Pos find_badge(Session& s, int cols, int rows) {
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      if (s.panel_hit_for_tests(x, y).what == sshos::PanelHit::Update) {
+        return sshos::Pos{x, y};
+      }
+    }
+  }
+  return sshos::Pos{-1, -1};
+}
+
+void click_at(Session& s, int x, int y) {
+  s.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Press, 1, x, y, 0}});
+  s.on_input(sshos::InputEvent{
+      sshos::MouseEvent{sshos::MouseAction::Release, 1, x, y, 0}});
+}
+
+}  // namespace
+
+// L'ENTREE APPARAIT DANS LE MENU, ET LA PASTILLE DANS LA BARRE. On regarde
+// ce que l'utilisateur voit reellement, pas un accesseur de test.
+TEST(session_shows_the_update_entry_and_badge_when_one_is_available) {
+  UpdateFixture fix("available", "#!/bin/sh\nexit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  CHECK(badge.x >= 0);
+
+  open_menu(sess);
+  Surface open(80, 24);
+  sess.render(open);
+  CHECK(surface_contains(open, "Mettre a jour"));
+}
+
+// RIEN NE S'AFFICHE QUAND IL N'Y A RIEN. La pastille est une notification :
+// allumee en permanence, elle ne dirait plus rien.
+TEST(session_shows_no_badge_when_it_is_up_to_date) {
+  UpdateFixture fix("up-to-date", "#!/bin/sh\nexit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  CHECK(find_badge(sess, 80, 24).x < 0);
+
+  open_menu(sess);
+  Surface open(80, 24);
+  sess.render(open);
+  CHECK(surface_contains(open, "Verifier les mises a jour"));
+  CHECK(!surface_contains(open, "Mettre a jour"));
+}
+
+// LA SOURIS D'ABORD : CLIQUER LA PASTILLE OUVRE LA CONFIRMATION. Une
+// pastille qui annonce sans rien faire au clic serait le contre-exemple
+// exact de la regle du projet.
+TEST(session_clicking_the_update_badge_opens_the_confirmation) {
+  UpdateFixture fix("available", "#!/bin/sh\nexit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  REQUIRE(badge.x >= 0);
+  click_at(sess, badge.x, badge.y);
+
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(surface_contains(after, "Installer la mise a jour"));
+}
+
+// LA CONFIRMATION DU REDEMARRAGE COMPTE CE QUI VA MOURIR, et elle s'ouvre
+// sur « Annuler » : l'invariant de Modal veut que la reponse sure a une
+// question destructrice ne soit jamais celle d'un Entree reflexe.
+TEST(session_restart_confirmation_counts_what_dies_and_defaults_to_cancel) {
+  UpdateFixture fix("restart-pending", "#!/bin/sh\nexit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  REQUIRE(badge.x >= 0);
+  click_at(sess, badge.x, badge.y);
+
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(surface_contains(after, "Redemarrer maintenant"));
+  CHECK(surface_contains(after, "seront fermes"));
+
+  // Entree seule ne detruit rien : le focus est sur Annuler.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  Surface closed(80, 24);
+  sess.render(closed);
+  CHECK(!surface_contains(closed, "Redemarrer maintenant"));
+  CHECK(!sess.wants_quit());
+}
+
+// UNE ENTREE INERTE NE LANCE RIEN, meme si l'identifiant arrive jusqu'au
+// routage : la garde ne repose pas sur l'interface.
+TEST(session_does_not_act_on_a_disabled_update_entry) {
+  UpdateFixture fix("updates-disabled", "#!/bin/sh\nexit 0\n",
+                    "message=git absent\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  // Pas de pastille, et l'entree dit pourquoi.
+  CHECK(find_badge(sess, 80, 24).x < 0);
+  open_menu(sess);
+  Surface open(80, 24);
+  sess.render(open);
+  CHECK(surface_contains(open, "Mise a jour indisponible"));
+}
+
+// LE RECOLTEUR DU DEMON APPELLE BIEN LE SERVICE. C'est le cablage qui est ne
+// sans appelant QUATORZE fois dans ce projet, et celui dont depend toute la
+// sortie de « Mise a jour en cours » : un test qui appellerait UpdateService
+// lui-meme ne testerait jamais son appelant.
+//
+// Le script pose ici est REEL : il reecrit le fichier d'etat, exactement
+// comme le vrai. On passe donc par un fork, un execv, la mort de l'enfant,
+// reap_children(), et le retour dans le service.
+TEST(session_routes_a_service_child_exit_to_the_update_service) {
+  UpdateFixture fix("available",
+                    "#!/bin/sh\n"
+                    "printf 'schema=1\\nprefix=%s\\nsource=git\\n"
+                    "status=restart-pending\\n' \"$(dirname \"$(dirname \"$0\")\")\" "
+                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "exit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  // Cliquer la pastille, puis ALLER CHERCHER la confirmation : Entree seule
+  // ne fait rien, le focus est sur Annuler.
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  REQUIRE(badge.x >= 0);
+  click_at(sess, badge.x, badge.y);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Tab, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  // PREMIERE MOITIE : le script a-t-il vraiment tourne ? On recolte comme
+  // le demon le ferait, et on lit le fichier directement. Le distinguer de
+  // la seconde moitie est ce qui rend un echec diagnostiquable.
+  bool script_ran = false;
+  for (int i = 0; i < 300 && !script_ran; ++i) {
+    sshos::reap_children(sess);
+    std::ifstream in(fix.state_path(), std::ios::binary);
+    std::ostringstream os;
+    os << in.rdbuf();
+    if (os.str().find("restart-pending") != std::string::npos) script_ran = true;
+    else ::usleep(10 * 1000);
+  }
+  CHECK(script_ran);
+
+  // On recolte encore : l'enfant peut mourir apres avoir ecrit.
+  for (int i = 0; i < 100; ++i) {
+    if (sshos::reap_children(sess) > 0) break;
+    ::usleep(10 * 1000);
+  }
+
+  // SECONDE MOITIE : le service a-t-il ete prevenu ? C'est CE chemin-la que
+  // le test existe pour verifier -- celui qui est ne sans appelant quatorze
+  // fois dans ce projet.
+  sess.mark_refresh_due();
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(find_badge(sess, 80, 24).x >= 0);
+  open_menu(sess);
+  Surface open(80, 24);
+  sess.render(open);
+  CHECK(surface_contains(open, "Redemarrer pour terminer"));
 }

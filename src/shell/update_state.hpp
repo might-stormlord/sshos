@@ -44,9 +44,11 @@ struct UpdateState {
 // plusieurs mégaoctets y ferait une lecture, une allocation et une analyse
 // synchrones dans la boucle d'affichage, à chaque relecture -- exactement ce
 // que la contrainte « le démon ne bloque jamais » interdit. Le projet sait
-// plafonner ailleurs (kMaxMessageBytes de proto.hpp) ; ici aussi.
+// plafonner ailleurs (kMaxMessageBytes de proto.hpp) ; ici aussi. Le nom
+// diffère du sien pour la même raison : les deux vivent dans le namespace
+// sshos, et deux constantes homonymes ne compileraient pas.
 inline constexpr std::size_t kMaxStateBytes = 4096;
-inline constexpr std::size_t kMaxMessageBytes = 200;
+inline constexpr std::size_t kMaxStateMessageBytes = 200;
 
 // Le seul schéma connu. Une valeur différente est traitée comme un fichier
 // absent : mieux vaut ne rien afficher que de deviner un format.

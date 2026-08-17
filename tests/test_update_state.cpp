@@ -119,9 +119,9 @@ TEST(update_state_clamps_checked_at_outside_the_plausible_range) {
 
 TEST(update_state_truncates_an_oversized_message) {
   std::string raw = "schema=1\nmessage=";
-  raw.append(sshos::kMaxMessageBytes + 50, 'z');
+  raw.append(sshos::kMaxStateMessageBytes + 50, 'z');
   raw.push_back('\n');
-  CHECK_EQ(parse(raw).message.size(), sshos::kMaxMessageBytes);
+  CHECK_EQ(parse(raw).message.size(), sshos::kMaxStateMessageBytes);
 }
 
 TEST(update_state_reads_every_status_value) {

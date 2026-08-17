@@ -1,5 +1,13 @@
 #include "daemon/session.hpp"
 
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+
+#include <cstdlib>
+
+#include "daemon/daemonize.hpp"
+
 #include <chrono>
 
 #include "wm/tile.hpp"
@@ -71,9 +79,98 @@ constexpr std::chrono::milliseconds kDoubleClick{600};
 
 }  // namespace
 
+namespace {
+
+// L'etat de la mise a jour est propre a l'UTILISATEUR, pas a l'installation :
+// il vit sous son home quel que soit le prefixe choisi.
+std::string update_state_path() {
+  if (const char* x = std::getenv("XDG_DATA_HOME")) {
+    if (*x != '\0') return std::string(x) + "/sshos/state";
+  }
+  const char* home = std::getenv("HOME");
+  if (home == nullptr || *home == '\0') return {};
+  return std::string(home) + "/.local/share/sshos/state";
+}
+
+std::string update_log_path() {
+  const std::string st = update_state_path();
+  if (st.empty()) return "/dev/null";
+  return st.substr(0, st.rfind('/')) + "/update.log";
+}
+
+// LE LANCEUR D'ENFANT. fork() SIMPLE, jamais spawn_detached : celui-ci fait
+// un double fork et rend le pid de l'INTERMEDIAIRE, qui meurt en quelques
+// millisecondes ; le vrai travail serait reparente a init et ne pourrait
+// plus jamais etre recolte. Applying retomberait donc ~1 ms apres le clic,
+// sur un fichier d'etat inchange, pendant que la compilation tourne hors
+// radar. C'est le motif de Pty qu'il faut ici.
+pid_t launch_updater(const std::vector<std::string>& argv) {
+  if (argv.empty()) return -1;
+  std::vector<char*> raw;
+  raw.reserve(argv.size() + 1);
+  for (const std::string& a : argv) raw.push_back(const_cast<char*>(a.c_str()));
+  raw.push_back(nullptr);
+
+  const std::string log = update_log_path();
+
+  const pid_t pid = ::fork();
+  if (pid != 0) return pid;
+
+  // Entre fork et execve, uniquement des fonctions sures vis-a-vis des
+  // signaux.
+
+  // LE MASQUE SURVIT A EXECVE. Le demon bloque SIGTERM/SIGINT/SIGCHLD pour
+  // son signalfd ; sans ce retablissement, git, make et le binaire de tests
+  // heriteraient de SIGCHLD bloque.
+  sigset_t empty;
+  sigemptyset(&empty);
+  ::sigprocmask(SIG_SETMASK, &empty, nullptr);
+
+  struct sigaction dfl {};
+  dfl.sa_handler = SIG_DFL;
+  sigemptyset(&dfl.sa_mask);
+  const int signals[] = {SIGPIPE, SIGHUP, SIGTERM, SIGINT, SIGCHLD};
+  for (int sig : signals) ::sigaction(sig, &dfl, nullptr);
+
+  // La sortie ne doit ni se perdre ni atteindre le terminal de l'utilisateur.
+  const int fd = ::open(log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (fd >= 0) {
+    ::dup2(fd, 1);
+    ::dup2(fd, 2);
+    if (fd > 2) ::close(fd);
+  }
+  const int devnull = ::open("/dev/null", O_RDONLY);
+  if (devnull >= 0) {
+    ::dup2(devnull, 0);
+    if (devnull > 2) ::close(devnull);
+  }
+
+  ::execv(raw[0], raw.data());
+  ::_exit(127);
+}
+
+}  // namespace
+
 Session::Session(Platform& plat, FdRegistrar& fds, int, int)
-    : plat_(&plat), fds_(&fds) {
+    : plat_(&plat),
+      fds_(&fds),
+      update_(plat, update_state_path(), launch_updater) {
   theme_ = Theme::defaults().for_profile(out_);
+  // UNE SEULE LECTURE, ICI. Sans elle, la pastille et le libellé de l'entrée
+  // resteraient vides jusqu'au premier réveil périodique -- soit une seconde
+  // de bureau qui ment sur son état, à l'instant précis où l'utilisateur
+  // regarde. Et ce n'est pas dans render() que ça peut se faire : render()
+  // ne doit toucher ni au disque ni au réseau, c'est la règle qui garde le
+  // démon vivant.
+  update_.tick();
+}
+
+int Session::update_delay_ms() const { return update_.delay_ms(); }
+
+void Session::tick_update() {
+  update_.tick();
+  // Le libelle de l'entree et la pastille viennent de changer.
+  dirty_ = true;
 }
 
 std::string Session::take_out_of_band() {
@@ -184,15 +281,75 @@ void Session::run_menu(const std::string& id) {
     detach_ = true;
     return;
   }
+  if (id.rfind("update:", 0) == 0) {
+    run_update_command(id);
+    return;
+  }
   if (id == "session:quit") {
     // ON DEMANDE. C'est le seul geste du bureau qui détruise le travail de
     // toutes les fenêtres à la fois, et il était jusqu'ici à un clic de
     // distance -- au milieu du menu, juste sous « Quitter », qui lui ne
     // détruit rien.
-    modal_quits_session_ = true;
+    modal_kind_ = ModalKind::QuitSession;
     modal_.ask("Fermer la session ? Toutes les fenetres seront perdues.", 0);
     dirty_ = true;
   }
+}
+
+// LA GARDE NE REPOSE PAS SUR L'INTERFACE. L'identifiant peut venir d'un menu
+// construit un instant plus tot, alors que l'etat a change entre-temps :
+// fermer le bureau sur un ordre perime serait le pire bogue de cette
+// fonctionnalite. On revoit donc l'entree courante avant d'agir.
+// Les trois portes du menu passent par ici. Le menu ne sait rien du service :
+// il recoit un libelle et un drapeau, et rend l'identifiant tel quel.
+void Session::refresh_menu_extras() {
+  const UpdateEntry e = update_.entry();
+  menu_.set_extra_items({{e.id, e.label, e.enabled}});
+}
+
+void Session::run_update_command(std::string_view id) {
+  const UpdateEntry e = update_.entry();
+  if (!e.enabled) return;
+  if (id != e.id) return;
+
+  if (id == "update:restart") {
+    // ON DEMANDE. C'est le seul geste de cette fonctionnalite qui detruise
+    // du travail, et l'invariant de Modal veut qu'Annuler ait le focus par
+    // defaut sur une question destructrice.
+    modal_kind_ = ModalKind::RestartForUpdate;
+    modal_.ask(restart_question(), 0);
+    dirty_ = true;
+    return;
+  }
+  if (id == "update:apply") {
+    // Rien ne se ferme ici : la question est legere, mais elle existe parce
+    // qu'une compilation et une suite complete vont demarrer.
+    modal_kind_ = ModalKind::ApplyUpdate;
+    modal_.ask("Installer la mise a jour ? Vos fenetres restent ouvertes.", 0);
+    dirty_ = true;
+    return;
+  }
+  update_.run(id);
+  dirty_ = true;
+}
+
+// LA SESSION NE CONNAIT PAS LES TYPES D'APPLICATIONS -- c'est un principe
+// affiche. Elle sait compter des fenetres et des enfants surveilles ; elle
+// dit donc « processus en cours », jamais « shells », parce qu'un enfant
+// peut aussi bien etre une copie de fichiers.
+std::string Session::restart_question() const {
+  const size_t windows = wm_.stack().size();
+  const size_t procs = children_.size();
+  std::string q = "Redemarrer maintenant ? ";
+  q += std::to_string(windows);
+  q += windows > 1 ? " fenetres" : " fenetre";
+  if (procs > 0) {
+    q += " et ";
+    q += std::to_string(procs);
+    q += procs > 1 ? " processus en cours" : " processus en cours";
+  }
+  q += " seront fermes.";
+  return q;
 }
 
 void Session::menu_key(const KeyEvent& k) {
@@ -246,6 +403,7 @@ void Session::do_action(Action a) {
       snap_focused(SnapDir::Down);
       return;
     case Action::OpenMenu:
+      refresh_menu_extras();
       menu_.open();
       return;
     case Action::ToggleMouse:
@@ -399,13 +557,17 @@ void Session::request_close(Window& w) {
 
 void Session::answer_modal(bool confirmed) {
   if (confirmed) {
-    if (modal_quits_session_) {
+    if (modal_kind_ == ModalKind::QuitSession) {
       quit_ = true;
+    } else if (modal_kind_ == ModalKind::ApplyUpdate) {
+      update_.run("update:apply");
+    } else if (modal_kind_ == ModalKind::RestartForUpdate) {
+      update_.run("update:restart");
     } else if (Window* t = wm_.find(modal_.target())) {
       close_window(*t);
     }
   }
-  modal_quits_session_ = false;
+  modal_kind_ = ModalKind::CloseWindow;
   modal_.dismiss();
   dirty_ = true;
 }
@@ -501,6 +663,9 @@ void Session::close_window(Window& w) {
 
 void Session::mark_refresh_due() {
   dirty_ = true;
+  // Le service n'est pas une App : Session::mark_refresh_due ne parcourt que
+  // les fenetres, et rien ne l'appellerait sans cette ligne.
+  update_.tick();
   for (const auto& w : wm_.stack()) {
     if (w == nullptr || w->app == nullptr) continue;
     if (w->app->refresh_ms() >= 0) w->app->on_refresh();
@@ -536,6 +701,14 @@ void Session::close_window_for_tests(WindowId id) {
 }
 
 void Session::on_child_exit(pid_t pid, int status) {
+  // AVANT la recherche dans children_, qui passe par une fenetre et ignore
+  // SILENCIEUSEMENT un pid inconnu : un enfant de service n'a pas de
+  // fenetre, et sa mort disparaitrait sans trace.
+  if (update_.owns(pid)) {
+    update_.on_child_exit(pid, status);
+    dirty_ = true;
+    return;
+  }
   const auto it = std::find_if(children_.begin(), children_.end(),
                                [pid](const ChildWatch& c) { return c.pid == pid; });
   if (it == children_.end()) return;
@@ -763,7 +936,12 @@ void Session::on_mouse(const MouseEvent& m) {
     dirty_ = true;
     switch (ph.what) {
       case PanelHit::MenuButton:
-        menu_.open();
+        refresh_menu_extras();
+      menu_.open();
+        break;
+      case PanelHit::Update:
+        // « La souris d'abord » : la pastille annonce, et la cliquer agit.
+        run_update_command(update_.entry().id);
         break;
       case PanelHit::Hint:
         // Le rappel dit quelle touche ouvre l'aide ; le cliquer l'ouvre
@@ -825,6 +1003,7 @@ void Session::on_mouse(const MouseEvent& m) {
     // sortie d'un écran vide sans toucher au clavier. Le clic gauche, lui,
     // ne fait rien : ouvrir un menu dessus serait insupportable.
     if (m.button == 2) {
+      refresh_menu_extras();
       menu_.open_at(m.x, m.y);
       dirty_ = true;
     }
@@ -1232,6 +1411,9 @@ void Session::render(Surface& out) {
   // que le hit-test consulte, et un panneau caché reste un panneau dont on
   // doit savoir où il serait.
   panel_.set_hint(panel_hint());
+  // AVANT layout() : la discipline du panneau veut que layout() calcule une
+  // fois ce que draw() et hit() relisent.
+  panel_.set_update_badge(update_.badge());
   panel_.layout(wm_, out.w(), out.h(), out_.utf8);
   const Window* front = wm_.find(focused);
   if (front == nullptr || front->mode != WinMode::Fullscreen) {

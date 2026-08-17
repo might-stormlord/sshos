@@ -18,6 +18,7 @@
 #include "shell/clock.hpp"
 #include "shell/help.hpp"
 #include "shell/menu.hpp"
+#include "shell/update_service.hpp"
 #include "shell/modal.hpp"
 #include "shell/panel.hpp"
 #include "shell/snapassist.hpp"
@@ -27,6 +28,12 @@
 #include "wm/window.hpp"
 
 namespace sshos {
+
+// Ce qu'une confirmation en cours va faire si on lui répond oui. C'était
+// un booléen tant qu'il n'y avait que deux cas ; il y en a quatre, et un
+// booléen de plus par cas serait le début d'un jeu de drapeaux qui se
+// contredisent.
+enum class ModalKind { CloseWindow, QuitSession, ApplyUpdate, RestartForUpdate };
 
 class Session : public ChildSink {
  public:
@@ -56,6 +63,13 @@ class Session : public ChildSink {
   // caret.
   std::optional<Pos> cursor() const { return cursor_; }
   bool wants_quit() const { return quit_; }
+
+  // L'echeance de la verification quotidienne. Le demon la replie dans le
+  // delai de son epoll_wait SANS la garde `if (client)` : le bureau detache
+  // est l'etat NORMAL de ce projet, et une echeance qui ne bat que client
+  // attache ne bat presque jamais.
+  int update_delay_ms() const;
+  void tick_update();
 
   // Ouvre une application du catalogue. Rend 0 si l'identifiant est inconnu
   // ou si le plafond de fenêtres est atteint.
@@ -220,6 +234,9 @@ class Session : public ChildSink {
   // Exécute une action de la table de raccourcis sur la fenêtre focalisée.
   void do_action(Action a);
   // Exécute une entrée du menu, désignée par son identifiant.
+  void refresh_menu_extras();
+  void run_update_command(std::string_view id);
+  std::string restart_question() const;
   void run_menu(const std::string& id);
   // Les frappes vont au menu tant qu'il est ouvert, jamais à l'application.
   void menu_key(const KeyEvent& k);
@@ -266,6 +283,7 @@ class Session : public ChildSink {
   Clock clock_;
   Menu menu_;
   Modal modal_;
+  UpdateService update_;
   Help help_;
   LeaderDispatch leader_;
 
@@ -300,7 +318,7 @@ class Session : public ChildSink {
   // La modale sert à deux choses : fermer une fenêtre, ou fermer la
   // SESSION. Sans ce drapeau, la réponse « oui » ne saurait pas à quoi
   // elle répond.
-  bool modal_quits_session_ = false;
+  ModalKind modal_kind_ = ModalKind::CloseWindow;
   // Le moniteur, en FOND D'ÉCRAN plutôt qu'en fenêtre : on veut voir la
   // charge de la machine EN MÊME TEMPS qu'on travaille, pas à la place.
   SysInfo sysinfo_;
