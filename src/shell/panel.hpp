@@ -10,7 +10,13 @@
 
 namespace sshos {
 
-enum class PanelHit { None, Body, MenuButton, Pinned, Task, Overflow, Clock, Hint };
+// Update : la pastille de mise a jour. Elle EST cliquable, et ce n'est pas
+// un ornement -- « la souris d'abord » est la regle du projet, et le
+// panneau a deja le precedent avec le rappel de la touche leader, que
+// cliquer ouvre l'aide.
+enum class PanelHit {
+  None, Body, MenuButton, Pinned, Task, Overflow, Clock, Hint, Update
+};
 
 struct PanelHitResult {
   PanelHit what = PanelHit::None;
@@ -51,6 +57,12 @@ class Panel {
   // toute la place du monde et le montre donc toujours.
   void set_hint(std::string h) { hint_ = std::move(h); }
 
+  // La pastille de mise a jour. A poser AVANT layout() : la discipline du
+  // panneau veut que layout() calcule une fois ce que draw() et hit()
+  // relisent, sinon ce qu'on clique n'est pas ce qu'on voit.
+  void set_update_badge(bool on) { update_badge_ = on; }
+  bool update_badge() const { return update_badge_; }
+
   // Une ligne sur un bord horizontal, seize colonnes sur un bord vertical :
   // une entrée de tâche ne tient pas dans moins.
   int thickness() const;
@@ -85,6 +97,7 @@ class Panel {
   Rect rect_{};
   bool utf8_ = false;
   std::string hint_;
+  bool update_badge_ = false;
   std::vector<Item> items_;
 };
 

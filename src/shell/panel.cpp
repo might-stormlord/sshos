@@ -26,6 +26,11 @@ constexpr int kVerticalCols = 16;
 
 // La coupure elle-même vit dans render/width.hpp : l'aide en a besoin aussi,
 // pour la même raison et avec les mêmes pièges de largeur.
+// Le glyphe de la pastille. Une flèche vers le haut dit « il y a quelque
+// chose à prendre » ; les ronds pleins et vides sont déjà pris par l'état
+// des fenêtres, les réutiliser ici serait ambigu.
+std::string update_glyph(bool utf8) { return utf8 ? "\u2191" : "^"; }
+
 std::string elide(const std::string& s, int cells, bool utf8) {
   return elide_to_cells(s, cells, utf8 ? "…" : "~");
 }
@@ -161,6 +166,19 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   items_.push_back({PanelHit::Clock, -1, 0, false,
                     Rect{clock_x, y, kClockCells, 1}, std::string()});
 
+  // La pastille de mise à jour, entre les tâches et l'horloge. Elle est
+  // posée ICI, dans layout(), pour que draw() et hit() lisent la MÊME
+  // liste : c'est la seule façon de garantir que ce qu'on clique est ce
+  // qu'on voit, et c'est ce qui la rend cliquable sans effort.
+  //
+  // Elle cède la place après le rappel et avant l'horloge : tout ce qui se
+  // dispose à gauche part de `clock_left`, jamais de `clock_x`.
+  const int clock_left = update_badge_ ? clock_x - 2 : clock_x;
+  if (update_badge_) {
+    items_.push_back({PanelHit::Update, -1, 0, false,
+                      Rect{clock_x - 2, y, 1, 1}, update_glyph(utf8_)});
+  }
+
   int x = rect_.x + 1;
   // Le bouton de menu porte la marque du projet. En UTF-8 il gagne son
   // glyphe ; sans UTF-8 le mot seul reste lisible, là où un point
@@ -202,8 +220,8 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   // de vérifier qu'elle ne manque pas.
   const int hint_w = hint_.empty() ? 0 : text_cells(hint_);
   const bool show_hint =
-      hint_w > 0 && fits(clock_x - 1 - hint_w - 1, kLabelCells) == total;
-  int end = show_hint ? clock_x - 1 - hint_w - 1 : clock_x - 1;
+      hint_w > 0 && fits(clock_left - 1 - hint_w - 1, kLabelCells) == total;
+  int end = show_hint ? clock_left - 1 - hint_w - 1 : clock_left - 1;
 
   int shown = fits(end, kLabelCells);
   if (shown < total) {
@@ -211,7 +229,7 @@ void Panel::layout_horizontal(const WindowManager& wm) {
     // un compteur, plutôt que de disparaître sans le dire. Le rappel a
     // forcément cédé la place à ce stade -- sa garde exige que TOUT tienne.
     const int over_w = 1 + static_cast<int>(std::to_string(total).size());
-    end = clock_x - 1 - over_w - 1;
+    end = clock_left - 1 - over_w - 1;
     shown = fits(end, kLabelCells);
   }
 
@@ -247,12 +265,12 @@ void Panel::layout_horizontal(const WindowManager& wm) {
     const std::string t = (utf8_ ? "»" : ">") + std::to_string(hidden);
     const int w = text_cells(t);
     items_.push_back({PanelHit::Overflow, hidden, 0, false,
-                      Rect{clock_x - 1 - w, y, w, 1}, t});
+                      Rect{clock_left - 1 - w, y, w, 1}, t});
   }
 
   if (show_hint) {
     items_.push_back({PanelHit::Hint, -1, 0, false,
-                      Rect{clock_x - 1 - hint_w, y, hint_w, 1}, hint_});
+                      Rect{clock_left - 1 - hint_w, y, hint_w, 1}, hint_});
   }
 }
 
@@ -267,6 +285,14 @@ void Panel::layout_vertical(const WindowManager& wm) {
   items_.push_back({PanelHit::Clock, -1, 0, false,
                     Rect{x, bottom - clock_h, w, clock_h}, std::string()});
 
+  // Sur un bord vertical la pastille prend sa propre ligne, juste au-dessus
+  // de l'horloge. Même discipline : posée dans layout(), donc cliquable.
+  const int badge_h = update_badge_ && rect_.h >= clock_h + 2 ? 1 : 0;
+  if (badge_h > 0) {
+    items_.push_back({PanelHit::Update, -1, 0, false,
+                      Rect{x, bottom - clock_h - 1, w, 1}, update_glyph(utf8_)});
+  }
+
   int y = rect_.y;
   const std::string menu = utf8_ ? "☰ ssh_os" : "ssh_os";
   items_.push_back(
@@ -276,7 +302,7 @@ void Panel::layout_vertical(const WindowManager& wm) {
   const int label_cells = w - 2;
   const std::vector<PanelEntry> entries = build_entries(wm);
   const int total = static_cast<int>(entries.size());
-  int room = std::max(0, bottom - clock_h - y);
+  int room = std::max(0, bottom - clock_h - badge_h - y);
 
   // Même règle qu'à l'horizontale, en lignes plutôt qu'en colonnes : le
   // rappel prend la ligne juste au-dessus de l'horloge tant qu'il ne coûte
@@ -306,7 +332,7 @@ void Panel::layout_vertical(const WindowManager& wm) {
 
   if (show_hint) {
     items_.push_back({PanelHit::Hint, -1, 0, false,
-                      Rect{x, bottom - clock_h - 1, w, 1}, hint_});
+                      Rect{x, bottom - clock_h - badge_h - 1, w, 1}, hint_});
   }
 }
 
@@ -335,7 +361,8 @@ void Panel::draw(View v, const Theme& th, const std::string& clock_text,
     // Le rappel porte l'accent sans être une tâche : il doit se remarquer
     // d'un bureau vide, où il est la seule chose à lire, sans se disputer la
     // lecture avec la fenêtre active quand la barre se remplit.
-    const bool highlit = it.focused || it.what == PanelHit::Hint;
+    const bool highlit =
+        it.focused || it.what == PanelHit::Hint || it.what == PanelHit::Update;
     v.text(it.r.x, it.r.y, it.text, highlit ? hot : base);
   }
 }

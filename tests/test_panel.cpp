@@ -672,3 +672,114 @@ TEST(panel_spends_every_free_cell_on_its_labels) {
   CHECK(row.find("Terminal (buil\xe2\x80\xa6") != std::string::npos);
   CHECK(row.find("10:05") != std::string::npos);
 }
+
+// LA PASTILLE SE CLIQUE. Une pastille qui annonce une mise à jour sans être
+// cliquable est le contre-exemple exact de « la souris d'abord » -- règle
+// que le dossier de reprise note avoir déjà dû être redite une fois. Le
+// panneau a le précédent : cliquer le rappel de la touche leader ouvre
+// l'aide.
+TEST(panel_hits_the_update_badge_where_it_draws_it) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_update_badge(true);
+  p.layout(wm, 80, 24, /*utf8=*/true);
+
+  const sshos::Rect r = p.rect(80, 24);
+  int hits = 0;
+  for (int x = 0; x < 80; ++x) {
+    if (p.hit(x, r.y).what == sshos::PanelHit::Update) ++hits;
+  }
+  CHECK_EQ(hits, 1);
+}
+
+TEST(panel_has_no_update_badge_when_it_is_off) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_update_badge(false);
+  p.layout(wm, 80, 24, /*utf8=*/true);
+
+  const sshos::Rect r = p.rect(80, 24);
+  for (int x = 0; x < 80; ++x) {
+    CHECK(p.hit(x, r.y).what != sshos::PanelHit::Update);
+  }
+}
+
+// CE QU'ON CLIQUE EST CE QU'ON VOIT. Le hit-test et le dessin lisent la
+// même liste ; ce cas le prouve plutôt que de le supposer.
+TEST(panel_draws_the_update_badge_at_the_hit_position) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_update_badge(true);
+  p.layout(wm, 80, 24, /*utf8=*/true);
+
+  sshos::Surface s(80, 24);
+  p.draw(s.root(), sshos::Theme::defaults(), "14:32");
+
+  const sshos::Rect r = p.rect(80, 24);
+  int badge_x = -1;
+  for (int x = 0; x < 80; ++x) {
+    if (p.hit(x, r.y).what == sshos::PanelHit::Update) badge_x = x;
+  }
+  REQUIRE(badge_x >= 0);
+  CHECK_EQ(s.at(badge_x, r.y).ch, U'↑');
+}
+
+// LE GLYPHE SUIT LE TERMINAL. Une flèche Unicode sur un terminal ASCII
+// ferait un caractère de remplacement à l'endroit le plus visible du bureau.
+TEST(panel_falls_back_to_ascii_for_the_update_badge) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_update_badge(true);
+  p.layout(wm, 80, 24, /*utf8=*/false);
+
+  sshos::Surface s(80, 24);
+  p.draw(s.root(), sshos::Theme::defaults(), "14:32");
+
+  const sshos::Rect r = p.rect(80, 24);
+  int badge_x = -1;
+  for (int x = 0; x < 80; ++x) {
+    if (p.hit(x, r.y).what == sshos::PanelHit::Update) badge_x = x;
+  }
+  REQUIRE(badge_x >= 0);
+  CHECK_EQ(s.at(badge_x, r.y).ch, U'^');
+}
+
+// LA PASTILLE NE RECOUVRE PAS L'HORLOGE. Elle prend sa place AVANT elle, et
+// tout ce qui se dispose a gauche doit en tenir compte.
+TEST(panel_keeps_the_clock_clear_of_the_update_badge) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_update_badge(true);
+  p.layout(wm, 80, 24, /*utf8=*/true);
+
+  const sshos::Rect r = p.rect(80, 24);
+  int badge_x = -1;
+  for (int x = 0; x < 80; ++x) {
+    if (p.hit(x, r.y).what == sshos::PanelHit::Update) badge_x = x;
+  }
+  REQUIRE(badge_x >= 0);
+  CHECK(p.hit(badge_x, r.y).what != sshos::PanelHit::Clock);
+  // L'horloge est bien a sa droite, et pas dessus.
+  bool clock_after = false;
+  for (int x = badge_x + 1; x < 80; ++x) {
+    if (p.hit(x, r.y).what == sshos::PanelHit::Clock) clock_after = true;
+  }
+  CHECK(clock_after);
+}
+
+// SUR UN BORD VERTICAL AUSSI. Le panneau se pose sur les quatre bords, et
+// une fonction qui ne marche que sur deux d'entre eux est un demi-travail.
+TEST(panel_hits_the_update_badge_on_a_vertical_edge) {
+  sshos::WindowManager wm;
+  sshos::Panel p;
+  p.set_edge(sshos::PanelEdge::Left);
+  p.set_update_badge(true);
+  p.layout(wm, 80, 24, /*utf8=*/true);
+
+  const sshos::Rect r = p.rect(80, 24);
+  int hits = 0;
+  for (int y = r.y; y < r.y + r.h; ++y) {
+    if (p.hit(r.x, y).what == sshos::PanelHit::Update) ++hits;
+  }
+  CHECK_EQ(hits, 1);
+}
