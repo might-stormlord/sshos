@@ -7,8 +7,10 @@
 > **Dernière mise à jour :** 17 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1146 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement
-> (re-passés le 17 août). Arbre de travail propre. **210 commits** sur `main`.
+> **1206 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **aussi dans un conteneur `ubuntu:26.04` nu**. Arbre de travail propre.
+> **228 commits** sur `main`, 112 fichiers dans `src/`.
+> **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
 > depuis** (§2 bis). 41 535 lignes sur 162 fichiers.
@@ -18,7 +20,9 @@
 > **Par où commencer, dans cet ordre :**
 > **§2** compiler et lancer · **§2 bis** ⚠️ *la publication sur GitHub, faite — et la
 > réécriture d'historique qu'elle a entraînée : à lire avant toute manipulation de
-> git* · **§3** où l'on en est · **§3 bis** la carte du code ·
+> git* · **§2 ter** ⚠️ *l'installation locale et la mise à jour depuis le bureau — à
+> lire avant de lancer un démon ou de toucher aux chemins* ·
+> **§3** où l'on en est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
 > jalon, les 108 de `src/` · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
@@ -243,6 +247,72 @@ git branch -f main m1-noyau && git push origin main
 
 - **Pas d'en-têtes de licence par fichier.** L'AGPL les recommande ; il y a 108 fichiers
   dans `src/`. Le `LICENSE` et le README suffisent juridiquement.
+
+---
+
+## 2 ter. L'installation locale, et la mise à jour depuis le bureau
+
+Livrée le 17 août 2026. Conception :
+[`docs/superpowers/specs/2026-08-17-installation-et-mise-a-jour-design.md`](superpowers/specs/2026-08-17-installation-et-mise-a-jour-design.md).
+Plan :
+[`docs/superpowers/plans/2026-08-17-installation-et-mise-a-jour.md`](superpowers/plans/2026-08-17-installation-et-mise-a-jour.md).
+
+### Le problème que ça règle
+
+Recompiler fermait le bureau : c'était le même binaire et le même socket. Il y a
+désormais **deux instances qui s'ignorent** — l'installée, stable, qui sert de poste de
+travail, et celle de développement, qu'on casse sans conséquence.
+
+```bash
+sh tools/install.sh                    # interactif, quatre questions
+sh tools/install.sh --yes --source git # sans rien demander
+~/.local/bin/sshos                     # le bureau installé
+```
+
+### Ce qu'il faut savoir avant d'y toucher
+
+| | |
+|---|---|
+| **L'isolation** | `~/.local/bin/sshos` est un **lanceur de quatre lignes**, pas le binaire. Il pose `SSHOS_BOOT_ID` (le nom du socket) et `SSHOS_EXE` (le chemin de relance). Le vrai binaire est dans `~/.local/libexec/`. |
+| **Les deux variables ne descendent PAS dans les shells** | Elles sont dans `kBanned` (`src/pty/env.cpp`). Sans ça, `./build-release/sshos --kill` tapé dans un terminal du bureau installé **tuait ce bureau**. Conséquence assumée : `sshos` tapé dans une fenêtre vise l'instance de développement. |
+| **Le démon se relance par CHEMIN** | `daemon_exe_path()` (`src/daemon/daemonize.hpp`) préfère `SSHOS_EXE` à `/proc/self/exe`, qui désigne une **inode** : après une mise à jour, celle du client est l'ancienne version. |
+| **`sshos --daemon` NE REND PAS LA MAIN** | `become_daemon()` ne forke pas ; il exécute la boucle dans le processus appelant. Le détachement vient de `spawn_detached`, côté client. Pour lancer un démon dans un script, passer par le chemin client (`pty.fork()` + exec du binaire **sans** drapeau), comme `tools/sonde.py`. |
+| **Le C++ n'écrit jamais l'état** | `~/.local/share/sshos/state`, clé=valeur, écrit par les scripts avec un `rename()` atomique et lu par `src/shell/update_state.cpp`. C'est ce qui garde `git`, `cmake` et le réseau hors du fil unique du démon. |
+| **Le lanceur d'enfant est un `fork()` SIMPLE** | Jamais `spawn_detached` : son double fork rend le pid de l'intermédiaire, et le vrai travail, réparenté à init, ne serait **jamais** récoltable. Voir `launch_updater` dans `src/daemon/session.cpp`. |
+
+### Les outils
+
+| Commande | Ce qu'elle fait |
+|---|---|
+| `sh tools/install.sh --help` | installe ; échelle git → binaire publié → archive → arbre local |
+| `sh tools/update.sh --check\|--apply\|--rollback` | posé à l'installation sous `~/.local/libexec/sshos-update` |
+| `python3 tools/verif_isolation.py <HOME>` | **le test qui juge tout** : le binaire de dev ne doit ni voir ni tuer le bureau installé |
+| `python3 tools/sonde_update.py` | la sonde bout-en-bout, sur un faux dépôt git — 26 vérifications |
+
+`SSHOS_PREFIX`, `SSHOS_STATE_DIR` et `SSHOS_REPO_URL` surchargent les chemins et l'URL :
+c'est ce qui permet à la sonde de ne pas écraser l'installation réelle. **`SSHOS_BOOT_ID`
+n'isole QUE le nom du socket**, jamais les chemins — l'erreur a été commise une fois.
+
+### La CI
+
+`.github/workflows/release.yml` publie `sshos`, `sshos_tests`, `golden.tar.gz` et
+`SHA256SUMS` à chaque poussée sur `main`, **seulement si la suite est verte**. Conteneur
+épinglé `ubuntu:26.04` ; seule la compilation y tourne, `checkout` et `gh` restent sur le
+runner.
+
+> **Deux pièges de portabilité trouvés en la mettant en place**, et corrigés à la source :
+> une image nue n'a pas de `tzdata`, donc `localtime_r` retombait sur UTC ; et les
+> scénarios golden ne figeaient pas leur fuseau alors que leurs références contiennent
+> une heure rendue — elles n'étaient vraies que sur la machine qui les avait
+> enregistrées. Neuf échecs, zéro depuis.
+
+### Le modèle de menace, dit une fois
+
+La racine de confiance est **le compte GitHub**. `SHA256SUMS` vient de la même release que
+le binaire : il prouve l'intégrité **du transport**, pas l'authenticité. Et « on n'installe
+qu'après le vert » **exécute déjà la charge utile**. La propriété réelle est donc : *on
+n'installe pas du code cassé*. Pas de signature détachée — c'est une décision, notée comme
+telle dans la spec §5.0.
 
 ---
 
@@ -1011,8 +1081,11 @@ concluait que le balayage mentait. Le rapport était affirmatif, sourcé, et fau
 
 ## 10. Où l'on en est, et ce qui reste
 
-**Les sept jalons sont livrés.** Il n'y a **pas de plan en cours** : le travail se
-fait à la demande, un geste à la fois, en réaction à l'usage réel.
+**Les sept jalons sont livrés**, et depuis le 17 août 2026 **l'installation locale et
+la mise à jour depuis le bureau** le sont aussi — quatorze tâches, plan clos, §2 ter.
+
+Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
+en réaction à l'usage réel.
 
 ### Le jalon 7 — ce qu'il change, et la contrainte qui l'a décidé
 
