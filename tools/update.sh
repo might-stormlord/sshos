@@ -9,7 +9,11 @@
 # Conception : docs/superpowers/specs/2026-08-17-installation-et-mise-a-jour-design.md
 set -eu
 
-REPO_URL="https://github.com/might-stormlord/sshos.git"
+# L'URL du depot. Surchargeable pour la meme raison que boot_id_path dans
+# net.hpp : sans ca, la sonde bout-en-bout devrait parler au vrai GitHub et
+# compiler le vrai projet a chaque cas -- des minutes par verdict, et un
+# reseau dans la boucle d'un test.
+REPO_URL="${SSHOS_REPO_URL:-https://github.com/might-stormlord/sshos.git}"
 API="https://api.github.com/repos/might-stormlord/sshos"
 CODELOAD="https://codeload.github.com/might-stormlord/sshos"
 
