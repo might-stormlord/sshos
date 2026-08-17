@@ -57,6 +57,40 @@ std::string golden_dir() {
   return p + "golden/";
 }
 
+// Fige le fuseau horaire le temps d'un scénario, et rend celui d'origine.
+//
+// LES RÉFÉRENCES CONTIENNENT UNE HEURE RENDUE. GoldenPlatform fige déjà
+// l'instant, pour la raison écrite plus haut : « une référence de rendu qui
+// contient l'heure courante ne serait une référence de rien ». Le même
+// argument vaut pour la ZONE, et il avait été oublié -- les références ont
+// donc été enregistrées sur une machine à Toronto, et elles échouaient
+// partout ailleurs. Sur une image de conteneur nue, sans tzdata, elles
+// échouaient même en n'affichant que de l'UTC.
+class TzGuard {
+ public:
+  explicit TzGuard(const char* zone) {
+    const char* prev = std::getenv("TZ");
+    had_tz_ = prev != nullptr;
+    if (had_tz_) prev_value_ = prev;
+    ::setenv("TZ", zone, 1);
+    ::tzset();
+  }
+  ~TzGuard() {
+    if (had_tz_) {
+      ::setenv("TZ", prev_value_.c_str(), 1);
+    } else {
+      ::unsetenv("TZ");
+    }
+    ::tzset();
+  }
+  TzGuard(const TzGuard&) = delete;
+  TzGuard& operator=(const TzGuard&) = delete;
+
+ private:
+  bool had_tz_ = false;
+  std::string prev_value_;
+};
+
 // Pose une variable d'environnement et rend l'état d'origine à la sortie de
 // portée, qu'elle ait été définie ou absente. Il en existe déjà deux copies
 // dans la suite (test_net.cpp, test_tty.cpp) ; une troisième reste plus
@@ -191,6 +225,11 @@ void compare(const std::string& name, const std::string& suffix,
 void run_scenario(const std::string& name,
                   const std::function<void(Session&)>& script, const char* file,
                   int line) {
+  // La zone est figée comme l'instant l'est : les deux entrent dans l'image
+  // enregistrée, et laisser l'une des deux à l'ambiance rend la référence
+  // vraie sur une seule machine.
+  TzGuard tz("America/Toronto");
+
   GoldenPlatform plat;
   sshos::NullFdRegistrar fds;
   Session sess(plat, fds, kCols, kRows);

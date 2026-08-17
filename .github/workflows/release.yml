@@ -1,0 +1,77 @@
+name: release
+
+# À chaque poussée sur `main`. La publication n'a lieu que si la suite
+# complète est verte : c'est ce qui fait que l'échelon « binaire publié » de
+# l'installeur ne peut jamais servir du code cassé.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # LE CONTENEUR EST EPINGLE A ubuntu:26.04, et la compilation seule y
+      # tourne. Deux raisons de ne pas faire du job entier un job de
+      # conteneur : les actions JavaScript (checkout, gh) ont besoin du nœud
+      # fourni par le runner, et c'est la facon habituelle dont ces jobs
+      # cassent -- alors qu'ici on ne depend du conteneur que pour le
+      # compilateur et la glibc.
+      #
+      # Et l'epinglage, plutot que ubuntu-latest : la cible est le systeme de
+      # l'auteur, pas un plus petit denominateur commun. Une image ancienne
+      # signifierait un compilateur et des en-tetes anciens, donc des
+      # fonctionnalites interdites dans sa propre application.
+      - name: Compiler et passer la suite dans ubuntu:26.04
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src ubuntu:26.04 sh -c '
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            # tzdata : sans base de fuseaux, localtime_r retombe sur UTC et les
+            # tests qui rendent une heure echouent. Neuf cas sur une image nue,
+            # verifie dans le conteneur AVANT de pousser ce fichier.
+            # (Pas d apostrophe dans ce bloc : il est deja entre quotes simples.)
+            apt-get install -y -qq --no-install-recommends g++ cmake make ca-certificates tzdata
+            cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+            cmake --build build-release -j"$(nproc)"
+            # LE CRITERE EST ZERO ECHEC, jamais un compte de cas : le total
+            # perime a chaque commit qui ajoute un test.
+            ./build-release/sshos_tests
+          '
+
+      # Les references voyagent avec le binaire de tests. Sans elles, les cas
+      # golden echouent chez celui qui telecharge -- test_golden.cpp deduisait
+      # leur chemin de __FILE__, grave a la compilation -- et l'installeur
+      # raterait systematiquement son propre garde-fou.
+      - name: Empaqueter les references et les empreintes
+        run: |
+          set -eu
+          tar czf golden.tar.gz -C tests golden
+          cp build-release/sshos build-release/sshos_tests .
+          sha256sum sshos sshos_tests golden.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # Le commit exact est dans le nom de la release : c'est lui que
+      # l'installeur inscrit dans installed_commit, et sans lui la
+      # comparaison des vingt-quatre heures n'aurait aucun sens.
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="commit-${GITHUB_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag deja publiee, rien a faire"
+            exit 0
+          fi
+          gh release create "$tag" \
+            --title "$GITHUB_SHA" \
+            --notes "Publication automatique depuis main. Compile dans ubuntu:26.04, suite complete au vert." \
+            sshos sshos_tests golden.tar.gz SHA256SUMS
