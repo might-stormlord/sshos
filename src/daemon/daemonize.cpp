@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace sshos {
@@ -104,6 +105,13 @@ void become_daemon() {
   // silencieusement. L'ordre entre become_daemon() et le reste du
   // démarrage du démon appartient à la tâche 13. Ne pas ajouter de
   // dispositif de journalisation ici pour contourner le problème.
+}
+
+std::string daemon_exe_path() {
+  if (const char* p = std::getenv("SSHOS_EXE")) {
+    if (*p != '\0') return p;
+  }
+  return "/proc/self/exe";
 }
 
 }  // namespace sshos

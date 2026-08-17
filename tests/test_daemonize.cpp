@@ -6,6 +6,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <random>
 #include <sstream>
@@ -668,4 +669,56 @@ TEST(daemonize_clears_signal_dispositions_before_exec) {
 // dans un argv vide) et le passerait tel quel à execv.
 TEST(daemonize_spawn_detached_rejects_empty_argv) {
   CHECK_EQ(sshos::spawn_detached({}), -1);
+}
+
+namespace {
+
+// Pose une variable d'environnement et rend l'état d'origine à la sortie de
+// portée, qu'elle ait été définie ou absente.
+class EnvVarGuard {
+ public:
+  explicit EnvVarGuard(const char* name) : name_(name) {
+    if (const char* v = std::getenv(name)) {
+      had_value_ = true;
+      value_ = v;
+    }
+  }
+  ~EnvVarGuard() {
+    if (had_value_) {
+      ::setenv(name_, value_.c_str(), 1);
+    } else {
+      ::unsetenv(name_);
+    }
+  }
+  EnvVarGuard(const EnvVarGuard&) = delete;
+  EnvVarGuard& operator=(const EnvVarGuard&) = delete;
+
+ private:
+  const char* name_;
+  bool had_value_ = false;
+  std::string value_;
+};
+
+}  // namespace
+
+// LE CHEMIN L'EMPORTE SUR L'INODE. « /proc/self/exe » désigne l'inode en
+// cours d'exécution, pas un chemin : elle reste vivante même après que le
+// fichier a été remplacé ou délié. C'est exactement ce qu'il faut dans
+// l'arbre de développement, et exactement ce qu'il ne faut pas après une
+// mise à jour -- un client lancé AVANT celle-ci relancerait l'ancienne
+// version, en silence, et le contrôle de compatibilité du protocole ne se
+// déclencherait même pas puisque les deux binaires seraient les mêmes.
+TEST(daemon_exe_path_prefers_the_installed_path_over_the_running_inode) {
+  EnvVarGuard guard("SSHOS_EXE");
+
+  ::setenv("SSHOS_EXE", "/home/u/.local/libexec/sshos", 1);
+  CHECK_EQ(sshos::daemon_exe_path(), std::string("/home/u/.local/libexec/sshos"));
+
+  // Vide vaut absente. Un lanceur mal écrit ne doit pas rendre le démon
+  // inlançable : on retombe sur le comportement de l'arbre de dev.
+  ::setenv("SSHOS_EXE", "", 1);
+  CHECK_EQ(sshos::daemon_exe_path(), std::string("/proc/self/exe"));
+
+  ::unsetenv("SSHOS_EXE");
+  CHECK_EQ(sshos::daemon_exe_path(), std::string("/proc/self/exe"));
 }

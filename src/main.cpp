@@ -37,7 +37,9 @@ bool logind_kills_user_processes() {
 }
 
 int start_daemon_and_connect(const std::string& name) {
-  const pid_t mid = sshos::spawn_detached({"/proc/self/exe", "--daemon"});
+  // Par CHEMIN, pas par inode : après une mise à jour, l'inode de ce
+  // processus est l'ancienne version (voir daemon_exe_path).
+  const pid_t mid = sshos::spawn_detached({sshos::daemon_exe_path(), "--daemon"});
   if (mid < 0) {
     std::fprintf(stderr, "sshos: impossible de lancer le demon\n");
     return 1;

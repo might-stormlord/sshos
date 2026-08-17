@@ -61,4 +61,23 @@ pid_t spawn_detached(const std::vector<std::string>& argv);
 // À appeler en tête du mode --daemon, dans le processus déjà détaché.
 void become_daemon();
 
+// Le chemin du binaire à relancer pour obtenir un démon.
+//
+// `/proc/self/exe` désigne l'INODE en cours d'exécution, pas un chemin :
+// elle reste vivante même après que le fichier a été remplacé ou délié.
+// C'est exactement ce qu'il faut dans l'arbre de développement — on relance
+// le binaire qu'on vient de compiler, où qu'il soit — et exactement ce
+// qu'il ne faut pas après une mise à jour : un client lancé AVANT celle-ci
+// porte l'ancienne inode, et relancerait donc l'ancienne version en
+// silence. Le contrôle de compatibilité du protocole ne rattraperait même
+// pas l'erreur, puisque le démon relancé serait le jumeau du client.
+//
+// Le lanceur installé pose `SSHOS_EXE` ; quand elle est définie et non
+// vide, elle fait autorité. Vide vaut absente, pour qu'un lanceur mal écrit
+// ne rende pas le démon inlançable.
+//
+// Ici plutôt que dans main.cpp parce que CMakeLists.txt retire main.cpp de
+// `sshos_core` : tout ce qui y vit est hors de portée de la suite de tests.
+std::string daemon_exe_path();
+
 }  // namespace sshos
