@@ -8,7 +8,7 @@
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
 > **1146 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement
-> (re-passés le 17 août). Arbre de travail propre. **206 commits** sur `main`.
+> (re-passés le 17 août). Arbre de travail propre. **208 commits** sur `main`.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
 > depuis** (§2 bis). 41 535 lignes sur 162 fichiers.
@@ -141,7 +141,7 @@ par l'entrée « Fermer la session » du menu, qui pose une confirmation.
 
 Le projet est en ligne : **<https://github.com/might-stormlord/sshos>**, dépôt
 **public**, sous **GNU AGPL-3.0**. Une seule branche a été poussée, `main`, avec ses
-**206 commits** et 197 fichiers. Ce disque n'est plus l'unique copie.
+**208 commits** et 197 fichiers suivis. Ce disque n'est plus l'unique copie.
 
 > Le §2 bis d'avant décrivait une publication *arrêtée en cours*, bloquée sur
 > l'authentification et visant `gtix2/sshos` en privé. Rien de tout cela n'est resté
