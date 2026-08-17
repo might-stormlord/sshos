@@ -114,20 +114,36 @@ int main(int argc, char** argv) {
   }
 
   // Mode normal : attacher, en démarrant le démon s'il n'existe pas.
-  try {
-    sshos::Fd probe = sshos::connect_abstract(name);
-    probe.reset();
-  } catch (const std::exception&) {
-    if (logind_kills_user_processes()) {
-      std::fprintf(stderr,
-                   "sshos: attention, logind est configure avec "
-                   "KillUserProcesses=yes ;\n        vos fenetres ne "
-                   "survivront pas a la deconnexion.\n        Parade : "
-                   "loginctl enable-linger %d\n",
-                   static_cast<int>(::getuid()));
+  //
+  // DEUX TOURS AU PLUS. Un démon qui s'arrête pour se mettre à jour nous
+  // rend la main avec kClientRestartRequested : on repart alors sur le
+  // binaire NEUF, que `daemon_exe_path()` désigne par chemin et non par
+  // inode. Un seul tour de plus, jamais une boucle : si le redémarrage
+  // échoue, mieux vaut rendre la main au shell avec un message que tourner.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    try {
+      sshos::Fd probe = sshos::connect_abstract(name);
+      probe.reset();
+    } catch (const std::exception&) {
+      // L'avertissement logind n'a de sens qu'au premier lancement : le
+      // répéter après une mise à jour serait du bruit.
+      if (attempt == 0 && logind_kills_user_processes()) {
+        std::fprintf(stderr,
+                     "sshos: attention, logind est configure avec "
+                     "KillUserProcesses=yes ;\n        vos fenetres ne "
+                     "survivront pas a la deconnexion.\n        Parade : "
+                     "loginctl enable-linger %d\n",
+                     static_cast<int>(::getuid()));
+      }
+      if (start_daemon_and_connect(name) != 0) return 1;
     }
-    if (start_daemon_and_connect(name) != 0) return 1;
+
+    const int rc = sshos::run_client(name);
+    if (rc != sshos::kClientRestartRequested) return rc;
+
+    std::fprintf(stderr, "sshos: mise a jour installee, redemarrage...\n");
   }
 
-  return sshos::run_client(name);
+  std::fprintf(stderr, "sshos: le redemarrage n'a pas abouti\n");
+  return 1;
 }

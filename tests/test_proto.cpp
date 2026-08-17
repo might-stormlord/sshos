@@ -461,3 +461,26 @@ TEST(proto_decoder_unknown_tag_then_hello_is_delivered) {
   CHECK_EQ(got->term, std::string("xterm"));
   CHECK(!d.failed());
 }
+
+// LA RAISON DE MISE A JOUR EST UNE CONSTANTE, PAS UNE PHRASE. Les quatre
+// autres raisons sont des litteraux francais que le client se contente
+// d'imprimer ; faire dependre un COMPORTEMENT d'une comparaison de texte
+// libre casserait a la premiere reformulation, en silence. Ce cas fige la
+// valeur et verifie qu'elle traverse l'encodage intacte.
+TEST(proto_carries_a_stable_update_detach_reason) {
+  const std::string wire = sshos::encode(sshos::Msg{
+      sshos::Detached{sshos::kDetachReasonUpdate}});
+
+  sshos::Decoder d;
+  d.feed(wire);
+  const auto got = d.next();
+  REQUIRE(got.has_value());
+  const auto* det = std::get_if<sshos::Detached>(&*got);
+  REQUIRE(det != nullptr);
+  CHECK_EQ(det->reason, std::string(sshos::kDetachReasonUpdate));
+
+  // Et elle ne se confond avec aucune des raisons ordinaires du demon.
+  CHECK(std::string(sshos::kDetachReasonUpdate) != "le demon s'arrete");
+  CHECK(std::string(sshos::kDetachReasonUpdate) != "detache, la session continue");
+  CHECK(std::string(sshos::kDetachReasonUpdate) != "un autre client a pris la main");
+}

@@ -750,11 +750,23 @@ int run_daemon(std::string_view socket_name) {
     // ci-dessus et par ce timerfd réarmé ici. C'est redondant et volontaire
     // (décision prise en amont de cette tâche, non remise en cause ici) ;
     // voir le rapport de tâche pour la justification.
+    // LE REDÉMARRAGE POUR MISE À JOUR. L'ÉCOUTEUR SE FERME AVANT L'ANNONCE :
+    // une adresse abstraite est libérée à la fermeture du descripteur, pas à
+    // la sortie du processus. En annonçant d'abord, le client -- qui réagit
+    // en microsecondes -- se reconnecterait au démon mourant, son connect()
+    // réussirait, et il se ferait fermer au nez sur le message trompeur
+    // « le demon a ferme la connexion sans annoncer de detachement ».
+    if (session.wants_update_restart()) {
+      ::epoll_ctl(ep.get(), EPOLL_CTL_DEL, listener.get(), nullptr);
+      listener.reset();
+      drop_client(kDetachReasonUpdate);
+      running = false;
+    }
+
     // HORS DE TOUTE BRANCHE. `wants_quit()` n'était lu que dans la branche
-    // EPOLLIN du client : une sortie décidée ailleurs -- la fin d'une mise à
-    // jour, par exemple -- n'aurait pris effet qu'à la frappe suivante, que
-    // l'utilisateur n'a aucune raison de faire puisqu'il attend justement
-    // que le bureau reparte.
+    // EPOLLIN du client : une sortie décidée ailleurs n'aurait pris effet
+    // qu'à la frappe suivante, que l'utilisateur n'a aucune raison de faire
+    // puisqu'il attend justement que le bureau reparte.
     if (session.wants_quit()) running = false;
 
     const int next = clock.delay_ms(FrameClock::Clock::now());

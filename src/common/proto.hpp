@@ -28,6 +28,20 @@ struct Hello {
 struct Welcome {};
 struct Incompatible { std::string reason; };
 struct Detached { std::string reason; };
+
+// La raison d'un détachement pour mise à jour, et la SEULE qui porte un
+// comportement : le client la compare par ÉGALITÉ et rejoue son chemin de
+// démarrage au lieu de rendre la main au shell.
+//
+// Toutes les autres raisons sont purement informatives -- des phrases
+// françaises que le client se contente d'imprimer -- et les reformuler n'a
+// aucune conséquence. C'est précisément pourquoi celle-ci est une constante
+// partagée : faire dépendre un comportement d'un texte libre casserait à la
+// première reformulation, en silence.
+//
+// Aucun changement de format de trame : `Detached` porte déjà une chaîne,
+// donc kBuildId n'a pas à être incrémenté.
+inline constexpr const char* kDetachReasonUpdate = "mise a jour";
 struct Input { std::string bytes; };
 struct Resize { uint16_t cols = 0; uint16_t rows = 0; };
 struct FrameMsg { std::string ansi; };

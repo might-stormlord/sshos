@@ -4,22 +4,18 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include <cstdlib>
-
-#include "daemon/daemonize.hpp"
-
 #include <chrono>
-
-#include "wm/tile.hpp"
-
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <variant>
 
 #include "app/catalog.hpp"
+#include "daemon/daemonize.hpp"
 #include "daemon/host.hpp"
 #include "render/width.hpp"
 #include "wm/decor.hpp"
+#include "wm/tile.hpp"
 
 namespace sshos {
 namespace {
@@ -166,6 +162,8 @@ Session::Session(Platform& plat, FdRegistrar& fds, int, int)
 }
 
 int Session::update_delay_ms() const { return update_.delay_ms(); }
+
+bool Session::wants_update_restart() const { return update_.wants_restart(); }
 
 void Session::tick_update() {
   update_.tick();

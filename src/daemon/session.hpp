@@ -71,6 +71,10 @@ class Session : public ChildSink {
   int update_delay_ms() const;
   void tick_update();
 
+  // L'utilisateur a confirme le redemarrage. Le demon ferme son ecouteur,
+  // annonce la raison au client et sort ; le client se rattache tout seul.
+  bool wants_update_restart() const;
+
   // Ouvre une application du catalogue. Rend 0 si l'identifiant est inconnu
   // ou si le plafond de fenêtres est atteint.
   WindowId open_from_catalog(std::string_view id);

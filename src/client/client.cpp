@@ -279,6 +279,14 @@ int run_client(std::string_view socket_name) {
             break;
           }
         } else if (const auto* d = std::get_if<Detached>(&*m)) {
+          // La seule raison qui porte un comportement. Comparaison par
+          // ÉGALITÉ sur une constante partagée : le démon vient de poser un
+          // binaire neuf et s'arrête pour qu'on reparte dessus.
+          if (d->reason == kDetachReasonUpdate) {
+            rc = kClientRestartRequested;
+            stop = true;
+            break;
+          }
           std::fprintf(stderr, "\r\nsshos: detache (%s)\r\n", d->reason.c_str());
           stop = true;
           break;
