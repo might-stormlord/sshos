@@ -4,18 +4,21 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 15 août 2026, branche `m1-noyau`. Tout ce qui suit a été
-> mesuré sur le commit `e6d013d`.
-> **1146 tests au vert** en `Release` (19,6 s) comme sous ASan/UBSan (47,3 s),
-> 0 avertissement. Arbre de travail propre. **200 commits** depuis `main`.
-> 41 535 lignes sur 162 fichiers.
+> **Dernière mise à jour :** 17 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
+> <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
+> comment, et surtout ce que la publication a changé dans l'historique.
+> **1146 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement
+> (re-passés le 17 août). Arbre de travail propre. **206 commits** sur `main`.
+> ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
+> `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
+> depuis** (§2 bis). 41 535 lignes sur 162 fichiers.
 > **Les SEPT jalons sont livrés**, et le travail qui a suivi est demandé au fil de
 > l'usage par l'utilisateur. Le §3 donne la position exacte.
 >
 > **Par où commencer, dans cet ordre :**
-> **§2** compiler et lancer · **§2 bis** ⚠️ *la publication sur GitHub, arrêtée en
-> cours d'exécution — à lire avant toute manipulation de git* · **§3** où l'on en
-> est · **§3 bis** la carte du code ·
+> **§2** compiler et lancer · **§2 bis** ⚠️ *la publication sur GitHub, faite — et la
+> réécriture d'historique qu'elle a entraînée : à lire avant toute manipulation de
+> git* · **§3** où l'on en est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
 > jalon, les 108 de `src/` · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
@@ -49,6 +52,7 @@ tâches.
   Uniquement la bibliothèque standard et l'API POSIX/Linux.
 - **Cible :** glibc/Linux (`epoll`, `signalfd`, `timerfd`, sockets UNIX abstraits).
 - **Dépôt :** `/home/storm/dev/ssh_os_2.0`, branche de travail `m1-noyau` (base `main`).
+  **Distant :** <https://github.com/might-stormlord/sshos>, public, AGPL-3.0.
 
 > ⚠️ Il existe un ancien projet Rust dans `/home/storm/dev/ssh_os`. **On n'en reprend rien.**
 > Consigne explicite de l'utilisateur : « non vieux projet on ne reprend rien de ça ».
@@ -72,12 +76,12 @@ complet.
 
 ## 2. Compiler, lancer, tester
 
-> 🟠 **LE PROJET EST EN COURS DE PREMIÈRE PUBLICATION, ET ELLE N'EST PAS FINIE.**
-> Il a vécu ses 200 premiers commits **sur ce seul disque**, sans aucun dépôt
-> distant. **Tant que le premier `git push` n'a pas abouti, ce disque reste
-> l'unique copie** et un `rm -rf` détruit le projet. Le §2 bis dit exactement où
-> l'on en est et ce qu'il reste à faire — **le lire avant toute manipulation de
-> git**.
+> 🟢 **LE PROJET EST PUBLIÉ.** Il a vécu ses 205 premiers commits **sur ce seul
+> disque**, sans aucun dépôt distant ; ce n'est plus le cas depuis le 17 août 2026.
+> Mais la publication a **réécrit tout l'historique** (les empreintes de commit ont
+> toutes changé) et a laissé **23 branches locales sur l'ancien historique, qui ne
+> doivent jamais être poussées**. Le §2 bis explique — **le lire avant toute
+> manipulation de git**.
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
@@ -133,95 +137,102 @@ par l'entrée « Fermer la session » du menu, qui pose une confirmation.
 
 ---
 
-## 2 bis. La publication sur GitHub — arrêtée en cours, le 15 août 2026
+## 2 bis. La publication sur GitHub — faite le 17 août 2026
 
-Le projet part vers **`https://github.com/gtix2/sshos.git`**, en **dépôt privé**
-(choix de l'utilisateur). Le travail local est **terminé** ; il ne manque que
-l'authentification, qui ne peut venir que de l'utilisateur. **Rien n'a encore quitté
-la machine.**
+Le projet est en ligne : **<https://github.com/might-stormlord/sshos>**, dépôt
+**public**, sous **GNU AGPL-3.0**. Une seule branche a été poussée, `main`, avec ses
+**206 commits** et 197 fichiers. Ce disque n'est plus l'unique copie.
 
-### Ce qui est fait
+> Le §2 bis d'avant décrivait une publication *arrêtée en cours*, bloquée sur
+> l'authentification et visant `gtix2/sshos` en privé. Rien de tout cela n'est resté
+> vrai : le compte, la visibilité et la licence ont changé au moment de publier.
 
-- **`origin` est déclaré** vers cette URL (`git remote -v` le montre).
-- **`main` a été avancée sur `m1-noyau`** par fast-forward pur — `main` était un
-  ancêtre, rien n'a été réécrit pour cela. Les deux branches pointent sur le même
-  commit. C'est **`main` seule** qu'il faut pousser.
-- **Un audit de pré-publication a été passé** : aucun secret dans l'historique
-  (les 852 blobs de la base d'objets ouverts un par un), aucun blob de plus de
-  0,17 Mo, `.git` à ~1 Mo après `gc`.
-- **`docs/sessions/` est désormais exclu par `.gitignore`.** Il contient 930 Ko de
-  transcriptions de conversation brutes, et il n'était protégé que par
-  `.git/info/exclude` — un fichier **local, ni poussé ni cloné**, dont le motif ne
-  couvrait même que `_autosnapshot-*`. C'était le vrai risque de ce dépôt.
-- **`tools/__pycache__/sonde.cpython-314.pyc` a été purgé de l'historique.** Il était
-  suivi et gravait `/home/storm/dev/ssh_os_2.0` dans un blob binaire.
-  ⚠️ **Conséquence à connaître : les quatre derniers commits du 15 août ont été
-  réécrits** (`filter-branch` sur `398b6b6^..HEAD`). Leurs empreintes ont changé ; le
-  diff a été vérifié avant destruction de la sauvegarde et ne portait que ce fichier,
-  messages, auteurs et dates intacts. Les empreintes citées dans ce dossier ont été
-  mises à jour en conséquence.
-- **Un `README.md` a été écrit** : sans lui, le premier document ouvert par un
-  visiteur aurait été ce dossier-ci, un carnet de reprise interne de 54 Ko.
+### Ce que la publication a changé dans l'historique — le point important
 
-### Ce qui bloque, et c'est la seule chose
+**Toutes les empreintes de commit ont changé.** L'adresse `user@…` de l'auteur a été
+remplacée dans les **203 commits** qui la portaient (en auteur *et* en committer) par
+l'adresse de non-réponse GitHub `317721292+might-stormlord@users.noreply.github.com`,
+qui rattache les commits au compte sans exposer de courriel. Le nom d'auteur, lui, reste
+`user`.
 
-**Aucune authentification GitHub ne fonctionne depuis cette machine.**
+- Réécriture par `git filter-branch --env-filter` sur `main` et `m1-noyau`, 205 commits
+  en 17 s. **Vérifié après coup :** 205 commits toujours présents, dates d'auteur
+  intactes, et `git diff <ancien sommet> main` **ne rend rien** — le contenu est
+  strictement identique, seules les métadonnées ont bougé.
+- L'adresse était aussi dans **un blob** (`docs/REPRISE.md`, uniquement dans le commit
+  de tête). Un seul sur les 835 blobs de l'historique, ouverts un par un pour le
+  vérifier. Il a été purgé par un `commit --amend` du sommet.
+- Les 2 commits d'auteur `Claude <noreply@anthropic.com>` n'ont pas été touchés, et les
+  112 lignes `Co-Authored-By` non plus.
+- **Sauvegarde avant réécriture :** `/root/sshos-backup-avant-reecriture.bundle`
+  (1014 Ko, tous les refs). ⚠️ Elle contient l'**ancien** historique, avec l'adresse.
+  Elle est hors du dépôt et ne doit pas y entrer.
 
+### Le piège à connaître avant de toucher aux branches
+
+`git branch` en montre 25. **23 d'entre elles portent encore l'ancien historique**, donc
+l'ancienne adresse : les 14 `worktree-agent-*` et 9 autres (`net-fixes-round2`,
+`task13-round1-fix`, `feat/client-tty-guard-loop`…). Seules `main` et `m1-noyau` ont été
+réécrites.
+
+> **Ne jamais pousser avec `--all` ni `--mirror`.** Ce n'était déjà pas souhaitable
+> (aucune de ces branches n'a le moindre commit unique — `git branch --no-merged
+> m1-noyau` ne rend rien) ; c'est désormais **une fuite de courriel**. Pousser
+> explicitement : `git push origin main`.
+
+Pour faire le ménage, chacune est verrouillée par un worktree : `git worktree remove
+<chemin>` **avant** `git branch -D`. Attention, `.claude/worktrees/agent-aba4275accf38f581`
+porte 51 lignes non commitées dans `src/daemon/daemon.cpp` — un état très ancien et
+largement dépassé par `m1-noyau`, mais à regarder avant tout `--force`.
+
+### Comment on pousse, maintenant
+
+`gh` est installé (2.46.0) et authentifié en `https` sur le compte `might-stormlord` ;
+le *credential helper* est en place, `git push` ne demande plus rien.
+
+```bash
+git push origin main
 ```
-$ ssh -T git@github.com          → Permission denied (publickey)
-$ git push -u origin main        → could not read Username for 'https://github.com'
+
+**`main` et `m1-noyau` sont deux branches distinctes qu'il faut réaligner à la main.**
+Le travail se fait sur `m1-noyau` ; `main` est ce qui part sur GitHub. Après une série
+de commits :
+
+```bash
+git branch -f main m1-noyau && git push origin main
 ```
 
-Pas de `credential.helper`, et **`gh` n'est pas installé**. En revanche `apt-get` est
-disponible et le réseau vers GitHub fonctionne (`api.github.com` répond 200).
+### Ce qui a été vérifié avant que ça parte
 
-La clé publique de cette machine, si l'on prend la voie SSH :
+- **Aucun secret dans l'historique** : les 835 blobs de la base d'objets ouverts un par
+  un ; aucun blob de plus de 0,17 Mo.
+- **`docs/sessions/` est exclu par `.gitignore`** et absent du dépôt distant — vérifié
+  sur l'arbre poussé. Il contient 930 Ko de transcriptions de conversation brutes, et il
+  n'était protégé jusqu'au 15 août que par `.git/info/exclude`, un fichier **local, ni
+  poussé ni cloné**, dont le motif ne couvrait même que `_autosnapshot-*`. C'était le
+  vrai risque de ce dépôt.
+- **`tools/__pycache__/sonde.cpython-314.pyc` avait été purgé de l'historique** le
+  15 août ; il gravait `/home/storm/dev/ssh_os_2.0` dans un blob binaire. Ne pas
+  relancer cette purge : elle est faite, et le fichier ne peut plus revenir
+  (`__pycache__/` et `*.pyc` sont dans `.gitignore`).
+- **Côté GitHub, après le push :** dépôt `PUBLIC`, branche par défaut `main`, **une
+  seule branche distante**, licence détectée `AGPL-3.0`, et l'unique adresse de courriel
+  visible dans les 100 derniers commits est l'adresse de non-réponse.
+- **1146 tests au vert** en `Release`, relancés juste avant le commit de publication.
 
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO6ifLcE4BBEhn9p6yendPfLheh66GNtVAk1fVWpwqrM root@dockernx
-```
+### Ce qui reste ouvert
 
-**On ne sait pas si le dépôt distant existe déjà :** `https://api.github.com/repos/gtix2/sshos`
-répond **404** en anonyme, ce que GitHub renvoie aussi bien pour « privé » que pour
-« inexistant ». La question se tranchera en une commande une fois authentifié.
-
-### Les trois voies, à trancher avec l'utilisateur
-
-| Voie | Ce qu'elle demande |
-|---|---|
-| **`gh auth login`** *(la plus simple)* | `apt-get install gh` — **une installation système, donc l'accord explicite de l'utilisateur** (§4). Ensuite un code à huit caractères à coller dans un navigateur. Aucune clé ni jeton à manipuler, et `gh` sait dire si le dépôt existe et le créer sinon. |
-| **Clé SSH** | L'utilisateur colle la clé ci-dessus, soit sur le compte (`github.com/settings/keys` → *New SSH key*), soit sur le dépôt (`Settings` → *Security* → **Deploy keys** → *Add deploy key*, en cochant **« Allow write access »**). ⚠️ Il a cherché « SSH key » sur la page du dépôt sans la trouver : **elle s'y appelle « Deploy keys »**. Le dépôt doit déjà exister. Puis basculer `origin` en `git@github.com:gtix2/sshos.git`. |
-| **Jeton personnel (HTTPS)** | Portée `repo`. **Ne jamais le faire coller dans la conversation** — il resterait dans l'historique. L'utilisateur tape lui-même `git push` et saisit ses identifiants. |
-
-### Les pièges à ne pas commettre
-
-1. **Ne jamais pousser avec `--all` ni `--mirror`.** Le dépôt porte **25 branches
-   locales**, dont 14 nommées `worktree-agent-<hash>`. Vérifié : **aucune n'a le
-   moindre commit unique** (`git branch --no-merged m1-noyau` ne rend rien). Elles
-   n'apporteraient rien et transformeraient la page du dépôt en catalogue de
-   plomberie. Pousser explicitement `git push -u origin main`.
-2. **Si le dépôt distant est à créer, le créer VIDE** — sans « Add a README », sans
-   « Add .gitignore ». Un dépôt initialisé par GitHub a un commit sans ancêtre commun
-   avec le nôtre, et le push est alors refusé.
-3. **Ne pas relancer la purge du `.pyc`** : elle est faite, et le fichier ne peut plus
-   revenir (`__pycache__/` et `*.pyc` sont dans `.gitignore`).
-
-### Deux choses écartées, et c'est un choix de l'utilisateur
-
-- **Pas de `LICENSE`.** Sans elle le code reste « tous droits réservés » par défaut.
-  Sans conséquence sur un dépôt privé ; à reprendre le jour où il s'ouvrirait.
-- **Les 24 branches locales n'ont pas été supprimées.** Elles ne partiront pas
-  puisqu'on ne pousse que `main`. Pour faire le ménage plus tard : chacune est
-  verrouillée par un worktree, donc `git worktree remove <chemin>` **avant**
-  `git branch -D`. Attention, `.claude/worktrees/agent-aba4275accf38f581` porte 51
-  lignes non commitées dans `src/daemon/daemon.cpp` — un état très ancien et
-  largement dépassé par `m1-noyau`, mais à regarder avant tout `--force`.
-
-> **Un point non technique, et irréversible :** l'adresse `317721292+might-stormlord@users.noreply.github.com` figure
-> dans les métadonnées des 200 commits. Sur un dépôt privé c'est sans conséquence,
-> mais elle ne pourra plus en être retirée sans réécrire toute l'histoire le jour où
-> le dépôt s'ouvrirait. De même, **112 commits portent une ligne `Co-Authored-By`**
-> vers Claude. Rien de gênant, mais autant le savoir avant que ce soit public.
+- **Le nom d'auteur `user` est resté** dans les 206 commits — seule l'adresse a été
+  retirée. Le changer demanderait une nouvelle réécriture ; elle est sans risque tant
+  que `main` n'a qu'un seul contributeur, mais elle imposerait un `push --force`.
+- **Deux maquettes de documentation contiennent encore un prénom** dans une invite de
+  shell fictive : `docs/superpowers/specs/2026-08-10-ssh-os-design.md` (`user@box:~$`)
+  et `tests/test_terminal.cpp` (`\033]2;user@machine:…`, un titre OSC de test). Ce ne
+  sont pas des courriels et ils n'apprennent rien de plus que le nom d'auteur des
+  commits. Laissés en l'état ; les changer dans tout l'historique coûterait une
+  réécriture de blobs sur de nombreux commits.
+- **Pas d'en-têtes de licence par fichier.** L'AGPL les recommande ; il y a 108 fichiers
+  dans `src/`. Le `LICENSE` et le README suffisent juridiquement.
 
 ---
 
