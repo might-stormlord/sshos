@@ -8,7 +8,7 @@
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
 > **1146 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement
-> (re-passés le 17 août). Arbre de travail propre. **208 commits** sur `main`.
+> (re-passés le 17 août). Arbre de travail propre. **210 commits** sur `main`.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
 > depuis** (§2 bis). 41 535 lignes sur 162 fichiers.
@@ -141,7 +141,7 @@ par l'entrée « Fermer la session » du menu, qui pose une confirmation.
 
 Le projet est en ligne : **<https://github.com/might-stormlord/sshos>**, dépôt
 **public**, sous **GNU AGPL-3.0**. Une seule branche a été poussée, `main`, avec ses
-**208 commits** et 197 fichiers suivis. Ce disque n'est plus l'unique copie.
+**210 commits** et 197 fichiers suivis. Ce disque n'est plus l'unique copie.
 
 > Le §2 bis d'avant décrivait une publication *arrêtée en cours*, bloquée sur
 > l'authentification et visant `gtix2/sshos` en privé. Rien de tout cela n'est resté
@@ -151,34 +151,53 @@ Le projet est en ligne : **<https://github.com/might-stormlord/sshos>**, dépôt
 
 **Toutes les empreintes de commit ont changé, et deux fois plutôt qu'une.** L'identité
 d'auteur a été entièrement remplacée : le courriel personnel puis, dans une seconde
-passe, le nom civil. Les 206 commits concernés portent désormais
+passe, le nom civil. Les commits concernés portent désormais tous
 `might-stormlord <317721292+might-stormlord@users.noreply.github.com>`, une identité qui
 rattache les commits au compte GitHub sans exposer ni courriel ni état civil.
 
-- Réécriture par `git filter-branch --env-filter` sur `main` et `m1-noyau`, 205 commits
-  en 17 s. **Vérifié après coup :** 205 commits toujours présents, dates d'auteur
-  intactes, et `git diff <ancien sommet> main` **ne rend rien** — le contenu est
-  strictement identique, seules les métadonnées ont bougé.
+**Première passe — le courriel.** `git filter-branch --env-filter` sur `main` et
+`m1-noyau`, 205 commits en 17 s.
+
 - L'adresse était aussi dans **un blob** (`docs/REPRISE.md`, uniquement dans le commit
   de tête). Un seul sur les 835 blobs de l'historique, ouverts un par un pour le
   vérifier. Il a été purgé par un `commit --amend` du sommet.
-- Les 2 commits d'auteur `Claude <noreply@anthropic.com>` n'ont pas été touchés, et les
-  112 lignes `Co-Authored-By` non plus.
-- **Sauvegarde avant réécriture :** `/root/sshos-backup-avant-reecriture.bundle`
-  (1014 Ko, tous les refs). ⚠️ Elle contient l'**ancien** historique, avec l'adresse.
-  Elle est hors du dépôt et ne doit pas y entrer.
+- **Vérifié après coup :** 205 commits toujours présents, dates d'auteur intactes, et
+  `git diff <ancien sommet> main` **ne rend rien** — contenu strictement identique,
+  seules les métadonnées avaient bougé.
+
+**Seconde passe — le nom.** Même outil, avec en plus un `--tree-filter` qui balaie le
+prénom du contenu : il subsistait dans **25 blobs**, tous des exemples (versions
+successives du README, du titre OSC de `tests/test_terminal.cpp`, de l'invite fictive de
+la spec de conception, et d'un commentaire de `src/apps/files/files.cpp` qui illustrait
+l'élision par un chemin personnel). Le sommet avait été nettoyé à la main juste avant,
+donc le `sed` ne l'a pas touché.
+
+- **Vérifié après coup :** les 842 blobs atteignables depuis `main` ouverts un par un,
+  **zéro** contient encore le prénom ou l'ancienne adresse ; côté GitHub, les seuls noms
+  d'auteur sont `might-stormlord` et `Claude`. L'arbre du sommet publié est **strictement
+  identique** à celui sur lequel les 1146 tests étaient passés au vert.
+- ⚠️ Cette passe **écrase l'historique publié** : elle s'est terminée par un
+  `git push --force-with-lease origin main`.
+
+Les 2 commits d'auteur `Claude <noreply@anthropic.com>` n'ont été touchés par aucune des
+deux passes, et les 112 lignes `Co-Authored-By` non plus.
+
+**Sauvegardes, une par passe** — hors du dépôt, et elles ne doivent pas y entrer :
+`/root/sshos-backup-avant-reecriture.bundle` (1014 Ko) et
+`/root/sshos-backup-avant-retrait-du-nom.bundle` (1,1 Mo), tous les refs à chaque fois.
+⚠️ **Elles contiennent l'ancienne identité**, courriel compris.
 
 ### Le piège à connaître avant de toucher aux branches
 
 `git branch` en montre 25. **23 d'entre elles portent encore l'ancien historique**, donc
-l'ancienne adresse : les 14 `worktree-agent-*` et 9 autres (`net-fixes-round2`,
-`task13-round1-fix`, `feat/client-tty-guard-loop`…). Seules `main` et `m1-noyau` ont été
-réécrites.
+l'ancienne identité **entière — courriel et nom** : les 14 `worktree-agent-*` et 9 autres
+(`net-fixes-round2`, `task13-round1-fix`, `feat/client-tty-guard-loop`…). Seules `main`
+et `m1-noyau` ont été réécrites, et elles seules.
 
 > **Ne jamais pousser avec `--all` ni `--mirror`.** Ce n'était déjà pas souhaitable
 > (aucune de ces branches n'a le moindre commit unique — `git branch --no-merged
-> m1-noyau` ne rend rien) ; c'est désormais **une fuite de courriel**. Pousser
-> explicitement : `git push origin main`.
+> m1-noyau` ne rend rien) ; c'est désormais **une fuite d'identité**, qui annulerait
+> d'un coup les deux réécritures. Pousser explicitement : `git push origin main`.
 
 Pour faire le ménage, chacune est verrouillée par un worktree : `git worktree remove
 <chemin>` **avant** `git branch -D`. Attention, `.claude/worktrees/agent-aba4275accf38f581`
