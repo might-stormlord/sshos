@@ -50,6 +50,10 @@ void Menu::open() {
   // destructive qu'on choisissait par defaut.
   all_.push_back({"session:detach", "Quitter"});
   all_.push_back({"session:quit", "Fermer la session"});
+  // Les entrées de la session viennent APRÈS les nôtres : ce sont des
+  // ajouts au lanceur, pas des applications, et elles ne doivent pas
+  // pousser « Terminal » vers le bas de la liste.
+  for (const MenuItem& e : extra_) all_.push_back(e);
   refilter();
 }
 
@@ -152,6 +156,13 @@ void Menu::draw(View v, const Theme& th, Border b) const {
   sel.bg = th.accent;
   sel.fg = th.modal_bg;
 
+  // Une entrée inerte se voit. `border_blur` est déjà la couleur de
+  // l'inactif dans cette palette : pas besoin d'ajouter un champ au thème,
+  // ce qui obligerait chaque thème à se prononcer sur un cas qu'il ne
+  // connaît pas.
+  Style dim = st;
+  dim.fg = th.border_blur;
+
   v.text(inner_x, rect_.y + 1, "> " + query_, st);
   for (int i = 0; i < inner_w; ++i) {
     v.put(inner_x + i, rect_.y + 2, U'-', st);
@@ -165,8 +176,12 @@ void Menu::draw(View v, const Theme& th, Border b) const {
   for (int i = 0; i < rows_for_items; ++i) {
     const int idx = first + i;
     if (idx >= static_cast<int>(shown_.size())) break;
-    v.text(inner_x, rect_.y + 3 + i, shown_[static_cast<size_t>(idx)].label,
-           idx == sel_ ? sel : st);
+    const MenuItem& item = shown_[static_cast<size_t>(idx)];
+    // La sélection l'emporte sur le grisé : une entrée inerte reste
+    // sélectionnable, sinon la flèche du bas sauterait par-dessus et
+    // l'utilisateur ne pourrait pas lire ce qu'elle dit.
+    v.text(inner_x, rect_.y + 3 + i, item.label,
+           idx == sel_ ? sel : (item.enabled ? st : dim));
   }
 }
 

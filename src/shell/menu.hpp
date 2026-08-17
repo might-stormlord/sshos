@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "render/surface.hpp"
@@ -11,6 +12,14 @@ namespace sshos {
 struct MenuItem {
   std::string id;
   std::string label;
+  // Une entrée peut être VISIBLE ET SANS EFFET : « Mise a jour en cours »
+  // dit ce qui se passe, mais ne relance rien. Masquer l'entrée à la place
+  // ferait croire que la fonction a disparu.
+  //
+  // Le champ existe aussi pour que l'inertie ait un observable : sans lui,
+  // un libellé « en cours » n'était qu'un libellé, et appuyer sur Entrée
+  // déclenchait quand même l'action.
+  bool enabled = true;
 };
 
 enum class MenuHit { None, Body, Search, Item };
@@ -25,6 +34,16 @@ struct MenuHitResult {
 // entrées qui n'ouvrent aucune fenêtre -- déplacer le panneau, quitter.
 class Menu {
  public:
+  // Des entrées que le menu ne sait pas fabriquer lui-même, posées par la
+  // session AVANT chaque ouverture. Le menu n'en connaît ni l'origine ni le
+  // sens : il les rend comme les siennes, et la session interprète
+  // l'identifiant -- exactement la discipline qui lui évite de dépendre de
+  // apps/ ou de l'état du démon.
+  //
+  // Reposer la liste la REMPLACE : le libellé change à chaque changement
+  // d'état, et le menu est rouvert des dizaines de fois.
+  void set_extra_items(std::vector<MenuItem> items) { extra_ = std::move(items); }
+
   void open();
 
   // Ancré au CURSEUR plutôt qu'au bouton du panneau : c'est ce qu'attend un
@@ -58,6 +77,7 @@ class Menu {
   int anchor_x_ = 0;
   int anchor_y_ = 0;
   std::string query_;
+  std::vector<MenuItem> extra_;
   std::vector<MenuItem> all_;
   std::vector<MenuItem> shown_;
   int sel_ = 0;

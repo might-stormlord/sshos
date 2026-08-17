@@ -259,3 +259,155 @@ TEST(menu_opened_at_the_cursor_carries_the_same_entries) {
     CHECK_EQ(a.visible()[i].id, b.visible()[i].id);
   }
 }
+
+// LE MENU NE SAIT RIEN DU SERVICE DE MISE À JOUR. Il reçoit des entrées
+// supplémentaires et les rend comme les siennes : c'est ce qui évite que
+// shell/ ait à connaître l'état du démon. La session pose la liste avant
+// chaque ouverture ; le menu ne fait que l'afficher et rendre l'identifiant.
+TEST(menu_appends_the_extra_items_after_its_own) {
+  Menu m;
+  m.set_extra_items({{"update:check", "Verifier les mises a jour", true}});
+  m.open();
+
+  bool found = false;
+  bool after_the_last_fixed_entry = false;
+  for (const MenuItem& it : m.visible()) {
+    if (it.id == "session:quit") after_the_last_fixed_entry = true;
+    if (it.id == "update:check") {
+      found = true;
+      CHECK_EQ(it.label, std::string("Verifier les mises a jour"));
+      CHECK(it.enabled);
+      CHECK(after_the_last_fixed_entry);
+    }
+  }
+  CHECK(found);
+}
+
+// UNE ENTRÉE INERTE RESTE VISIBLE : elle dit ce qui se passe. C'est la
+// session qui refuse d'agir, pas le menu qui cache -- masquer l'entrée
+// pendant une mise à jour ferait croire que la fonction a disparu.
+TEST(menu_keeps_a_disabled_item_visible) {
+  Menu m;
+  m.set_extra_items({{"update:apply", "Mise a jour en cours...", false}});
+  m.open();
+
+  bool found = false;
+  for (const MenuItem& it : m.visible()) {
+    if (it.id == "update:apply") {
+      found = true;
+      CHECK(!it.enabled);
+    }
+  }
+  CHECK(found);
+}
+
+// LES ENTRÉES FIXES RESTENT ACTIVES. Le champ a une valeur par défaut, et
+// une aggrégation à deux membres doit continuer de produire une entrée
+// utilisable -- sans quoi tout le menu deviendrait inerte d'un coup.
+TEST(menu_leaves_its_own_entries_enabled) {
+  Menu m;
+  m.open();
+  for (const MenuItem& it : m.visible()) {
+    CHECK(it.enabled);
+  }
+}
+
+// LE CLIC DROIT PASSE PAR LE MÊME CHEMIN. open_at() appelle open(), donc une
+// entrée ajoutée apparaît aux trois points d'ouverture sans que personne ait
+// à y penser -- l'invariant que menu.cpp décrit déjà pour ses propres
+// entrées.
+TEST(menu_shows_the_extra_items_when_opened_at_the_cursor) {
+  Menu m;
+  m.set_extra_items({{"update:check", "Verifier les mises a jour", true}});
+  m.open_at(4, 4);
+
+  bool found = false;
+  for (const MenuItem& it : m.visible()) {
+    if (it.id == "update:check") found = true;
+  }
+  CHECK(found);
+}
+
+// REPOSER LES ENTRÉES LES REMPLACE, ELLE NE LES EMPILE PAS. Le libellé
+// change à chaque changement d'état, et le menu est rouvert des dizaines de
+// fois : deux ouvertures ne doivent pas donner deux lignes.
+TEST(menu_replaces_the_extra_items_instead_of_accumulating_them) {
+  Menu m;
+  m.set_extra_items({{"update:check", "Verifier les mises a jour", true}});
+  m.open();
+  m.close();
+  m.set_extra_items({{"update:apply", "Mettre a jour", true}});
+  m.open();
+
+  int count = 0;
+  for (const MenuItem& it : m.visible()) {
+    if (it.id.rfind("update:", 0) == 0) {
+      ++count;
+      CHECK_EQ(it.id, std::string("update:apply"));
+    }
+  }
+  CHECK_EQ(count, 1);
+}
+
+// UNE LISTE VIDE N'AJOUTE RIEN. C'est l'etat d'un bureau ou la mise a jour
+// n'a pas encore ete cablee.
+TEST(menu_without_extra_items_is_unchanged) {
+  Menu a;
+  Menu b;
+  b.set_extra_items({});
+  a.open();
+  b.open();
+  REQUIRE_EQ(a.visible().size(), b.visible().size());
+}
+
+// UNE ENTRÉE INERTE SE VOIT. Peinte à l'identique, elle ferait croire qu'un
+// clic va faire quelque chose. Elle reste sélectionnable -- la flèche du bas
+// ne saute pas par-dessus -- mais sa couleur dit qu'elle attend.
+TEST(menu_draws_a_disabled_item_dimmed) {
+  Menu m;
+  m.set_extra_items({{"update:apply", "Mise a jour en cours...", false}});
+  m.open();
+
+  Surface s(60, 24);
+  m.layout(60, 24);
+  const Theme th = Theme::defaults();
+  m.draw(s.root(), th, sshos::Border::Ascii);
+
+  // On cherche la ligne de l'entrée inerte, et on lit la couleur de sa
+  // première lettre.
+  const Rect r = m.rect(60, 24);
+  bool checked = false;
+  for (int y = r.y; y < r.y + r.h; ++y) {
+    if (s.text_row(y).find("Mise a jour en cours") == std::string::npos) continue;
+    const int x = static_cast<int>(s.text_row(y).find("Mise a jour en cours"));
+    CHECK(s.at(x, y).fg == th.border_blur);
+    CHECK(!(s.at(x, y).fg == th.modal_fg));
+    checked = true;
+  }
+  CHECK(checked);
+}
+
+TEST(menu_draws_an_enabled_item_normally) {
+  Menu m;
+  m.set_extra_items({{"update:check", "Verifier les mises a jour", true}});
+  m.open();
+  // On deplace la selection pour que l'entree ne soit pas celle qui a la
+  // main : la selection a sa propre couleur et masquerait le cas.
+  m.move(1);
+
+  Surface s(60, 24);
+  m.layout(60, 24);
+  const Theme th = Theme::defaults();
+  m.draw(s.root(), th, sshos::Border::Ascii);
+
+  const Rect r = m.rect(60, 24);
+  bool checked = false;
+  for (int y = r.y; y < r.y + r.h; ++y) {
+    const std::string row = s.text_row(y);
+    const size_t at = row.find("Verifier les mises a jour");
+    if (at == std::string::npos) continue;
+    CHECK(s.at(static_cast<int>(at), y).fg == th.modal_fg);
+    checked = true;
+  }
+  CHECK(checked);
+}
