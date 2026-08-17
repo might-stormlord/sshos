@@ -312,6 +312,23 @@ int run_daemon(std::string_view socket_name) {
     if (help_delay >= 0) {
       timeout = (timeout < 0) ? help_delay : std::min(timeout, help_delay);
     }
+    // L'ÉCHÉANCE DE LA VÉRIFICATION QUOTIDIENNE. Pas de garde `if (client)`,
+    // contrairement au plancher d'une seconde et au rafraîchissement
+    // périodique juste en dessous : le bureau DÉTACHÉ est l'état normal de
+    // ce projet -- c'est sa raison d'être -- et une échéance qui ne battrait
+    // que client attaché ne battrait presque jamais.
+    //
+    // Rien ne s'affiche sans client de toute façon : le service ne fait
+    // qu'écrire un fichier d'état, et la pastille attendra le rattachement.
+    // `help_delay_ms()` ci-dessus est le précédent exact.
+    const int update_delay = session.update_delay_ms();
+    if (update_delay >= 0) {
+      if (update_delay == 0) {
+        session.tick_update();
+      } else {
+        timeout = (timeout < 0) ? update_delay : std::min(timeout, update_delay);
+      }
+    }
     // Le rafraichissement periodique d'une application VISIBLE -- le
     // moniteur systeme. Sans ce repli, ses chiffres ne bougeraient qu'a la
     // frappe suivante : le demon ne dessine que sur une trame sale, et
@@ -538,7 +555,6 @@ int run_daemon(std::string_view socket_name) {
             continue;
           }
 
-          if (session.wants_quit()) running = false;
         }
 
         // EPOLLHUP est signalé quel que soit le masque demandé : un
@@ -734,6 +750,13 @@ int run_daemon(std::string_view socket_name) {
     // ci-dessus et par ce timerfd réarmé ici. C'est redondant et volontaire
     // (décision prise en amont de cette tâche, non remise en cause ici) ;
     // voir le rapport de tâche pour la justification.
+    // HORS DE TOUTE BRANCHE. `wants_quit()` n'était lu que dans la branche
+    // EPOLLIN du client : une sortie décidée ailleurs -- la fin d'une mise à
+    // jour, par exemple -- n'aurait pris effet qu'à la frappe suivante, que
+    // l'utilisateur n'a aucune raison de faire puisqu'il attend justement
+    // que le bureau reparte.
+    if (session.wants_quit()) running = false;
+
     const int next = clock.delay_ms(FrameClock::Clock::now());
     itimerspec its{};
     if (next > 0) {

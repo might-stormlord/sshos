@@ -105,9 +105,16 @@ void UpdateService::schedule_from(std::int64_t checked_at) {
 void UpdateService::tick() {
   reload();
 
-  // Rien à attendre quand la mise à jour est impossible, ou quand un enfant
-  // travaille déjà : on ne réveille pas le démon pour rien.
-  if (state_.status == UpdateStatus::UpdatesDisabled || child_ > 0) {
+  // Rien à attendre quand la mise à jour est impossible, quand un enfant
+  // travaille déjà, ou quand il n'y a tout simplement pas d'installation --
+  // le cas de l'arbre de développement, qui n'a ni préfixe ni script.
+  //
+  // Sans cette dernière condition, un démon sans installation se réveillerait
+  // toutes les trente secondes pour constater qu'il n'a rien à lancer, et
+  // repartirait pour trente secondes. Ce n'est pas du scrutin actif, mais
+  // c'est un réveil par minute que personne n'a demandé.
+  if (state_.status == UpdateStatus::UpdatesDisabled || child_ > 0 ||
+      updater_path().empty()) {
     have_deadline_ = false;
     return;
   }

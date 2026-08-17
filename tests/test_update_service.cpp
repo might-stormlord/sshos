@@ -426,3 +426,35 @@ TEST(update_service_treats_an_oversized_state_file_as_absent) {
   CHECK(!svc.badge());
   std::remove(path.c_str());
 }
+
+// SANS INSTALLATION, PAS D'ÉCHÉANCE. C'est le cas de l'arbre de
+// développement : ni préfixe, ni script. Sans cette règle, le démon se
+// réveillerait toutes les trente secondes pour constater qu'il n'a rien à
+// lancer -- un réveil par minute que personne n'a demandé.
+TEST(update_service_schedules_nothing_without_an_installation) {
+  {  // aucun fichier d'état du tout
+    FakePlatform plat;
+    FakeLauncher launcher;
+    UpdateService svc(plat, "/tmp/sshos-test-il-n-y-a-rien-ici", launcher.fn());
+    svc.tick();
+    CHECK_EQ(svc.delay_ms(), -1);
+  }
+  {  // un état sans préfixe : on ne sait pas où vit le script
+    FakePlatform plat;
+    FakeLauncher launcher;
+    const std::string path = write_state("schema=1\nstatus=up-to-date\n");
+    UpdateService svc(plat, path, launcher.fn());
+    svc.tick();
+    CHECK_EQ(svc.delay_ms(), -1);
+    std::remove(path.c_str());
+  }
+  {  // avec un préfixe, l'échéance existe
+    FakePlatform plat;
+    FakeLauncher launcher;
+    const std::string path = write_state(state_body("up-to-date"));
+    UpdateService svc(plat, path, launcher.fn());
+    svc.tick();
+    CHECK(svc.delay_ms() > 0);
+    std::remove(path.c_str());
+  }
+}
