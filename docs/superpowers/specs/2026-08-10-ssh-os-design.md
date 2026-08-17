@@ -285,7 +285,7 @@ Le z-order est l'ordre d'un `std::vector<Window*>` : début = arrière-plan, fin
 
 ```
 ╭─ Terminal — bash ─────────────────────[_][□][×]╮
-│ user@box:~$ make -j8                        │
+│ user@box:~$ make -j8                           │
 │ [ 42%] Building CXX object src/wm.cpp.o        │
 │ [ 47%] Building CXX object src/render.cpp.o    │
 ╰───────────────────────────────────────────────◢╯

@@ -149,11 +149,11 @@ Le projet est en ligne : **<https://github.com/might-stormlord/sshos>**, dépôt
 
 ### Ce que la publication a changé dans l'historique — le point important
 
-**Toutes les empreintes de commit ont changé.** L'adresse `user@…` de l'auteur a été
-remplacée dans les **203 commits** qui la portaient (en auteur *et* en committer) par
-l'adresse de non-réponse GitHub `317721292+might-stormlord@users.noreply.github.com`,
-qui rattache les commits au compte sans exposer de courriel. Le nom d'auteur, lui, reste
-`user`.
+**Toutes les empreintes de commit ont changé, et deux fois plutôt qu'une.** L'identité
+d'auteur a été entièrement remplacée : le courriel personnel puis, dans une seconde
+passe, le nom civil. Les 206 commits concernés portent désormais
+`might-stormlord <317721292+might-stormlord@users.noreply.github.com>`, une identité qui
+rattache les commits au compte GitHub sans exposer ni courriel ni état civil.
 
 - Réécriture par `git filter-branch --env-filter` sur `main` et `m1-noyau`, 205 commits
   en 17 s. **Vérifié après coup :** 205 commits toujours présents, dates d'auteur
@@ -222,15 +222,6 @@ git branch -f main m1-noyau && git push origin main
 
 ### Ce qui reste ouvert
 
-- **Le nom d'auteur `user` est resté** dans les 206 commits — seule l'adresse a été
-  retirée. Le changer demanderait une nouvelle réécriture ; elle est sans risque tant
-  que `main` n'a qu'un seul contributeur, mais elle imposerait un `push --force`.
-- **Deux maquettes de documentation contiennent encore un prénom** dans une invite de
-  shell fictive : `docs/superpowers/specs/2026-08-10-ssh-os-design.md` (`user@box:~$`)
-  et `tests/test_terminal.cpp` (`\033]2;user@machine:…`, un titre OSC de test). Ce ne
-  sont pas des courriels et ils n'apprennent rien de plus que le nom d'auteur des
-  commits. Laissés en l'état ; les changer dans tout l'historique coûterait une
-  réécriture de blobs sur de nombreux commits.
 - **Pas d'en-têtes de licence par fichier.** L'AGPL les recommande ; il y a 108 fichiers
   dans `src/`. Le `LICENSE` et le README suffisent juridiquement.
 

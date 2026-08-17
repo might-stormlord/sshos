@@ -114,7 +114,7 @@ version dérivée reste sous la même licence et doit publier ses sources, y com
 elle n'est **exploitée qu'en service** sans jamais être distribuée. C'est le cas d'usage
 qui compte ici : `sshos` est un démon que l'on joint à distance.
 
-Copyright © 2026 user ([@might-stormlord](https://github.com/might-stormlord)).
+Copyright © 2026 [might-stormlord](https://github.com/might-stormlord).
 
 ---
 
@@ -194,4 +194,4 @@ derivative stays under the same license and must publish its sources, **includin
 it is only ever run as a service** and never distributed. That is the case that matters
 here: `sshos` is a daemon you reach over the network.
 
-Copyright © 2026 user ([@might-stormlord](https://github.com/might-stormlord)).
+Copyright © 2026 [might-stormlord](https://github.com/might-stormlord).
