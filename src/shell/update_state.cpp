@@ -1,0 +1,142 @@
+#include "shell/update_state.hpp"
+
+#include <algorithm>
+#include <array>
+#include <utility>
+#include <vector>
+
+namespace sshos {
+namespace {
+
+// Retire les espaces de bord et le retour chariot d'une fin de ligne
+// Windows. Un script qui écrit avec `printf` ne doit pas produire un fichier
+// que le démon lit différemment selon la machine.
+std::string_view trim(std::string_view s) {
+  const auto is_space = [](char c) {
+    return c == ' ' || c == '\t' || c == '\r';
+  };
+  while (!s.empty() && is_space(s.front())) s.remove_prefix(1);
+  while (!s.empty() && is_space(s.back())) s.remove_suffix(1);
+  return s;
+}
+
+// Lit un entier décimal signé, sans exception et sans dépasser. Rend false
+// dès qu'un caractère n'est pas un chiffre : « 12abc » n'est pas 12, c'est
+// illisible. Une valeur qui déborde est illisible aussi -- accepter
+// INT64_MAX ici ferait déborder l'arithmétique qui suit.
+bool read_int64(std::string_view s, std::int64_t& out) {
+  if (s.empty()) return false;
+  bool negative = false;
+  std::size_t i = 0;
+  if (s[0] == '-' || s[0] == '+') {
+    negative = s[0] == '-';
+    i = 1;
+    if (s.size() == 1) return false;
+  }
+  std::int64_t v = 0;
+  for (; i < s.size(); ++i) {
+    const char c = s[i];
+    if (c < '0' || c > '9') return false;
+    const int d = c - '0';
+    // Garde AVANT la multiplication : le débordement signé n'est pas un
+    // comportement défini, et -fsanitize=undefined l'attraperait.
+    if (v > (9223372036854775807LL - d) / 10) return false;
+    v = v * 10 + d;
+  }
+  out = negative ? -v : v;
+  return true;
+}
+
+bool read_status(std::string_view s, UpdateStatus& out) {
+  static constexpr std::pair<std::string_view, UpdateStatus> kTable[] = {
+      {"idle", UpdateStatus::Idle},
+      {"checking", UpdateStatus::Checking},
+      {"applying", UpdateStatus::Applying},
+      {"up-to-date", UpdateStatus::UpToDate},
+      {"available", UpdateStatus::Available},
+      {"restart-pending", UpdateStatus::RestartPending},
+      {"check-failed", UpdateStatus::CheckFailed},
+      {"apply-failed", UpdateStatus::ApplyFailed},
+      {"history-rewritten", UpdateStatus::HistoryRewritten},
+      {"updates-disabled", UpdateStatus::UpdatesDisabled},
+  };
+  for (const auto& row : kTable) {
+    if (row.first == s) {
+      out = row.second;
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
+  UpdateState out;
+  if (raw.size() > kMaxStateBytes) return out;
+
+  // Les clés déjà vues. La PREMIÈRE occurrence gagne : une ligne ajoutée
+  // après coup ne doit pas pouvoir écraser une valeur déjà lue.
+  std::vector<std::string_view> seen;
+  const auto first_time = [&seen](std::string_view key) {
+    if (std::find(seen.begin(), seen.end(), key) != seen.end()) return false;
+    seen.push_back(key);
+    return true;
+  };
+
+  bool schema_ok = false;
+  UpdateState parsed;
+
+  std::size_t pos = 0;
+  while (pos <= raw.size()) {
+    const std::size_t nl = raw.find('\n', pos);
+    const std::string_view line =
+        raw.substr(pos, nl == std::string_view::npos ? std::string_view::npos
+                                                     : nl - pos);
+    pos = nl == std::string_view::npos ? raw.size() + 1 : nl + 1;
+
+    const std::size_t eq = line.find('=');
+    if (eq == std::string_view::npos) continue;  // ni clé ni valeur
+
+    const std::string_view key = trim(line.substr(0, eq));
+    const std::string_view value = trim(line.substr(eq + 1));
+    if (key.empty() || !first_time(key)) continue;
+
+    if (key == "schema") {
+      std::int64_t v = 0;
+      schema_ok = read_int64(value, v) && v == kUpdateStateSchema;
+    } else if (key == "prefix") {
+      parsed.prefix = std::string(value);
+    } else if (key == "source") {
+      parsed.source = std::string(value);
+    } else if (key == "installed_commit") {
+      parsed.installed_commit = std::string(value);
+    } else if (key == "previous_commit") {
+      parsed.previous_commit = std::string(value);
+    } else if (key == "remote_commit") {
+      parsed.remote_commit = std::string(value);
+    } else if (key == "checked_at") {
+      std::int64_t v = 0;
+      // Hors de [0, maintenant] : ramené à zéro. Une valeur dans le futur
+      // veut dire que l'horloge a reculé depuis l'écriture ; une valeur
+      // absurde ferait déborder l'arithmétique des 24 h.
+      if (read_int64(value, v) && v >= 0 && v <= now_epoch) parsed.checked_at = v;
+    } else if (key == "status") {
+      UpdateStatus st = UpdateStatus::Idle;
+      if (read_status(value, st)) parsed.status = st;
+    } else if (key == "pid") {
+      std::int64_t v = 0;
+      if (read_int64(value, v) && v > 0) parsed.pid = static_cast<pid_t>(v);
+    } else if (key == "message") {
+      parsed.message = std::string(value.substr(
+          0, std::min(value.size(), kMaxMessageBytes)));
+    }
+    // Toute autre clé est ignorée : le format peut gagner des champs sans
+    // que les anciens lecteurs aient à s'en soucier.
+  }
+
+  if (!schema_ok) return out;  // état vierge, sans message
+  return parsed;
+}
+
+}  // namespace sshos
