@@ -36,14 +36,55 @@ struct GoldenPlatform : sshos::Platform {
   std::string read_file(std::string_view) const override { return {}; }
 };
 
+// SSHOS_GOLDEN_DIR d'abord, __FILE__ ensuite.
+//
 // __FILE__ est absolu (CMake passe des chemins absolus), donc le répertoire
 // des références se déduit de la position de ce fichier, sans dépendre du
-// répertoire courant du lanceur de tests.
+// répertoire courant du lanceur de tests. C'est exactement ce qu'il faut en
+// développement -- et exactement ce qu'il ne faut pas pour un binaire de
+// test PUBLIÉ : le chemin gravé est celui de la machine qui a compilé, et
+// il n'existe pas chez celui qui le télécharge.
 std::string golden_dir() {
+  if (const char* d = std::getenv("SSHOS_GOLDEN_DIR")) {
+    std::string p = d;
+    if (!p.empty()) {
+      if (p.back() != '/') p.push_back('/');
+      return p;
+    }
+  }
   std::string p = __FILE__;
   p.resize(p.rfind('/') + 1);
   return p + "golden/";
 }
+
+// Pose une variable d'environnement et rend l'état d'origine à la sortie de
+// portée, qu'elle ait été définie ou absente. Il en existe déjà deux copies
+// dans la suite (test_net.cpp, test_tty.cpp) ; une troisième reste plus
+// simple que de faire dépendre cinquante fichiers de test d'un en-tête
+// commun pour vingt lignes.
+class EnvVarGuard {
+ public:
+  explicit EnvVarGuard(const char* name) : name_(name) {
+    if (const char* v = std::getenv(name)) {
+      had_value_ = true;
+      value_ = v;
+    }
+  }
+  ~EnvVarGuard() {
+    if (had_value_) {
+      ::setenv(name_, value_.c_str(), 1);
+    } else {
+      ::unsetenv(name_);
+    }
+  }
+  EnvVarGuard(const EnvVarGuard&) = delete;
+  EnvVarGuard& operator=(const EnvVarGuard&) = delete;
+
+ private:
+  const char* name_;
+  bool had_value_ = false;
+  std::string value_;
+};
 
 void key(Session& s, sshos::Key k, char32_t c = 0, uint8_t mods = 0) {
   s.on_input(sshos::InputEvent{sshos::KeyEvent{k, c, mods}});
@@ -229,4 +270,32 @@ TEST(golden_the_panel_on_the_left_edge) {
     key(s, sshos::Key::Enter);
     click(s, 30, 10);  // un clic anodin, pour figer aussi le focus
   });
+}
+
+// LES RÉFÉRENCES DOIVENT POUVOIR DÉMÉNAGER. __FILE__ est gravé à la
+// compilation : un binaire de test publié dans une release chercherait le
+// répertoire de la machine qui l'a compilé, qui n'existe pas chez celui qui
+// le télécharge. Les neuf cas ci-dessus échoueraient alors par
+// construction, et l'échelon binaire de l'installeur raterait
+// systématiquement son propre garde-fou -- « on n'installe qu'après le
+// vert » ne pourrait jamais être vert.
+//
+// La variable est donc consultée d'abord ; le chemin compilé reste le repli
+// du développement, où il est exactement ce qu'il faut.
+TEST(golden_dir_prefers_the_environment_over_the_compiled_path) {
+  EnvVarGuard guard("SSHOS_GOLDEN_DIR");
+
+  ::setenv("SSHOS_GOLDEN_DIR", "/tmp/refs", 1);
+  CHECK_EQ(golden_dir(), std::string("/tmp/refs/"));
+
+  // La barre oblique finale est ajoutée si elle manque, jamais doublée.
+  ::setenv("SSHOS_GOLDEN_DIR", "/tmp/refs/", 1);
+  CHECK_EQ(golden_dir(), std::string("/tmp/refs/"));
+
+  // Vide vaut absente : on ne va pas chercher les références à la racine.
+  ::setenv("SSHOS_GOLDEN_DIR", "", 1);
+  CHECK(golden_dir().find("tests/golden/") != std::string::npos);
+
+  ::unsetenv("SSHOS_GOLDEN_DIR");
+  CHECK(golden_dir().find("tests/golden/") != std::string::npos);
 }
