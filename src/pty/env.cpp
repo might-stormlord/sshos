@@ -33,7 +33,13 @@ constexpr std::pair<std::string_view, std::string_view> kForced[] = {
 // noyau envoie SIGWINCH tout seul au groupe au premier plan. Un LINES ou
 // COLUMNS hérité serait une SECONDE vérité, figée à la taille qu'avait la
 // fenêtre au lancement de l'enfant.
-constexpr std::string_view kBanned[] = {"LINES", "COLUMNS"};
+// SSHOS_BOOT_ID et SSHOS_EXE sont l'identité du bureau lui-même : le nom de
+// son socket et le chemin de son binaire. Un enfant qui en hérite peut
+// s'attacher au bureau qui l'a lancé, ou le tuer -- et c'est précisément ce
+// qui arrive quand on travaille sur le projet depuis un terminal du bureau
+// installé.
+constexpr std::string_view kBanned[] = {"LINES", "COLUMNS", "SSHOS_BOOT_ID",
+                                        "SSHOS_EXE"};
 
 bool in(const auto& table, std::string_view key) {
   return std::find(std::begin(table), std::end(table), key) != std::end(table);

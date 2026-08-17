@@ -143,3 +143,27 @@ TEST(child_env_is_deterministic) {
   const std::vector<std::string> env = child_env(base, delta);
   CHECK(std::is_sorted(env.begin(), env.end()));
 }
+
+// L'IDENTITÉ DU BUREAU NE DESCEND PAS DANS SES PROPRES SHELLS. Un shell
+// ouvert dans le bureau installé qui hérite de SSHOS_BOOT_ID calcule le
+// même nom de socket que lui : « sshos --kill » tapé là tue la session de
+// travail, et « sshos » s'y rattache au lieu d'ouvrir une instance neuve.
+// C'est exactement le piège que l'installation isolée existe pour fermer.
+//
+// SSHOS_EXE part pour la même raison : c'est le chemin de relance du
+// bureau, pas une information dont un invité a besoin.
+TEST(child_env_never_leaks_the_desktop_identity_to_a_shell) {
+  const std::vector<std::string> base = {
+      "PATH=/usr/bin",
+      "SSHOS_BOOT_ID=local",
+      "SSHOS_EXE=/home/u/.local/libexec/sshos",
+  };
+
+  const std::vector<std::string> env = child_env(base, {});
+
+  CHECK_EQ(value_of(env, "SSHOS_BOOT_ID"), std::string("<absente>"));
+  CHECK_EQ(value_of(env, "SSHOS_EXE"), std::string("<absente>"));
+
+  // On bannit deux variables, pas l'environnement : le reste passe.
+  CHECK_EQ(value_of(env, "PATH"), std::string("/usr/bin"));
+}
