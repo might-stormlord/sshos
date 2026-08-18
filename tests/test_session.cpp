@@ -4599,3 +4599,47 @@ TEST(session_keeps_a_progress_window_open_while_the_update_runs) {
     ::usleep(50 * 1000);
   }
 }
+
+// UN ETAT N'EST JAMAIS UN CUL-DE-SAC. En « redemarrer pour terminer »,
+// l'entree unique ne proposait que le redemarrage : un utilisateur dont le
+// binaire pose se revelait mauvais n'avait plus AUCUN moyen d'aller chercher
+// la correction depuis le bureau. C'est arrive pour de vrai, et il a fallu
+// une commande tapee a la main pour en sortir.
+TEST(session_keeps_the_check_reachable_while_a_restart_is_pending) {
+  UpdateFixture fix("restart-pending",
+                    "#!/bin/sh\n"
+                    "printf 'schema=1\\nprefix=%s\\nsource=git\\nstatus=available\\n"
+                    "installed_commit=aaa\\nremote_commit=bbb\\n' "
+                    "\"$(dirname \"$(dirname \"$0\")\")\" "
+                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "exit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  open_menu(sess);
+  Surface open(80, 24);
+  sess.render(open);
+  // Les DEUX sont la : l'action principale, et la porte de sortie.
+  CHECK(surface_contains(open, "Redemarrer pour terminer"));
+  CHECK(surface_contains(open, "Verifier les mises a jour"));
+
+  // Et la verification part vraiment : elle n'est pas qu'affichee.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Escape, 0, 0}});
+  sess.run_update_command_for_tests("update:check");
+  bool ran = false;
+  for (int i = 0; i < 300 && !ran; ++i) {
+    sshos::reap_children(sess);
+    std::ifstream in(fix.state_path(), std::ios::binary);
+    std::ostringstream os;
+    os << in.rdbuf();
+    if (os.str().find("available") != std::string::npos) ran = true;
+    else ::usleep(10 * 1000);
+  }
+  CHECK(ran);
+  for (int i = 0; i < 100; ++i) {
+    if (sshos::reap_children(sess) > 0) break;
+    ::usleep(10 * 1000);
+  }
+}

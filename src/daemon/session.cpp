@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include "app/catalog.hpp"
 #include "daemon/daemonize.hpp"
@@ -314,14 +315,36 @@ void Session::run_menu(const std::string& id) {
 // il recoit un libelle et un drapeau, et rend l'identifiant tel quel.
 void Session::refresh_menu_extras() {
   const UpdateEntry e = update_.entry();
-  menu_.set_extra_items({{e.id, e.label, e.enabled}});
+  std::vector<MenuItem> items{{e.id, e.label, e.enabled}};
+
+  // UN ETAT NE DOIT JAMAIS ETRE UN CUL-DE-SAC. En « redemarrer pour
+  // terminer », l'entree unique proposait le redemarrage et RIEN d'autre :
+  // un utilisateur dont le binaire pose se revelait mauvais n'avait plus
+  // aucun moyen d'aller chercher la correction depuis le bureau. C'est
+  // arrive.
+  //
+  // La verification reste donc joignable, en seconde ligne. Elle n'est
+  // ajoutee que la : partout ailleurs, une seule entree suffit.
+  if (e.id == "update:restart" && e.enabled) {
+    items.push_back({"update:check", "Verifier les mises a jour", true});
+  }
+  menu_.set_extra_items(std::move(items));
 }
 
 void Session::run_update_command(std::string_view id) {
   const UpdateEntry e = update_.entry();
   if (!e.enabled) return;
-  if (id != e.id) return;
+  // Une verification est toujours recevable des lors que rien ne travaille :
+  // c'est ce qui empeche un etat d'etre sans issue. Les autres commandes,
+  // elles, doivent correspondre a ce que l'entree propose vraiment -- un
+  // ordre perime ne doit pas fermer le bureau.
+  if (id != e.id && id != "update:check") return;
 
+  if (id == "update:check") {
+    update_.run("update:check");
+    dirty_ = true;
+    return;
+  }
   if (id == "update:restart") {
     // ON DEMANDE. C'est le seul geste de cette fonctionnalite qui detruise
     // du travail, et l'invariant de Modal veut qu'Annuler ait le focus par

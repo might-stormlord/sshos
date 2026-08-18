@@ -126,6 +126,9 @@ class Session : public ChildSink {
     return wm_.stack();
   }
   size_t watched_children_for_tests() const { return children_.size(); }
+  void run_update_command_for_tests(std::string_view id) {
+    run_update_command(id);
+  }
   void close_window_for_tests(WindowId id);
 
   // Relève -- et consomme -- la demande de repeint que la session a pu
