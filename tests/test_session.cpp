@@ -4643,3 +4643,58 @@ TEST(session_keeps_the_check_reachable_while_a_restart_is_pending) {
     ::usleep(10 * 1000);
   }
 }
+
+// UN CONSTAT QUI DEMANDE UNE ACTION DOIT L'OFFRIR. Annoncer « une mise a
+// jour est disponible » derriere un seul [ OK ], puis obliger a rouvrir le
+// menu pour la lancer, fait quatre gestes la ou il en faut un -- et le
+// bouton [ OK ] laisse croire que l'affaire est close.
+TEST(session_offers_the_update_right_in_the_check_result) {
+  UpdateFixture fix("up-to-date",
+                    "#!/bin/sh\n"
+                    "printf 'schema=1\\nprefix=%s\\nsource=git\\nstatus=available\\n"
+                    "installed_commit=aaa\\nremote_commit=bbb\\n"
+                    "installed_version=1.1\\nremote_version=1.3\\n"
+                    "commits_ahead=2\\n' "
+                    "\"$(dirname \"$(dirname \"$0\")\")\" "
+                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "exit 0\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  sess.run_update_command_for_tests("update:check");
+  bool ran = false;
+  for (int i = 0; i < 300 && !ran; ++i) {
+    sshos::reap_children(sess);
+    std::ifstream in(fix.state_path(), std::ios::binary);
+    std::ostringstream os;
+    os << in.rdbuf();
+    if (os.str().find("available") != std::string::npos) ran = true;
+    else ::usleep(10 * 1000);
+  }
+  REQUIRE(ran);
+  for (int i = 0; i < 200; ++i) {
+    if (sshos::reap_children(sess) > 0) break;
+    ::usleep(10 * 1000);
+  }
+
+  Surface after(80, 24);
+  sess.render(after);
+  CHECK(surface_contains(after, "Mise a jour disponible"));
+  CHECK(surface_contains(after, "Version 1.1 -> 1.3"));
+  // L'ACTION EST LA, tout de suite.
+  CHECK(surface_contains(after, "[ Mettre a jour ]"));
+  CHECK(surface_contains(after, "[ Plus tard ]"));
+  // Et surtout PAS un simple [ OK ], qui laisserait croire que c'est fini.
+  CHECK(!surface_contains(after, "[ OK ]"));
+
+  // « Plus tard » a le focus : un Entree reflexe ne lance pas une
+  // compilation de deux minutes.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  Surface closed(80, 24);
+  sess.render(closed);
+  CHECK(!surface_contains(closed, "[ Mettre a jour ]"));
+  // La pastille reste : on a dit plus tard, pas non.
+  CHECK(find_badge(sess, 80, 24).x >= 0);
+}

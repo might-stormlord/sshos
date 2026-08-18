@@ -766,6 +766,7 @@ void Session::on_child_exit(pid_t pid, int status) {
     // « Rien ne se passe » est la pire des reponses.
     if (update_.has_report()) {
       const std::string report = update_.take_report();
+      const UpdateEntry e = update_.entry();
       if (modal_kind_ == ModalKind::ApplyRunning && update_.needs_restart()) {
         // « Plus tard / Redemarrer » dit ce qui va se passer ; « Annuler /
         // Confirmer » obligerait a le deviner. La progression cede la place
@@ -773,6 +774,17 @@ void Session::on_child_exit(pid_t pid, int status) {
         modal_kind_ = ModalKind::RestartForUpdate;
         modal_.ask(report + "\n" + restart_question(), 0, "Plus tard",
                    "Redemarrer");
+      } else if (e.enabled && e.id == "update:apply") {
+        // UN CONSTAT QUI DEMANDE UNE ACTION DOIT L'OFFRIR. Annoncer « une
+        // mise a jour est disponible » derriere un seul « OK », puis obliger
+        // a rouvrir le menu pour la lancer, fait quatre gestes la ou il en
+        // faut un -- et le bouton [ OK ] laisse croire que c'est termine.
+        //
+        // Le libelle du bouton est celui de l'entree de menu : « Mettre a
+        // jour », ou « Reinstaller depuis GitHub » selon le cas. Deux facons
+        // de nommer la meme action se contrediraient tot ou tard.
+        modal_kind_ = ModalKind::ApplyUpdate;
+        modal_.ask(report, 0, "Plus tard", e.label);
       } else {
         modal_kind_ = ModalKind::Information;
         modal_.inform(report);
