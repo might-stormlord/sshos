@@ -307,7 +307,13 @@ void UpdateService::build_report() {
                                            : message_.substr(0, 60);
   switch (state_.status) {
     case UpdateStatus::UpToDate:
-      report_ = "Vous etes a jour.";
+      // Avec le numero quand on le connait : « a jour » tout court ne dit
+      // pas a jour de QUOI, et c'est la seule occasion ou l'utilisateur
+      // demande explicitement a savoir.
+      report_ = state_.installed_version.empty()
+                    ? "Vous etes a jour."
+                    : "Vous etes a jour, en version " +
+                          state_.installed_version + ".";
       break;
     case UpdateStatus::Available: {
       report_ = "Mise a jour disponible";

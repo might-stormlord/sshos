@@ -191,19 +191,27 @@ do_check() {
     write_state available "provenance inconnue"
     return 0
   fi
-  if [ "$REMOTE" = "$INSTALLED" ]; then
-    write_state up-to-date ""
-    return 0
-  fi
-
-  # Les numeros ne se calculent qu'avec un arbre git sous la main. Sans lui
-  # ils restent vides, et l'affichage retombe sur ce qu'il sait dire.
+  # LES NUMEROS SE CALCULENT AVANT DE TRANCHER, pas seulement quand une mise
+  # a jour existe : savoir « vous etes a jour, version 1.2 » vaut mieux que
+  # « vous etes a jour » tout court, et c'est le meme travail.
+  #
+  # Ils demandent un arbre git sous la main. Sans lui ils restent vides, et
+  # l'affichage retombe sur ce qu'il sait dire.
   if [ "$SOURCE" = git ] && have git && ensure_git_tree; then
     _iv=$(version_of "$SRC" "$INSTALLED" || true)
     _rv=$(version_of "$SRC" "$REMOTE" || true)
     [ -n "$_iv" ] && INSTALLED_VERSION="$_iv"
     [ -n "$_rv" ] && REMOTE_VERSION="$_rv"
-    COMMITS_AHEAD=$(git -C "$SRC" rev-list --count "$INSTALLED..$REMOTE" 2>/dev/null || echo "")
+    if [ "$REMOTE" != "$INSTALLED" ]; then
+      COMMITS_AHEAD=$(git -C "$SRC" rev-list --count "$INSTALLED..$REMOTE" 2>/dev/null || echo "")
+    else
+      COMMITS_AHEAD=""
+    fi
+  fi
+
+  if [ "$REMOTE" = "$INSTALLED" ]; then
+    write_state up-to-date ""
+    return 0
   fi
 
   # LE CONTROLE DE DESCENDANCE. Ce depot a force-pousse main deux fois ; sans
@@ -310,10 +318,17 @@ do_apply() {
 
   place "$_bin"
   # Le script se remplace LUI AUSSI : un script fige piloterait un binaire
-  # qui a evolue.
+  # qui a evolue. Et l'outil de version avec lui -- l'oublier laissait
+  # installed_version vide apres chaque mise a jour, donc « cce9d11 ->
+  # 3512ffe » au lieu de « 1.1 -> 1.2 », alors que tout etait en place pour
+  # l'afficher.
   if [ -f "$SRC/tools/update.sh" ]; then
     cp "$SRC/tools/update.sh" "$UPDATER.new" && chmod 0755 "$UPDATER.new" \
       && mv -f "$UPDATER.new" "$UPDATER"
+  fi
+  if [ -f "$SRC/tools/version.sh" ]; then
+    cp "$SRC/tools/version.sh" "$VERSIONER.new" && chmod 0755 "$VERSIONER.new" \
+      && mv -f "$VERSIONER.new" "$VERSIONER"
   fi
 
   PREVIOUS="$INSTALLED"

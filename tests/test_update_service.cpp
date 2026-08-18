@@ -654,3 +654,35 @@ TEST(update_service_clears_restart_pending_once_it_runs_the_installed_binary) {
   ::rmdir((dir + "/libexec").c_str());
   ::rmdir(dir.c_str());
 }
+
+// « A JOUR » TOUT COURT NE DIT PAS A JOUR DE QUOI. C'est la seule occasion
+// ou l'utilisateur demande explicitement a savoir ou il en est.
+TEST(update_service_names_the_version_when_it_says_you_are_up_to_date) {
+  {
+    FakePlatform plat;
+    FakeLauncher launcher;
+    const std::string path =
+        write_state(state_body("up-to-date", "installed_version=1.2\n"));
+    UpdateService svc(plat, path, launcher.fn());
+    svc.tick();
+    svc.run("update:check");
+    svc.on_child_exit(launcher.next_pid, 0);
+    REQUIRE(svc.has_report());
+    CHECK(svc.take_report().find("version 1.2") != std::string::npos);
+    std::remove(path.c_str());
+  }
+  {  // sans numero connu, on ne l'invente pas
+    FakePlatform plat;
+    FakeLauncher launcher;
+    const std::string path = write_state(state_body("up-to-date"));
+    UpdateService svc(plat, path, launcher.fn());
+    svc.tick();
+    svc.run("update:check");
+    svc.on_child_exit(launcher.next_pid, 0);
+    REQUIRE(svc.has_report());
+    const std::string r = svc.take_report();
+    CHECK(r.find("a jour") != std::string::npos);
+    CHECK(r.find("version") == std::string::npos);
+    std::remove(path.c_str());
+  }
+}
