@@ -34,7 +34,8 @@ namespace sshos {
 // booléen de plus par cas serait le début d'un jeu de drapeaux qui se
 // contredisent.
 enum class ModalKind {
-  CloseWindow, QuitSession, ApplyUpdate, RestartForUpdate, Information
+  CloseWindow, QuitSession, ApplyUpdate, ApplyRunning, RestartForUpdate,
+  Information
 };
 
 class Session : public ChildSink {
@@ -241,6 +242,7 @@ class Session : public ChildSink {
   void do_action(Action a);
   // Exécute une entrée du menu, désignée par son identifiant.
   void refresh_menu_extras();
+  void refresh_update_modal();
   void run_update_command(std::string_view id);
   std::string restart_question() const;
   void run_menu(const std::string& id);

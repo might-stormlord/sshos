@@ -9,11 +9,17 @@
 namespace sshos {
 namespace {
 
-constexpr char kCancel[] = "[ Annuler ]";
-constexpr char kConfirm[] = "[ Confirmer ]";
+// Les libelles NUS : button() pose les crochets, une seule fois.
+constexpr char kCancel[] = "Annuler";
+constexpr char kConfirm[] = "Confirmer";
 constexpr char kAcknowledge[] = "[ OK ]";
-constexpr int kCancelW = sizeof(kCancel) - 1;
-constexpr int kConfirmW = sizeof(kConfirm) - 1;
+constexpr int kCancelW = sizeof(kCancel) + 3;   // « [ Annuler ] »
+constexpr int kConfirmW = sizeof(kConfirm) + 3;
+
+// Un libelle est encadre de crochets et d'espaces : « Redemarrer » devient
+// « [ Redemarrer ] ». Le faire ICI plutot qu'a l'appel evite qu'un appelant
+// oublie les crochets et casse l'alignement des deux boutons.
+std::string button(const std::string& label) { return "[ " + label + " ]"; }
 
 // Cadre, LES LIGNES DE TEXTE, ligne vide, boutons, ligne vide, cadre. Le
 // corps peut tenir sur plusieurs lignes : « il existe 7 mises a jour » et
@@ -43,20 +49,47 @@ std::vector<std::string> body_lines(const std::string& s) {
 }  // namespace
 
 void Modal::ask(std::string question, WindowId target) {
+  ask(std::move(question), target, kCancel, kConfirm);
+}
+
+void Modal::ask(std::string question, WindowId target, std::string cancel_label,
+                std::string confirm_label) {
   // La seconde demande est ignorée, pas mise en file : c'est la première
   // question que l'utilisateur a sous les yeux.
-  if (open_) return;
+  //
+  // Sauf si une PROGRESSION occupe la place : elle n'attend aucune reponse,
+  // et c'est precisement elle qui doit se transformer en question quand le
+  // travail se termine.
+  if (open_ && style_ != ModalStyle::Progress) return;
   open_ = true;
+  style_ = ModalStyle::Question;
+  cancel_label_ = std::move(cancel_label);
+  confirm_label_ = std::move(confirm_label);
   question_ = std::move(question);
   target_ = target;
   confirm_ = false;
 }
 
-void Modal::inform(std::string message) {
-  // Même règle que ask() : la seconde demande est ignorée, pas mise en file.
-  if (open_) return;
+void Modal::progress(std::string message) {
+  if (open_ && style_ != ModalStyle::Progress) return;
   open_ = true;
-  info_ = true;
+  style_ = ModalStyle::Progress;
+  question_ = std::move(message);
+  target_ = 0;
+  confirm_ = false;
+}
+
+void Modal::set_body(std::string message) {
+  if (!open_) return;
+  question_ = std::move(message);
+}
+
+void Modal::inform(std::string message) {
+  // Même règle que ask() : la seconde demande est ignorée -- sauf face a une
+  // progression, qui a vocation a ceder la place a son resultat.
+  if (open_ && style_ != ModalStyle::Progress) return;
+  open_ = true;
+  style_ = ModalStyle::Info;
   question_ = std::move(message);
   target_ = 0;
   confirm_ = true;  // le seul bouton a le focus
@@ -64,7 +97,9 @@ void Modal::inform(std::string message) {
 
 void Modal::dismiss() {
   open_ = false;
-  info_ = false;
+  style_ = ModalStyle::Question;
+  cancel_label_.clear();
+  confirm_label_.clear();
   question_.clear();
   target_ = 0;
   confirm_ = false;
@@ -93,11 +128,13 @@ int Modal::buttons_y() const {
 void Modal::layout(int cols, int rows) { rect_ = rect(cols, rows); }
 
 Rect Modal::confirm_rect() const {
-  return Rect{rect_.x + rect_.w - 2 - kConfirmW, buttons_y(), kConfirmW, 1};
+  const int w = static_cast<int>(button(confirm_label_).size());
+  return Rect{rect_.x + rect_.w - 2 - w, buttons_y(), w, 1};
 }
 
 Rect Modal::cancel_rect() const {
-  return Rect{confirm_rect().x - 1 - kCancelW, buttons_y(), kCancelW, 1};
+  const int w = static_cast<int>(button(cancel_label_).size());
+  return Rect{confirm_rect().x - 1 - w, buttons_y(), w, 1};
 }
 
 void Modal::draw(View v, const Theme& th, Border b) const {
@@ -123,7 +160,8 @@ void Modal::draw(View v, const Theme& th, Border b) const {
     v.text(rect_.x + 2, rect_.y + 1 + static_cast<int>(i),
            elide_to_cells(lines[i], rect_.w - 4, "~"), st);
   }
-  if (info_) {
+  if (style_ == ModalStyle::Progress) return;  // aucun bouton : ca travaille
+  if (style_ == ModalStyle::Info) {
     // Un seul bouton, centré : il n'y a rien à décider.
     const int w = static_cast<int>(sizeof(kAcknowledge) - 1);
     v.text(rect_.x + (rect_.w - w) / 2, confirm_rect().y, kAcknowledge, hot);
@@ -131,15 +169,16 @@ void Modal::draw(View v, const Theme& th, Border b) const {
   }
   const Rect c = cancel_rect();
   const Rect k = confirm_rect();
-  v.text(c.x, c.y, kCancel, confirm_ ? st : hot);
-  v.text(k.x, k.y, kConfirm, confirm_ ? hot : st);
+  v.text(c.x, c.y, button(cancel_label_), confirm_ ? st : hot);
+  v.text(k.x, k.y, button(confirm_label_), confirm_ ? hot : st);
 }
 
 ModalHit Modal::hit(int x, int y) const {
   if (!open_ || !rect_.contains(x, y)) return ModalHit::None;
   // En mode information il n'y a qu'un bouton, et cliquer n'importe ou sur
   // sa ligne l'atteint : c'est une reconnaissance, pas un choix.
-  if (info_) {
+  if (style_ == ModalStyle::Progress) return ModalHit::Body;  // rien a cliquer
+  if (style_ == ModalStyle::Info) {
     if (confirm_rect().y == y) return ModalHit::Confirm;
     return ModalHit::Body;
   }

@@ -1,6 +1,7 @@
 #include "shell/update_service.hpp"
 
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -602,4 +603,54 @@ TEST(update_service_says_nothing_about_versions_when_it_knows_nothing) {
   CHECK(svc.news().empty());
   CHECK(svc.version_line().empty());
   std::remove(path.c_str());
+}
+
+// « IL FAUT REDEMARRER » CONTRE « ON A REDEMARRE ». Le script ecrit
+// restart-pending et ne peut pas savoir quand le redemarrage a eu lieu.
+// Sans cette lecture, la pastille restait allumee APRES le redemarrage et
+// cliquer redemandait de redemarrer -- indefiniment.
+TEST(update_service_clears_restart_pending_once_it_runs_the_installed_binary) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+
+  // On fabrique un prefixe avec un « binaire » pose, et on fait croire au
+  // service que c'est LUI qui tourne.
+  const std::string dir = temp_path("prefixe");
+  ::mkdir(dir.c_str(), 0700);
+  ::mkdir((dir + "/libexec").c_str(), 0700);
+  const std::string exe = dir + "/libexec/sshos";
+  { std::ofstream out(exe); out << "binaire"; }
+
+  const std::string body =
+      "schema=1\nprefix=" + dir + "\nsource=git\nstatus=restart-pending\n";
+  const std::string path = write_state(body);
+
+  {  // le demon EST le binaire pose : le redemarrage a eu lieu
+    UpdateService svc(plat, path, launcher.fn(), exe);
+    svc.tick();
+    CHECK(svc.running_is_installed());
+    CHECK(!svc.badge());
+    CHECK_EQ(svc.entry().label, std::string("Verifier les mises a jour"));
+  }
+  {  // le demon tourne encore sur autre chose : il faut bien redemarrer
+    const std::string autre = dir + "/libexec/sshos.previous";
+    { std::ofstream out(autre); out << "ancien"; }
+    UpdateService svc(plat, path, launcher.fn(), autre);
+    svc.tick();
+    CHECK(!svc.running_is_installed());
+    CHECK(svc.badge());
+    CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
+    ::remove(autre.c_str());
+  }
+  {  // binaire pose absent : on ne conclut pas, on garde l'etat du fichier
+    ::remove(exe.c_str());
+    UpdateService svc(plat, path, launcher.fn(), exe);
+    svc.tick();
+    CHECK(!svc.running_is_installed());
+    CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
+  }
+
+  std::remove(path.c_str());
+  ::rmdir((dir + "/libexec").c_str());
+  ::rmdir(dir.c_str());
 }

@@ -48,6 +48,10 @@ struct UpdateState {
   // `applying`, et c'est ce qui permet de distinguer un travail en cours
   // d'un travail interrompu par la mort du démon.
   pid_t pid = -1;
+  // Ou en est le travail : « compilation », « suite de tests »... Vide quand
+  // rien ne court. Une fenetre qui dit « en cours » pendant deux minutes
+  // sans rien preciser laisse croire a un blocage.
+  std::string stage;
   std::string message;
 };
 

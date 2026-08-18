@@ -42,7 +42,12 @@ class UpdateService {
   // compris.
   using Launcher = std::function<pid_t(const std::vector<std::string>& argv)>;
 
-  UpdateService(const Platform& plat, std::string state_path, Launcher launch);
+  // `self_exe` n'existe que pour les tests, comme `boot_id_path` de
+  // net.hpp : il a une valeur par defaut pointant sur le vrai chemin, et il
+  // permet de rejouer « le binaire qui tourne est-il celui qui est pose ? »
+  // sans avoir a remplacer le processus courant.
+  UpdateService(const Platform& plat, std::string state_path, Launcher launch,
+                std::string self_exe = "/proc/self/exe");
 
   // Relit le fichier d'état, et lance une vérification si l'échéance est
   // échue. Appelée par la session, au plus une fois par seconde.
@@ -71,6 +76,12 @@ class UpdateService {
   // bureau et laisse le client se rattacher.
   bool wants_restart() const { return wants_restart_; }
 
+  // Un redemarrage reste a faire : le binaire est pose, mais ce n'est pas
+  // encore lui qui tourne.
+  bool needs_restart() const {
+    return state_.status == UpdateStatus::RestartPending;
+  }
+
   // CE QU'ON DOIT DIRE A L'UTILISATEUR, ET UNE SEULE FOIS.
   //
   // Une verification AUTOMATIQUE se tait : elle ne doit pas harceler. Une
@@ -87,6 +98,19 @@ class UpdateService {
   // confirmation.
   //
   // « 7 nouveautes », ou vide si le compte est inconnu.
+  // Vrai si le processus en cours EST le binaire installe.
+  //
+  // C'est ce qui distingue « il faut redemarrer » de « on a redemarre ». Le
+  // demon ne connait pas son propre commit -- rien ne le grave dedans,
+  // CMakeLists etant intouchable -- mais il peut comparer son inode a celle
+  // du fichier pose. Un demon reste sur l'ancienne version tient une inode
+  // differente : deliee, ou devenue sshos.previous.
+  bool running_is_installed() const;
+
+  // « Mise a jour en cours : compilation... », ou l'etape est celle que le
+  // script vient d'ecrire. Vide si rien ne court.
+  std::string progress_line() const;
+
   std::string news() const;
   // « Version 1.12 -> 1.13 », ou « cce9d11 -> 3512ffe » a defaut de numeros,
   // ou vide. On n'invente jamais un numero.
@@ -102,6 +126,7 @@ class UpdateService {
   const Platform* plat_;
   std::string state_path_;
   Launcher launch_;
+  std::string self_exe_;
 
   UpdateState state_;
   bool loaded_ = false;
@@ -117,6 +142,8 @@ class UpdateService {
   bool have_deadline_ = false;
   std::chrono::steady_clock::time_point deadline_{};
   bool wants_restart_ = false;
+  // Vrai une fois qu'on a constate que le redemarrage avait eu lieu.
+  bool restart_done_ = false;
 };
 
 }  // namespace sshos

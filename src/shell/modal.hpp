@@ -10,6 +10,15 @@ namespace sshos {
 
 enum class ModalHit { None, Body, Cancel, Confirm };
 
+// Ce que la boite propose.
+//
+//   Question : deux boutons, et Annuler a le focus.
+//   Info     : un seul bouton -- il n'y a rien a decider.
+//   Progress : AUCUN bouton. Un travail court ; la boite reste sous les yeux
+//              et son corps se met a jour. Echap la referme, le travail
+//              continue -- il tourne dans un processus a part.
+enum class ModalStyle { Question, Info, Progress };
+
 // Le dialogue de confirmation. Une seule question à la fois : empiler des
 // dialogues sur un bureau texte ne mène nulle part, et l'utilisateur ne
 // saurait plus auquel il répond.
@@ -22,12 +31,29 @@ class Modal {
  public:
   void ask(std::string question, WindowId target);
 
+  // Les memes deux boutons, mais nommes. « Plus tard / Redemarrer » dit ce
+  // qui va se passer ; « Annuler / Confirmer » oblige a le deviner.
+  void ask(std::string question, WindowId target, std::string cancel_label,
+           std::string confirm_label);
+
+  // Un travail en cours. Aucun bouton, et le corps se remplace au fil des
+  // etapes par set_body().
+  void progress(std::string message);
+
+  // Remplace le corps d'une boite DEJA ouverte. C'est ce qui permet a une
+  // fenetre de progression de rester la pendant qu'elle raconte ce qui se
+  // passe -- sans elle il faudrait la fermer et la rouvrir, ce qui la ferait
+  // clignoter.
+  void set_body(std::string message);
+
+  ModalStyle style() const { return style_; }
+
   // UNE RÉPONSE, PAS UNE QUESTION. L'utilisateur a demandé quelque chose --
   // vérifier les mises à jour, par exemple -- et il attend qu'on lui dise ce
   // qu'il en est. Un seul bouton, parce qu'il n'y a rien à décider : lui
   // montrer « Annuler / Confirmer » lui ferait chercher ce qu'il annule.
   void inform(std::string message);
-  bool is_info() const { return info_; }
+  bool is_info() const { return style_ == ModalStyle::Info; }
 
   void dismiss();
 
@@ -39,9 +65,9 @@ class Modal {
   // destructrice ne doit jamais être celle qu'on donne par inadvertance,
   // d'un Entrée réflexe.
   bool confirm_focused() const { return confirm_; }
-  // Sans effet en mode information : un seul bouton, rien a parcourir.
+  // Sans effet quand il n'y a pas deux boutons a parcourir.
   void focus_next() {
-    if (!info_) confirm_ = !confirm_;
+    if (style_ == ModalStyle::Question) confirm_ = !confirm_;
   }
 
   Rect rect(int cols, int rows) const;
@@ -55,7 +81,9 @@ class Modal {
   Rect confirm_rect() const;
 
   bool open_ = false;
-  bool info_ = false;
+  ModalStyle style_ = ModalStyle::Question;
+  std::string cancel_label_;
+  std::string confirm_label_;
   std::string question_;
   WindowId target_ = 0;
   bool confirm_ = false;

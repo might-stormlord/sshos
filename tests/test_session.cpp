@@ -4529,21 +4529,73 @@ TEST(session_routes_a_service_child_exit_to_the_update_service) {
   Surface after(80, 24);
   sess.render(after);
 
-  // UN POP-UP REPOND. L'utilisateur a clique ; le menu s'est referme au
-  // moment du clic, donc une ligne de menu qui change ne lui dirait rien.
+  // LA FENETRE EST RESTEE, ET ELLE POSE MAINTENANT LA QUESTION SUIVANTE.
+  // Elle ne s'est pas refermee au lancement puis rouverte a la fin : c'est
+  // la meme boite, qui a change de contenu.
   CHECK(surface_contains(after, "Mise a jour installee"));
-  CHECK(surface_contains(after, "[ OK ]"));
-  // Un seul bouton : rien a decider, donc pas de « Annuler / Confirmer ».
-  CHECK(!surface_contains(after, "Annuler"));
+  CHECK(surface_contains(after, "[ Redemarrer ]"));
+  CHECK(surface_contains(after, "[ Plus tard ]"));
+  // Les libelles disent ce qui va se passer : « Annuler / Confirmer »
+  // obligerait a le deviner.
+  CHECK(!surface_contains(after, "[ Confirmer ]"));
+  // Et elle compte ce qui va mourir.
+  CHECK(surface_contains(after, "seront fermes"));
 
-  // On le referme, et le bureau montre l'etat qui en resulte.
+  // « Plus tard » : le focus est dessus, un Entree reflexe ne ferme rien.
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
   Surface closed(80, 24);
   sess.render(closed);
-  CHECK(!surface_contains(closed, "[ OK ]"));
+  CHECK(!surface_contains(closed, "[ Redemarrer ]"));
+  CHECK(!sess.wants_quit());
   CHECK(find_badge(sess, 80, 24).x >= 0);
   open_menu(sess);
   Surface open(80, 24);
   sess.render(open);
   CHECK(surface_contains(open, "Redemarrer pour terminer"));
+}
+
+// LA FENETRE RESTE PENDANT LE TRAVAIL, ET ELLE RACONTE. Une compilation et
+// une suite complete prennent une a deux minutes : refermer la boite
+// laisserait l'utilisateur devant un bureau muet, sans savoir si quelque
+// chose travaille -- et une boite figee sur « en cours » pendant deux
+// minutes laisse croire a un blocage.
+TEST(session_keeps_a_progress_window_open_while_the_update_runs) {
+  // Un script qui prend son temps : la fenetre doit vivre pendant ce
+  // temps-la.
+  UpdateFixture fix("available", "#!/bin/sh\nsleep 5\n",
+                    "installed_version=1.0\nremote_version=1.7\n"
+                    "commits_ahead=7\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  REQUIRE(badge.x >= 0);
+  click_at(sess, badge.x, badge.y);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Tab, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  Surface running(80, 24);
+  sess.render(running);
+  CHECK(surface_contains(running, "Mise a jour en cours"));
+  // AUCUN bouton : il n'y a rien a decider tant que ca travaille.
+  CHECK(!surface_contains(running, "[ Confirmer ]"));
+  CHECK(!surface_contains(running, "[ Annuler ]"));
+  CHECK(!surface_contains(running, "[ OK ]"));
+
+  // Le script ecrit son etape ; le battement d'une seconde la reprend.
+  fix.write_state("applying", "stage=compilation\npid=" +
+                                  std::to_string(::getpid()) + "\n");
+  sess.mark_refresh_due();
+  Surface staged(80, 24);
+  sess.render(staged);
+  CHECK(surface_contains(staged, "compilation"));
+
+  // On recolte ce qu'on a lance, sinon le cas suivant heriterait d'un
+  // zombie -- waitpid est global au processus.
+  for (int i = 0; i < 200; ++i) {
+    if (sshos::reap_children(sess) > 0) break;
+    ::usleep(50 * 1000);
+  }
 }

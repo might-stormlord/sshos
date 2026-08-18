@@ -1,6 +1,7 @@
 #include "shell/update_service.hpp"
 
 #include <signal.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -46,8 +47,24 @@ std::string read_capped(const std::string& path) {
 }  // namespace
 
 UpdateService::UpdateService(const Platform& plat, std::string state_path,
-                             Launcher launch)
-    : plat_(&plat), state_path_(std::move(state_path)), launch_(std::move(launch)) {}
+                             Launcher launch, std::string self_exe)
+    : plat_(&plat),
+      state_path_(std::move(state_path)),
+      launch_(std::move(launch)),
+      self_exe_(std::move(self_exe)) {}
+
+bool UpdateService::running_is_installed() const {
+  if (state_.prefix.empty()) return false;
+  const std::string installed = state_.prefix + "/libexec/sshos";
+  struct stat a {};
+  struct stat b {};
+  if (::stat(self_exe_.c_str(), &a) != 0) return false;
+  if (::stat(installed.c_str(), &b) != 0) return false;
+  // Le couple (peripherique, inode) identifie un fichier sans ambiguite ;
+  // comparer les chemins ne dirait rien, puisque /proc/self/exe pointe sur
+  // l'inode et non sur le nom.
+  return a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
 
 std::string UpdateService::updater_path() const {
   if (state_.prefix.empty()) return {};
@@ -73,6 +90,19 @@ void UpdateService::reload() {
     message_ = "mise a jour interrompue";
   } else if (!in_progress) {
     message_ = state_.message;
+  }
+
+  // « IL FAUT REDEMARRER » CONTRE « ON A REDEMARRE ». Le script ecrit
+  // restart-pending et ne peut pas savoir quand le redemarrage a eu lieu :
+  // c'est le demon qui le sait, en constatant qu'il EST le binaire pose.
+  //
+  // On ne reecrit pas le fichier pour autant -- le C++ ne l'ecrit jamais,
+  // c'est ce qui garde git et le reseau hors de son fil. On cesse
+  // simplement de croire un etat que la realite a depasse ; la prochaine
+  // verification remettra le fichier droit.
+  if (state_.status == UpdateStatus::RestartPending && running_is_installed()) {
+    state_.status = UpdateStatus::UpToDate;
+    restart_done_ = true;
   }
 }
 
@@ -232,6 +262,18 @@ std::string short_commit(const std::string& c) {
 }
 
 }  // namespace
+
+std::string UpdateService::progress_line() const {
+  const bool working =
+      child_ > 0 || (!stale_worker_ && (state_.status == UpdateStatus::Checking ||
+                                        state_.status == UpdateStatus::Applying));
+  if (!working) return {};
+  std::string s = state_.status == UpdateStatus::Checking
+                      ? "Verification en cours"
+                      : "Mise a jour en cours";
+  if (!state_.stage.empty()) s += " : " + state_.stage;
+  return s + "...";
+}
 
 std::string UpdateService::news() const {
   if (state_.commits_ahead <= 0) return {};

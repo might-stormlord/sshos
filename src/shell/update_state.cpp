@@ -148,6 +148,10 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
     } else if (key == "pid") {
       std::int64_t v = 0;
       if (read_int64(value, v) && v > 0) parsed.pid = static_cast<pid_t>(v);
+    } else if (key == "stage") {
+      // Meme discipline que `message` : il est dessine, donc borne.
+      parsed.stage = std::string(
+          value.substr(0, std::min(value.size(), std::size_t{40})));
     } else if (key == "message") {
       parsed.message = std::string(value.substr(
           0, std::min(value.size(), kMaxStateMessageBytes)));

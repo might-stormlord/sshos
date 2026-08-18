@@ -165,8 +165,20 @@ int Session::update_delay_ms() const { return update_.delay_ms(); }
 
 bool Session::wants_update_restart() const { return update_.wants_restart(); }
 
+// La fenetre de progression raconte ou l'on en est. Appelee des DEUX
+// reveils : l'echeance du service, et le battement d'une seconde de la
+// session. Le premier seul ne suffit pas -- pendant qu'un enfant travaille,
+// le service n'a plus d'echeance a attendre, donc plus de reveil, et la
+// boite serait restee figee sur « preparation... » pendant deux minutes.
+void Session::refresh_update_modal() {
+  if (modal_kind_ != ModalKind::ApplyRunning || !modal_.is_open()) return;
+  const std::string p = update_.progress_line();
+  if (!p.empty()) modal_.set_body(p);
+}
+
 void Session::tick_update() {
   update_.tick();
+  refresh_update_modal();
   // Le libelle de l'entree et la pastille viennent de changer.
   dirty_ = true;
 }
@@ -569,6 +581,14 @@ void Session::answer_modal(bool confirmed) {
       quit_ = true;
     } else if (modal_kind_ == ModalKind::ApplyUpdate) {
       update_.run("update:apply");
+      // LA FENETRE RESTE. Une compilation et une suite complete prennent une
+      // a deux minutes : refermer la boite laisserait l'utilisateur devant un
+      // bureau muet, sans savoir si quelque chose travaille.
+      modal_.dismiss();
+      modal_kind_ = ModalKind::ApplyRunning;
+      modal_.progress(update_.progress_line());
+      dirty_ = true;
+      return;
     } else if (modal_kind_ == ModalKind::RestartForUpdate) {
       update_.run("update:restart");
     } else if (modal_kind_ == ModalKind::Information) {
@@ -676,6 +696,7 @@ void Session::mark_refresh_due() {
   // Le service n'est pas une App : Session::mark_refresh_due ne parcourt que
   // les fenetres, et rien ne l'appellerait sans cette ligne.
   update_.tick();
+  refresh_update_modal();
   for (const auto& w : wm_.stack()) {
     if (w == nullptr || w->app == nullptr) continue;
     if (w->app->refresh_ms() >= 0) w->app->on_refresh();
@@ -721,8 +742,18 @@ void Session::on_child_exit(pid_t pid, int status) {
     // personne ne va le rouvrir pour verifier si quelque chose a change.
     // « Rien ne se passe » est la pire des reponses.
     if (update_.has_report()) {
-      modal_kind_ = ModalKind::Information;
-      modal_.inform(update_.take_report());
+      const std::string report = update_.take_report();
+      if (modal_kind_ == ModalKind::ApplyRunning && update_.needs_restart()) {
+        // « Plus tard / Redemarrer » dit ce qui va se passer ; « Annuler /
+        // Confirmer » obligerait a le deviner. La progression cede la place
+        // a la question, sans clignoter : c'est la meme boite.
+        modal_kind_ = ModalKind::RestartForUpdate;
+        modal_.ask(report + "\n" + restart_question(), 0, "Plus tard",
+                   "Redemarrer");
+      } else {
+        modal_kind_ = ModalKind::Information;
+        modal_.inform(report);
+      }
     }
     dirty_ = true;
     return;

@@ -60,6 +60,10 @@ get() { # get <cle>
 INSTALLED_VERSION=$(get installed_version)
 REMOTE_VERSION=$(get remote_version)
 COMMITS_AHEAD=$(get commits_ahead)
+# Ou en est le travail. Le demon le lit et le montre : une fenetre qui dit
+# « en cours » pendant deux minutes sans rien preciser laisse croire a un
+# blocage.
+STAGE=""
 SOURCE=$(get source);            [ -n "$SOURCE" ] || SOURCE=git
 INSTALLED=$(get installed_commit); [ -n "$INSTALLED" ] || INSTALLED=unknown
 PREVIOUS=$(get previous_commit)
@@ -88,6 +92,7 @@ remote_commit=$REMOTE
 installed_version=$INSTALLED_VERSION
 remote_version=$REMOTE_VERSION
 commits_ahead=$COMMITS_AHEAD
+stage=$STAGE
 checked_at=$CHECKED
 status=$_st
 pid=$_pid
@@ -240,6 +245,7 @@ do_apply() {
     write_state updates-disabled "installation locale, pas de source distante"
     return 0
   fi
+  STAGE="preparation"
   write_state applying "" "$$"
 
   _tmp=$(mktemp -d)
@@ -250,6 +256,7 @@ do_apply() {
   case "$SOURCE" in
     git)
       have git || { rm -rf "$_tmp"; fail apply-failed "git a disparu"; }
+      STAGE="recuperation des sources"; write_state applying "" "$$"
       ensure_git_tree || { rm -rf "$_tmp"; fail apply-failed "clone ou fetch impossible"; }
       git -C "$SRC" checkout --quiet -B main origin/main \
         || { rm -rf "$_tmp"; fail apply-failed "checkout impossible"; }
@@ -298,6 +305,7 @@ do_apply() {
 
   # Les references suivent le binaire : sans elles, un sshos_tests publie
   # chercherait le repertoire de la machine qui l'a compile.
+  STAGE="installation"; write_state applying "" "$$"
   rm -rf "$GOLDEN" && cp -r "$_refs" "$GOLDEN"
 
   place "$_bin"
@@ -327,6 +335,7 @@ do_apply() {
 build_and_test_tree() { # build_and_test_tree <racine> <tmp>
   have cmake || { fail apply-failed "cmake absent"; return 1; }
   have c++ || { fail apply-failed "compilateur absent"; return 1; }
+  STAGE="compilation"; write_state applying "" "$$"
   if ! timeout "$APPLY_TIMEOUT" cmake -S "$1" -B "$1/build-release" \
         -DCMAKE_BUILD_TYPE=Release >"$STATE_DIR/build.log" 2>&1; then
     fail apply-failed "configuration cmake echouee"; return 1
@@ -337,6 +346,7 @@ build_and_test_tree() { # build_and_test_tree <racine> <tmp>
   fi
   # LE CRITERE EST LE CODE DE RETOUR, jamais un compte de cas : le total
   # perime a chaque commit qui ajoute un test.
+  STAGE="suite de tests"; write_state applying "" "$$"
   if ! run_suite "$1/build-release/sshos_tests" "$1/tests/golden"; then
     fail apply-failed "la suite de tests echoue, rien n'est installe"; return 1
   fi
