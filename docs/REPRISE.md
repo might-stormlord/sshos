@@ -277,6 +277,7 @@ sh tools/install.sh --yes --source git # sans rien demander
 | **Les deux variables ne descendent PAS dans les shells** | Elles sont dans `kBanned` (`src/pty/env.cpp`). Sans ça, `./build-release/sshos --kill` tapé dans un terminal du bureau installé **tuait ce bureau**. Conséquence assumée : `sshos` tapé dans une fenêtre vise l'instance de développement. |
 | **Le démon se relance par CHEMIN** | `daemon_exe_path()` (`src/daemon/daemonize.hpp`) préfère `SSHOS_EXE` à `/proc/self/exe`, qui désigne une **inode** : après une mise à jour, celle du client est l'ancienne version. |
 | **`sshos --daemon` NE REND PAS LA MAIN** | `become_daemon()` ne forke pas ; il exécute la boucle dans le processus appelant. Le détachement vient de `spawn_detached`, côté client. Pour lancer un démon dans un script, passer par le chemin client (`pty.fork()` + exec du binaire **sans** drapeau), comme `tools/sonde.py`. |
+| **L'interface de l'installeur est écrite à la main** | `tools/tui.sh`, du `sh` POSIX et des séquences ANSI : l'installeur tourne **avant** que quoi que ce soit soit compilé, il ne peut pas emprunter le moteur du projet. ⚠️ `${#s}` de dash compte des **octets** : tout texte dessiné doit être en **ASCII pur**, guillemets français compris. |
 | **Le C++ n'écrit jamais l'état** | `~/.local/share/sshos/state`, clé=valeur, écrit par les scripts avec un `rename()` atomique et lu par `src/shell/update_state.cpp`. C'est ce qui garde `git`, `cmake` et le réseau hors du fil unique du démon. |
 | **Le lanceur d'enfant est un `fork()` SIMPLE** | Jamais `spawn_detached` : son double fork rend le pid de l'intermédiaire, et le vrai travail, réparenté à init, ne serait **jamais** récoltable. Voir `launch_updater` dans `src/daemon/session.cpp`. |
 
@@ -284,7 +285,8 @@ sh tools/install.sh --yes --source git # sans rien demander
 
 | Commande | Ce qu'elle fait |
 |---|---|
-| `sh tools/install.sh --help` | installe ; échelle git → binaire publié → archive → arbre local |
+| `sh tools/install.sh` | installe. **Assistant en mode texte** sur un terminal (flèches, clic, `←` pour revenir) ; questions simples sinon — c'est ce que la CI et les sondes empruntent. Échelle git → binaire publié → archive → arbre local |
+| `python3 tools/verif_installeur.py` | pilote l'assistant par un PTY et **mesure la largeur de chaque ligne du cadre** |
 | `sh tools/update.sh --check\|--apply\|--rollback` | posé à l'installation sous `~/.local/libexec/sshos-update` |
 | `python3 tools/verif_isolation.py <HOME>` | **le test qui juge tout** : le binaire de dev ne doit ni voir ni tuer le bureau installé |
 | `python3 tools/sonde_update.py` | la sonde bout-en-bout, sur un faux dépôt git — 26 vérifications |

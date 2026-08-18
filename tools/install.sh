@@ -111,38 +111,23 @@ fetch_stdout() { # fetch_stdout <url>
   esac
 }
 
-# --- 2. les quatre questions ----------------------------------------------
-step "Installation"
+# --- 2. les reglages -------------------------------------------------------
+# Quatre reglages, poses par un assistant quand il y a un terminal, par des
+# questions simples sinon. Les DEUX chemins remplissent exactement les memes
+# variables : PREFIX, WANT_PATH, WANT_LINGER, INSTANCE.
+. "$SELF_DIR/tui.sh"
 
-PREFIX=$(ask "Ou installer ?" "$PREFIX")
-case "$PREFIX" in
-  /*) ;;
-  *) die "le prefixe doit etre un chemin absolu : $PREFIX" ;;
-esac
-
-BIN_DIR="$PREFIX/bin"
-LIBEXEC="$PREFIX/libexec"
 # L'etat vit TOUJOURS sous le home de l'utilisateur, quel que soit le
 # prefixe : il lui est propre, pas propre a l'installation.
 SHARE="${XDG_DATA_HOME:-$HOME/.local/share}/sshos"
-
-EXE="$LIBEXEC/sshos"
-LAUNCHER="$BIN_DIR/sshos"
-UPDATER="$LIBEXEC/sshos-update"
-SRC="$SHARE/src"
-GOLDEN="$SHARE/golden"
-STATE="$SHARE/state"
-LOCK="$SHARE/lock"
-LOG="$SHARE/update.log"
-
-mkdir -p "$BIN_DIR" "$LIBEXEC" "$SHARE"
+mkdir -p "$SHARE"
 
 # Le verrou couvre TOUTE la sequence : rotation du binaire, pose, ecriture
 # de l'etat. Sans lui, deux installations concurrentes font que
-# sshos.previous finit par contenir le NOUVEAU binaire, et le retour
-# arriere restaure alors la version cassee.
+# sshos.previous finit par contenir le NOUVEAU binaire, et le retour arriere
+# restaure alors la version cassee.
 if have flock; then
-  exec 9>"$LOCK"
+  exec 9>"$SHARE/lock"
   flock -n 9 || die "une autre installation ou mise a jour est en cours"
 fi
 
@@ -168,57 +153,290 @@ profile_file() {
   esac
 }
 
-PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
-PROFILE=$(profile_file)
-
 # Deja joignable, ou deja ecrit ? On ne pose pas deux fois la meme ligne.
-path_already_set() {
-  case ":$PATH:" in *":$BIN_DIR:"*) return 0 ;; esac
-  [ -f "$PROFILE" ] && grep -qF "$BIN_DIR" "$PROFILE" && return 0
+path_already_set() { # path_already_set <repertoire bin>
+  case ":$PATH:" in *":$1:"*) return 0 ;; esac
+  [ -f "$(profile_file)" ] && grep -qF "$1" "$(profile_file)" && return 0
   return 1
 }
 
-if path_already_set; then
-  say "  $BIN_DIR est deja joignable."
-else
-  say "  $BIN_DIR n'est pas dans votre PATH : « sshos » ne se lancerait"
-  say "  qu'en tapant son chemin complet."
-  if [ "$WANT_PATH" = ask ]; then
-    say "  Ligne a ajouter dans $PROFILE :"
-    say ""
-    say "      $PATH_LINE"
-    say ""
-    _r=$(ask "  L'ajouter maintenant ? (oui/non)" "oui")
-    case "$_r" in oui|o|yes|y) WANT_PATH=yes ;; *) WANT_PATH=no ;; esac
-  fi
-  if [ "$WANT_PATH" = yes ]; then
-    # Un marqueur, pour qu'un futur lecteur sache d'ou vient la ligne et
-    # qu'une reinstallation ne l'empile pas.
-    {
-      printf '\n# Ajoute par tools/install.sh de ssh_os.\n'
-      printf '%s\n' "$PATH_LINE"
-    } >> "$PROFILE"
-    say "  ajoutee a $PROFILE"
-    say "  Elle prendra effet au prochain shell ; tout de suite :"
-    say ""
-    say "      . $PROFILE"
-    say ""
+# ---------------------------------------------------------------- assistant
+WIZ_STEPS=4
+W_PREFIX_LABEL=""
+W_PATH_LABEL=""
+W_LINGER_LABEL=""
+
+# Les lignes d'ecran ou tombent les choix, remplies pendant le dessin : sans
+# elles le clic ne saurait pas ce qu'on vise. C'est la meme discipline que le
+# panneau du bureau -- ce qu'on clique est ce qu'on voit, parce que les deux
+# lisent la meme chose.
+CLICK1=0; CLICK2=0; CLICK3=0
+
+wiz_load() { # wiz_load <etape>
+  CN=0; SEL_MAX=0
+  CH1=""; CD1=""; CH2=""; CD2=""; CH3=""; CD3=""
+  MODE=choix
+  case "$1" in
+    1) QUESTION="Ou installer ?"
+       CH1="~/.local";    CD1="votre home, sans root"
+       CH2="/usr/local";  CD2="tout le systeme, sudo requis"
+       CH3="autre...";    CD3="saisir un chemin"
+       CN=3 ;;
+    2) QUESTION="Ajouter au PATH ?"
+       CH1="oui";  CD1="pour taper sshos de n'importe ou"
+       CH2="non";  CD2="lancer par le chemin complet"
+       CN=2 ;;
+    3) QUESTION="Survivre a une deconnexion complete ?"
+       CH1="non";  CD1="le demon meurt avec la session"
+       CH2="oui";  CD2="loginctl enable-linger, configuration systeme"
+       CN=2 ;;
+    4) QUESTION="Nom d'instance"
+       MODE=saisie
+       CN=0 ;;
+  esac
+  SEL_MAX=$CN
+}
+
+wiz_answered_row() { # wiz_answered_row <libelle> <valeur>
+  _t=$(printf '%-30s %s' "$1" "$2")
+  printf '%s \033[32m%s\033[0m ' "$G_V" "$G_OK"
+  ui_pad "$_t" $((UI_COLS - 6))
+  printf ' %s\n' "$G_V"
+}
+
+wiz_choice_row() { # wiz_choice_row <indice> <libelle> <description>
+  _t=$(printf '  %-14s %s' "$2" "$3")
+  if [ "$1" = "$SEL" ]; then
+    printf '%s \033[36m%s\033[0m \033[1m' "$G_V" "$G_SEL"
+    ui_pad "$_t" $((UI_COLS - 6))
+    printf '\033[0m %s\n' "$G_V"
   else
-    say "  Non ajoutee. Lancez par le chemin complet, ou ajoutez-la vous-meme."
+    printf '%s   \033[2m' "$G_V"
+    ui_pad "$_t" $((UI_COLS - 6))
+    printf '\033[0m %s\n' "$G_V"
   fi
+}
+
+wiz_draw() {
+  ui_home
+  R=1
+  ui_top;                                      R=$((R + 1))
+  ui_title "Installation de ssh_os";           R=$((R + 1))
+  ui_blank;                                    R=$((R + 1))
+
+  [ -n "$W_PREFIX_LABEL" ] && { wiz_answered_row "Ou installer ?" "$W_PREFIX_LABEL"; R=$((R + 1)); }
+  [ -n "$W_PATH_LABEL" ]   && { wiz_answered_row "Ajouter au PATH ?" "$W_PATH_LABEL"; R=$((R + 1)); }
+  [ -n "$W_LINGER_LABEL" ] && { wiz_answered_row "Deconnexion complete" "$W_LINGER_LABEL"; R=$((R + 1)); }
+  [ "$STEP" -gt 1 ] && { ui_blank; R=$((R + 1)); }
+
+  printf '%s \033[36m%s\033[0m \033[1m' "$G_V" "$G_SEL"
+  ui_pad "$QUESTION" $((UI_COLS - 6))
+  printf '\033[0m %s\n' "$G_V"
+  R=$((R + 1))
+  ui_blank; R=$((R + 1))
+
+  CLICK1=0; CLICK2=0; CLICK3=0
+  if [ "$MODE" = saisie ]; then
+    printf '%s   [ \033[1m' "$G_V"
+    ui_pad "$BUF" 20
+    printf '\033[0m]'
+    ui_pad "" $((UI_COLS - 29))
+    printf ' %s\n' "$G_V"
+    R=$((R + 1))
+    ui_row ' ' "  la valeur de SSHOS_BOOT_ID, qui separe deux bureaux"
+    R=$((R + 1))
+  else
+    [ "$CN" -ge 1 ] && { CLICK1=$R; wiz_choice_row 1 "$CH1" "$CD1"; R=$((R + 1)); }
+    [ "$CN" -ge 2 ] && { CLICK2=$R; wiz_choice_row 2 "$CH2" "$CD2"; R=$((R + 1)); }
+    [ "$CN" -ge 3 ] && { CLICK3=$R; wiz_choice_row 3 "$CH3" "$CD3"; R=$((R + 1)); }
+  fi
+
+  _n=$((3 - CN))
+  [ "$MODE" = saisie ] && _n=1
+  while [ "$_n" -gt 0 ]; do ui_blank; R=$((R + 1)); _n=$((_n - 1)); done
+
+  ui_blank;                       R=$((R + 1))
+  ui_bar $((STEP - 1)) $WIZ_STEPS; R=$((R + 1))
+  ui_blank;                       R=$((R + 1))
+
+  if [ "$MODE" = saisie ]; then
+    ui_row ' ' "taper le nom   Entree valider   Gauche revenir"
+  else
+    ui_row ' ' "Haut/Bas choisir   Entree valider   clic aussi   Gauche revenir"
+  fi
+  R=$((R + 1))
+  ui_bottom
+}
+
+wiz_apply() { # enregistre la reponse de l'etape courante
+  case "$STEP" in
+    1) case "$SEL" in
+         1) PREFIX="$HOME/.local"; W_PREFIX_LABEL="~/.local" ;;
+         2) PREFIX="/usr/local";   W_PREFIX_LABEL="/usr/local" ;;
+         3) return 1 ;;  # « autre... » : bascule en saisie
+       esac ;;
+    2) case "$SEL" in
+         1) WANT_PATH=yes; W_PATH_LABEL="ajoutee a $(basename "$(profile_file)")" ;;
+         2) WANT_PATH=no;  W_PATH_LABEL="non, chemin complet" ;;
+       esac ;;
+    3) case "$SEL" in
+         1) WANT_LINGER=no;  W_LINGER_LABEL="non" ;;
+         2) WANT_LINGER=yes; W_LINGER_LABEL="oui, linger" ;;
+       esac ;;
+  esac
+  return 0
+}
+
+wiz_tui() {
+  ui_begin
+  STEP=1
+  SEL=1
+  BUF=""
+  wiz_load "$STEP"
+
+  while [ "$STEP" -le "$WIZ_STEPS" ]; do
+    # L'etape du PATH ne se pose pas quand le repertoire est deja joignable :
+    # une question dont la reponse ne change rien n'est pas une question.
+    if [ "$STEP" = 2 ] && path_already_set "$PREFIX/bin"; then
+      WANT_PATH=no
+      W_PATH_LABEL="deja joignable"
+      STEP=3; SEL=1; wiz_load 3
+      continue
+    fi
+
+    wiz_draw
+    ui_key
+
+    case "$KEY" in
+      ctrlc) ui_end; echo "install.sh: abandonne" >&2; exit 130 ;;
+      up)    [ "$MODE" = choix ] && { SEL=$((SEL - 1)); [ "$SEL" -lt 1 ] && SEL=$SEL_MAX; } ;;
+      down)  [ "$MODE" = choix ] && { SEL=$((SEL + 1)); [ "$SEL" -gt "$SEL_MAX" ] && SEL=1; } ;;
+      left)
+        if [ "$MODE" = saisie ] && [ "$STEP" = 1 ]; then
+          MODE=choix; wiz_load 1; SEL=1
+        elif [ "$STEP" -gt 1 ]; then
+          STEP=$((STEP - 1)); SEL=1; BUF=""
+          case "$STEP" in
+            1) W_PREFIX_LABEL="" ;;
+            2) W_PATH_LABEL="" ;;
+            3) W_LINGER_LABEL="" ;;
+          esac
+          wiz_load "$STEP"
+        fi ;;
+      click)
+        _hit=0
+        [ "$CLICK1" -gt 0 ] && [ "$MOUSE_Y" = "$CLICK1" ] && { SEL=1; _hit=1; }
+        [ "$CLICK2" -gt 0 ] && [ "$MOUSE_Y" = "$CLICK2" ] && { SEL=2; _hit=1; }
+        [ "$CLICK3" -gt 0 ] && [ "$MOUSE_Y" = "$CLICK3" ] && { SEL=3; _hit=1; }
+        # Cliquer un choix le selectionne ET le valide : c'est ce qu'on
+        # attend d'un clic, et c'est la regle « la souris d'abord ».
+        [ "$_hit" = 1 ] && KEY=enter
+        ;;
+    esac
+
+    if [ "$KEY" = enter ]; then
+      if [ "$MODE" = saisie ]; then
+        case "$STEP" in
+          1) if [ -n "$BUF" ]; then
+               case "$BUF" in
+                 /*) PREFIX="$BUF"; W_PREFIX_LABEL="$BUF"
+                     MODE=choix; STEP=2; SEL=1; BUF=""; wiz_load 2 ;;
+                 *)  : ;;  # un prefixe doit etre absolu : on ne bouge pas
+               esac
+             fi ;;
+          4) [ -n "$BUF" ] && INSTANCE="$BUF"
+             STEP=$((STEP + 1)) ;;
+        esac
+      else
+        if wiz_apply; then
+          STEP=$((STEP + 1))
+          SEL=1
+          [ "$STEP" -le "$WIZ_STEPS" ] && wiz_load "$STEP"
+          [ "$STEP" = 4 ] && BUF="$INSTANCE"
+        else
+          MODE=saisie
+          BUF=""
+        fi
+      fi
+      continue
+    fi
+
+    if [ "$MODE" = saisie ]; then
+      case "$KEY" in
+        char)      BUF="$BUF$KEY_CHAR" ;;
+        backspace) BUF=${BUF%?} ;;
+      esac
+    fi
+  done
+
+  ui_end
+}
+
+wiz_plain() {
+  step "Installation"
+  PREFIX=$(ask "Ou installer ?" "$PREFIX")
+  if ! path_already_set "$PREFIX/bin"; then
+    if [ "$WANT_PATH" = ask ]; then
+      say "  $PREFIX/bin n'est pas dans votre PATH."
+      _r=$(ask "  Ajouter la ligne a $(profile_file) ? (oui/non)" "oui")
+      case "$_r" in oui|o|yes|y) WANT_PATH=yes ;; *) WANT_PATH=no ;; esac
+    fi
+  else
+    WANT_PATH=no
+    say "  $PREFIX/bin est deja joignable."
+  fi
+  if [ "$WANT_LINGER" = ask ]; then
+    say "  Faire survivre le demon a une deconnexion COMPLETE demande"
+    say "  loginctl enable-linger, qui est une configuration systeme."
+    _r=$(ask "  La poser maintenant ? (oui/non)" "non")
+    case "$_r" in oui|o|yes|y) WANT_LINGER=yes ;; *) WANT_LINGER=no ;; esac
+  fi
+  INSTANCE=$(ask "Nom d'instance (valeur de SSHOS_BOOT_ID)" "$INSTANCE")
+}
+
+if ui_possible; then
+  wiz_tui
+else
+  wiz_plain
 fi
 
-# La persistance apres deconnexion complete : c'est de la configuration
-# systeme, donc elle se demande.
-if [ "$WANT_LINGER" = ask ]; then
-  say "  Faire survivre le demon a une deconnexion COMPLETE demande"
-  say "  « loginctl enable-linger », qui est une configuration systeme."
-  _r=$(ask "  La poser maintenant ? (oui/non)" "non")
-  case "$_r" in oui|o|yes|y) WANT_LINGER=yes ;; *) WANT_LINGER=no ;; esac
-fi
-
-INSTANCE=$(ask "Nom d'instance (valeur de SSHOS_BOOT_ID)" "$INSTANCE")
+case "$PREFIX" in
+  /*) ;;
+  *) die "le prefixe doit etre un chemin absolu : $PREFIX" ;;
+esac
 [ -n "$INSTANCE" ] || die "le nom d'instance ne peut pas etre vide"
+
+BIN_DIR="$PREFIX/bin"
+LIBEXEC="$PREFIX/libexec"
+EXE="$LIBEXEC/sshos"
+LAUNCHER="$BIN_DIR/sshos"
+UPDATER="$LIBEXEC/sshos-update"
+SRC="$SHARE/src"
+GOLDEN="$SHARE/golden"
+STATE="$SHARE/state"
+LOG="$SHARE/update.log"
+mkdir -p "$BIN_DIR" "$LIBEXEC"
+
+step "Reglages retenus"
+say "  emplacement  : $PREFIX"
+say "  instance     : $INSTANCE"
+
+# La ligne de PATH, si elle a ete acceptee. Idempotente : ni si le
+# repertoire est deja joignable, ni si le profil la contient deja.
+PROFILE=$(profile_file)
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+if [ "$WANT_PATH" = yes ] && ! path_already_set "$BIN_DIR"; then
+  {
+    printf '\n# Ajoute par tools/install.sh de ssh_os.\n'
+    printf '%s\n' "$PATH_LINE"
+  } >> "$PROFILE"
+  say "  PATH         : ligne ajoutee a $PROFILE"
+  say "                 effet au prochain shell, ou tout de suite : . $PROFILE"
+elif path_already_set "$BIN_DIR"; then
+  say "  PATH         : $BIN_DIR est deja joignable"
+else
+  say "  PATH         : inchange, lancez par $LAUNCHER"
+fi
 
 # --- 3. l'echelle d'acquisition -------------------------------------------
 TMP=$(mktemp -d)
