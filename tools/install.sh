@@ -23,6 +23,7 @@ INSTANCE="local"
 WANT_SOURCE="auto"      # auto | git | release | archive | local
 ASSUME_YES="no"
 WANT_LINGER="ask"       # ask | yes | no
+WANT_PATH="ask"         # ask | yes | no
 LOCAL_TREE=""           # arbre a utiliser pour l'echelon 4
 
 usage() {
@@ -34,6 +35,7 @@ usage: install.sh [options]
   --source QUOI       auto | git | release | archive | local (defaut : auto)
   --local-tree CHEMIN arbre a utiliser pour --source local (defaut : celui du script)
   --linger yes|no     poser ou non loginctl enable-linger, sans demander
+  --path yes|no       ajouter ou non le repertoire au PATH, sans demander
   --yes               ne rien demander, prendre les defauts
   --help              ceci
 
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
     --source)     WANT_SOURCE="$2"; shift 2 ;;
     --local-tree) LOCAL_TREE="$2"; shift 2 ;;
     --linger)     WANT_LINGER="$2"; shift 2 ;;
+    --path)       WANT_PATH="$2"; shift 2 ;;
     --yes)        ASSUME_YES="yes"; shift ;;
     --help|-h)    usage; exit 0 ;;
     *) echo "install.sh: option inconnue : $1" >&2; usage >&2; exit 2 ;;
@@ -143,17 +146,67 @@ if have flock; then
   flock -n 9 || die "une autre installation ou mise a jour est en cours"
 fi
 
-# Le PATH : on donne la ligne exacte, on ne touche pas au profil.
-case ":$PATH:" in
-  *":$BIN_DIR:"*) say "  $BIN_DIR est dans le PATH." ;;
-  *)
-    say "  ATTENTION : $BIN_DIR n'est pas dans votre PATH."
-    say "  Ajoutez cette ligne a votre profil (je n'y touche pas) :"
+# Le fichier ou la ligne de PATH doit aller.
+#
+# ~/.profile, ET PAS ~/.bashrc. Deux raisons, toutes deux verifiees :
+#
+#  - un shell de CONNEXION -- celui d'une session SSH -- ne lit ~/.bashrc que
+#    si ~/.profile le source. C'est le cas sur Ubuntu, ce n'est pas une regle.
+#    Ecrire dans ~/.bashrc laisse donc « sshos » introuvable sur toute machine
+#    ou ce chainage n'existe pas ;
+#  - ~/.bashrc commence presque toujours par « [ -z "$PS1" ] && return », donc
+#    la ligne n'y vaudrait que pour les shells INTERACTIFS : « ssh machine
+#    sshos » ne la verrait jamais. Depuis ~/.profile, si.
+#
+# zsh ne lit pas ~/.profile : pour lui, ~/.zprofile, qui joue le meme role.
+profile_file() {
+  _sh=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
+  [ -n "$_sh" ] || _sh="${SHELL:-/bin/sh}"
+  case "$_sh" in
+    */zsh) printf '%s' "$HOME/.zprofile" ;;
+    *)     printf '%s' "$HOME/.profile" ;;
+  esac
+}
+
+PATH_LINE="export PATH=\"$BIN_DIR:\$PATH\""
+PROFILE=$(profile_file)
+
+# Deja joignable, ou deja ecrit ? On ne pose pas deux fois la meme ligne.
+path_already_set() {
+  case ":$PATH:" in *":$BIN_DIR:"*) return 0 ;; esac
+  [ -f "$PROFILE" ] && grep -qF "$BIN_DIR" "$PROFILE" && return 0
+  return 1
+}
+
+if path_already_set; then
+  say "  $BIN_DIR est deja joignable."
+else
+  say "  $BIN_DIR n'est pas dans votre PATH : « sshos » ne se lancerait"
+  say "  qu'en tapant son chemin complet."
+  if [ "$WANT_PATH" = ask ]; then
+    say "  Ligne a ajouter dans $PROFILE :"
     say ""
-    say "      export PATH=\"$BIN_DIR:\$PATH\""
+    say "      $PATH_LINE"
     say ""
-    ;;
-esac
+    _r=$(ask "  L'ajouter maintenant ? (oui/non)" "oui")
+    case "$_r" in oui|o|yes|y) WANT_PATH=yes ;; *) WANT_PATH=no ;; esac
+  fi
+  if [ "$WANT_PATH" = yes ]; then
+    # Un marqueur, pour qu'un futur lecteur sache d'ou vient la ligne et
+    # qu'une reinstallation ne l'empile pas.
+    {
+      printf '\n# Ajoute par tools/install.sh de ssh_os.\n'
+      printf '%s\n' "$PATH_LINE"
+    } >> "$PROFILE"
+    say "  ajoutee a $PROFILE"
+    say "  Elle prendra effet au prochain shell ; tout de suite :"
+    say ""
+    say "      . $PROFILE"
+    say ""
+  else
+    say "  Non ajoutee. Lancez par le chemin complet, ou ajoutez-la vous-meme."
+  fi
+fi
 
 # La persistance apres deconnexion complete : c'est de la configuration
 # systeme, donc elle se demande.
