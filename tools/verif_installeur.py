@@ -139,7 +139,7 @@ def main():
         check("la question 1 est la", "Ou installer ?" in frame)
         check("les trois choix sont la",
               ".local" in frame and "/usr/local" in frame and "autre" in frame)
-        check("la barre de progression est la", "0/4" in frame)
+        check("la barre de progression est la", "0/3" in frame)
         check("l'aide mentionne le clic", "clic" in frame)
 
         print("\n== 2. Les fleches deplacent la selection")
@@ -156,7 +156,7 @@ def main():
         p.send(ENTER)
         f4 = last_frame(p.drain())
         check("l'etape 1 est cochee", "✓" in f4 and "Ou installer" in f4)
-        check("la progression a avance", "1/4" in f4)
+        check("la progression a avance", "1/3" in f4)
         widths = sorted(set(len(l) for l in box_lines(f4)))
         check("le cadre reste droit avec une ligne cochee", len(widths) == 1,
               "largeurs : %s" % widths)
@@ -165,7 +165,7 @@ def main():
         p.send(LEFT)
         f5 = last_frame(p.drain())
         check("on est revenu a la question 1",
-              "Ou installer ?" in f5 and "0/4" in f5)
+              "Ou installer ?" in f5 and "0/3" in f5)
 
         print("\n== 5. Le clic selectionne ET valide")
         # On retrouve la ligne d'ecran du second choix et on clique dessus.
@@ -180,7 +180,7 @@ def main():
         else:
             p.send(click(target))
             f6 = last_frame(p.drain())
-            check("le clic a valide et avance", "2/4" in f6 or "1/4" in f6,
+            check("le clic a valide et avance", "2/3" in f6 or "1/3" in f6,
                   "ecran :\n" + f6[:400])
             check("c'est bien /usr/local qui est retenu", "/usr/local" in f6)
 

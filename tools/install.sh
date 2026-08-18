@@ -22,7 +22,12 @@ PREFIX="${HOME}/.local"
 INSTANCE="local"
 WANT_SOURCE="auto"      # auto | git | release | archive | local
 ASSUME_YES="no"
-WANT_LINGER="ask"       # ask | yes | no
+# loginctl enable-linger n'est PLUS demande. Le demon avertit lui-meme, au
+# premier lancement et seulement quand le cas se presente (main.cpp) :
+# « logind est configure avec KillUserProcesses=yes ». Le bon message, au bon
+# moment, par le bon composant -- le doubler ici a l'aveugle n'apportait rien.
+# Le drapeau reste, pour qui sait qu'il en a besoin.
+WANT_LINGER="no"        # yes | no, via --linger
 WANT_PATH="ask"         # ask | yes | no
 LOCAL_TREE=""           # arbre a utiliser pour l'echelon 4
 
@@ -39,7 +44,8 @@ usage: install.sh [options]
   --yes               ne rien demander, prendre les defauts
   --help              ceci
 
-Sans --yes et sur un terminal, quatre questions sont posees.
+Sur un terminal, un assistant pose trois reglages. Sans terminal ou
+avec --yes, les defauts s'appliquent sans rien demander.
 FIN
 }
 
@@ -112,9 +118,9 @@ fetch_stdout() { # fetch_stdout <url>
 }
 
 # --- 2. les reglages -------------------------------------------------------
-# Quatre reglages, poses par un assistant quand il y a un terminal, par des
+# Trois reglages, poses par un assistant quand il y a un terminal, par des
 # questions simples sinon. Les DEUX chemins remplissent exactement les memes
-# variables : PREFIX, WANT_PATH, WANT_LINGER, INSTANCE.
+# variables : PREFIX, WANT_PATH, INSTANCE.
 . "$SELF_DIR/tui.sh"
 
 # L'etat vit TOUJOURS sous le home de l'utilisateur, quel que soit le
@@ -161,10 +167,9 @@ path_already_set() { # path_already_set <repertoire bin>
 }
 
 # ---------------------------------------------------------------- assistant
-WIZ_STEPS=4
+WIZ_STEPS=3
 W_PREFIX_LABEL=""
 W_PATH_LABEL=""
-W_LINGER_LABEL=""
 
 # Les lignes d'ecran ou tombent les choix, remplies pendant le dessin : sans
 # elles le clic ne saurait pas ce qu'on vise. C'est la meme discipline que le
@@ -175,6 +180,7 @@ CLICK1=0; CLICK2=0; CLICK3=0
 wiz_load() { # wiz_load <etape>
   CN=0; SEL_MAX=0
   CH1=""; CD1=""; CH2=""; CD2=""; CH3=""; CD3=""
+  NOTE=""
   MODE=choix
   case "$1" in
     1) QUESTION="Ou installer ?"
@@ -186,11 +192,7 @@ wiz_load() { # wiz_load <etape>
        CH1="oui";  CD1="pour taper sshos de n'importe ou"
        CH2="non";  CD2="lancer par le chemin complet"
        CN=2 ;;
-    3) QUESTION="Survivre a une deconnexion complete ?"
-       CH1="non";  CD1="le demon meurt avec la session"
-       CH2="oui";  CD2="loginctl enable-linger, configuration systeme"
-       CN=2 ;;
-    4) QUESTION="Nom d'instance"
+    3) QUESTION="Nom d'instance"
        MODE=saisie
        CN=0 ;;
   esac
@@ -226,14 +228,20 @@ wiz_draw() {
 
   [ -n "$W_PREFIX_LABEL" ] && { wiz_answered_row "Ou installer ?" "$W_PREFIX_LABEL"; R=$((R + 1)); }
   [ -n "$W_PATH_LABEL" ]   && { wiz_answered_row "Ajouter au PATH ?" "$W_PATH_LABEL"; R=$((R + 1)); }
-  [ -n "$W_LINGER_LABEL" ] && { wiz_answered_row "Deconnexion complete" "$W_LINGER_LABEL"; R=$((R + 1)); }
-  [ "$STEP" -gt 1 ] && { ui_blank; R=$((R + 1)); }
+    [ "$STEP" -gt 1 ] && { ui_blank; R=$((R + 1)); }
 
   printf '%s \033[36m%s\033[0m \033[1m' "$G_V" "$G_SEL"
   ui_pad "$QUESTION" $((UI_COLS - 6))
   printf '\033[0m %s\n' "$G_V"
   R=$((R + 1))
-  ui_blank; R=$((R + 1))
+  if [ -n "$NOTE" ]; then
+    printf '%s   \033[2m' "$G_V"
+    ui_pad "$NOTE" $((UI_COLS - 6))
+    printf '\033[0m %s\n' "$G_V"
+    R=$((R + 1))
+  else
+    ui_blank; R=$((R + 1))
+  fi
 
   CLICK1=0; CLICK2=0; CLICK3=0
   if [ "$MODE" = saisie ]; then
@@ -279,10 +287,6 @@ wiz_apply() { # enregistre la reponse de l'etape courante
          1) WANT_PATH=yes; W_PATH_LABEL="ajoutee a $(basename "$(profile_file)")" ;;
          2) WANT_PATH=no;  W_PATH_LABEL="non, chemin complet" ;;
        esac ;;
-    3) case "$SEL" in
-         1) WANT_LINGER=no;  W_LINGER_LABEL="non" ;;
-         2) WANT_LINGER=yes; W_LINGER_LABEL="oui, linger" ;;
-       esac ;;
   esac
   return 0
 }
@@ -300,7 +304,7 @@ wiz_tui() {
     if [ "$STEP" = 2 ] && path_already_set "$PREFIX/bin"; then
       WANT_PATH=no
       W_PATH_LABEL="deja joignable"
-      STEP=3; SEL=1; wiz_load 3
+      STEP=3; SEL=1; wiz_load 3; BUF="$INSTANCE"
       continue
     fi
 
@@ -319,7 +323,6 @@ wiz_tui() {
           case "$STEP" in
             1) W_PREFIX_LABEL="" ;;
             2) W_PATH_LABEL="" ;;
-            3) W_LINGER_LABEL="" ;;
           esac
           wiz_load "$STEP"
         fi ;;
@@ -344,7 +347,7 @@ wiz_tui() {
                  *)  : ;;  # un prefixe doit etre absolu : on ne bouge pas
                esac
              fi ;;
-          4) [ -n "$BUF" ] && INSTANCE="$BUF"
+          3) [ -n "$BUF" ] && INSTANCE="$BUF"
              STEP=$((STEP + 1)) ;;
         esac
       else
@@ -352,7 +355,7 @@ wiz_tui() {
           STEP=$((STEP + 1))
           SEL=1
           [ "$STEP" -le "$WIZ_STEPS" ] && wiz_load "$STEP"
-          [ "$STEP" = 4 ] && BUF="$INSTANCE"
+          [ "$STEP" = 3 ] && BUF="$INSTANCE"
         else
           MODE=saisie
           BUF=""
@@ -384,12 +387,6 @@ wiz_plain() {
   else
     WANT_PATH=no
     say "  $PREFIX/bin est deja joignable."
-  fi
-  if [ "$WANT_LINGER" = ask ]; then
-    say "  Faire survivre le demon a une deconnexion COMPLETE demande"
-    say "  loginctl enable-linger, qui est une configuration systeme."
-    _r=$(ask "  La poser maintenant ? (oui/non)" "non")
-    case "$_r" in oui|o|yes|y) WANT_LINGER=yes ;; *) WANT_LINGER=no ;; esac
   fi
   INSTANCE=$(ask "Nom d'instance (valeur de SSHOS_BOOT_ID)" "$INSTANCE")
 }
