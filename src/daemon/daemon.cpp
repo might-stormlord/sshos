@@ -15,11 +15,13 @@
 #include <vector>
 
 #include "common/frameclock.hpp"
+#include "common/oom.hpp"
 #include "common/net.hpp"
 #include "common/outqueue.hpp"
 #include "common/platform.hpp"
 #include "common/proto.hpp"
 #include "daemon/host.hpp"
+#include "daemon/journal.hpp"
 #include "daemon/reap.hpp"
 #include "daemon/session.hpp"
 #include "input/parser.hpp"
@@ -112,7 +114,25 @@ int run_daemon(std::string_view socket_name) {
   }
   set_nonblock(listener.get());
 
+  // HORS D'ATTEINTE DU TUEUR DE MEMOIRE, des que le socket est a nous. Le
+  // demon pese quelques megaoctets et porte TOUTE la session : le sacrifier
+  // pour en recuperer six detruit une journee de travail (common/oom.hpp).
+  // Sans privilege l'appel echoue, et ce n'est pas une raison de ne pas
+  // demarrer -- un demon non protege reste un demon.
+  protect_from_oom();
+
   RealPlatform plat;
+
+  // LE JOURNAL, et la premiere ligne tout de suite. Un bureau qui disparait
+  // ne laissait AUCUNE trace : ni la raison d'un arret demande, ni meme la
+  // preuve qu'il avait demarre. Une vie qui commence ici et ne se termine
+  // par aucune ligne est la signature d'un SIGKILL -- celui du tueur de
+  // memoire, typiquement, qui ne laisse a personne le temps d'ecrire.
+  Journal journal(plat, daemon_journal_path());
+  arm_crash_note(journal.path());
+  journal.note("demarrage pid=" + std::to_string(static_cast<int>(::getpid())) +
+               " socket=" + std::string(socket_name));
+  const char* raison_arret = "arret (raison inconnue)";
   Surface screen(80, 24);
   FrameClock clock{std::chrono::milliseconds(kFrameIntervalMs)};
 
@@ -374,7 +394,11 @@ int run_daemon(std::string_view socket_name) {
         // `signalfd` jusqu'a EAGAIN : un enregistrement laisse derriere
         // lui laisserait epoll nous rappeler en boucle.
         while (::read(sigfd.get(), &si, sizeof si) == sizeof si) {
-          if (si.ssi_signo == SIGTERM || si.ssi_signo == SIGINT) running = false;
+          if (si.ssi_signo == SIGTERM || si.ssi_signo == SIGINT) {
+            raison_arret = si.ssi_signo == SIGTERM ? "arret sur SIGTERM"
+                                                   : "arret sur SIGINT";
+            running = false;
+          }
           if (si.ssi_signo == SIGCHLD) child_died = true;
         }
         // Et celui-la recolte TOUS les morts, pas seulement celui que
@@ -760,6 +784,7 @@ int run_daemon(std::string_view socket_name) {
       ::epoll_ctl(ep.get(), EPOLL_CTL_DEL, listener.get(), nullptr);
       listener.reset();
       drop_client(kDetachReasonUpdate);
+      raison_arret = "arret pour terminer une mise a jour";
       running = false;
     }
 
@@ -767,7 +792,10 @@ int run_daemon(std::string_view socket_name) {
     // EPOLLIN du client : une sortie décidée ailleurs n'aurait pris effet
     // qu'à la frappe suivante, que l'utilisateur n'a aucune raison de faire
     // puisqu'il attend justement que le bureau reparte.
-    if (session.wants_quit()) running = false;
+    if (session.wants_quit()) {
+      raison_arret = "arret demande (quitter la session)";
+      running = false;
+    }
 
     const int next = clock.delay_ms(FrameClock::Clock::now());
     itimerspec its{};
@@ -779,6 +807,7 @@ int run_daemon(std::string_view socket_name) {
   }
 
   drop_client("le demon s'arrete");
+  journal.note(raison_arret);
   return 0;
 }
 

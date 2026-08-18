@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "common/oom.hpp"
 #include "harness.hpp"
 #include "pty/env.hpp"
 #include "pty/pty.hpp"
@@ -169,6 +170,68 @@ TEST(pty_hands_the_child_default_dispositions) {
   CHECK((ignored & (1ULL << (SIGHUP - 1))) == 0);
   CHECK(reaped_within(p));
 }
+
+namespace {
+
+// Le reglage du tueur de memoire du processus courant. Lu et pose a la
+// main : le test doit pouvoir le RENDRE, sans quoi il laisserait tout
+// l'ouvrier -- et donc tous les cas suivants -- immunise.
+std::string oom_reglage() {
+  const int fd = ::open("/proc/self/oom_score_adj", O_RDONLY);
+  if (fd < 0) return "<illisible>";
+  char buf[64];
+  const ssize_t n = ::read(fd, buf, sizeof buf - 1);
+  ::close(fd);
+  if (n <= 0) return "<vide>";
+  std::string s(buf, static_cast<size_t>(n));
+  while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
+  return s;
+}
+
+void oom_pose(const std::string& valeur) {
+  const int fd = ::open("/proc/self/oom_score_adj", O_WRONLY);
+  if (fd < 0) return;
+  const ssize_t ignored = ::write(fd, valeur.data(), valeur.size());
+  (void)ignored;
+  ::close(fd);
+}
+
+std::string sans_blancs(const std::string& s) {
+  std::string out;
+  for (char c : s) {
+    if (c != ' ' && c != '\r' && c != '\n' && c != '\t') out.push_back(c);
+  }
+  return out;
+}
+
+}  // namespace
+
+// QUATRIEME heritage. Le reglage du tueur de memoire survit a fork() ET a
+// execve(). Le demon se met hors d'atteinte (common/oom.hpp) parce qu'il
+// porte toute la session ; un invite qui GARDERAIT cette immunite ferait
+// tuer PostgreSQL a la place du « make -j12 » lance dans une fenetre du
+// bureau -- exactement l'inverse de ce qu'on cherchait.
+TEST(pty_hands_the_child_no_immunity_from_the_oom_killer) {
+  const std::string avant = oom_reglage();
+  if (!sshos::protect_from_oom()) {
+    // Sans CAP_SYS_RESOURCE le demon lui-meme ne peut pas se proteger : il
+    // n'y a alors aucune immunite a heriter, et rien a montrer ici.
+    CHECK_EQ(oom_reglage(), avant);
+    return;
+  }
+
+  Pty p;
+  const std::string err =
+      p.spawn(program_running({"/bin/cat", "/proc/self/oom_score_adj"}));
+  const std::string out = read_until(p, "0");
+  oom_pose(avant);  // AVANT toute assertion : un cas qui echoue doit rendre
+
+  REQUIRE_EQ(err, std::string());
+  CHECK_EQ(sans_blancs(out), std::string("0"));
+  CHECK_EQ(oom_reglage(), avant);
+  CHECK(reaped_within(p));
+}
+
 
 // TROISIÈME héritage. Un maître fuité laisse le shell de la fenêtre A lire
 // la sortie de la fenêtre B, et empêche à jamais la libération du PTY de A.

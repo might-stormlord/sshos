@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "common/oom.hpp"
+
 namespace sshos {
 namespace {
 
@@ -79,6 +81,11 @@ pid_t spawn_detached(const std::vector<std::string>& argv) {
   // become_daemon() reste l'endroit qui pose SIG_IGN sur SIGHUP : c'est le
   // démon lui-même qui a besoin de cette politique, pas son lanceur
   // générique.
+
+  // Le reglage du tueur de memoire s'herite et survit a execve : ce qu'on
+  // lance detache est un processus ORDINAIRE, jamais un heritier de
+  // l'immunite du demon (common/oom.hpp).
+  drop_oom_protection();
 
   std::vector<char*> raw;
   raw.reserve(argv.size() + 1);

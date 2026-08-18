@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "app/catalog.hpp"
+#include "common/oom.hpp"
+#include "common/paths.hpp"
 #include "daemon/daemonize.hpp"
 #include "daemon/host.hpp"
 #include "render/width.hpp"
@@ -81,12 +83,9 @@ namespace {
 // L'etat de la mise a jour est propre a l'UTILISATEUR, pas a l'installation :
 // il vit sous son home quel que soit le prefixe choisi.
 std::string update_state_path() {
-  if (const char* x = std::getenv("XDG_DATA_HOME")) {
-    if (*x != '\0') return std::string(x) + "/sshos/state";
-  }
-  const char* home = std::getenv("HOME");
-  if (home == nullptr || *home == '\0') return {};
-  return std::string(home) + "/.local/share/sshos/state";
+  const std::string dir = user_data_dir();
+  if (dir.empty()) return {};
+  return dir + "/state";
 }
 
 std::string update_log_path() {
@@ -128,6 +127,11 @@ pid_t launch_updater(const std::vector<std::string>& argv) {
   sigemptyset(&dfl.sa_mask);
   const int signals[] = {SIGPIPE, SIGHUP, SIGTERM, SIGINT, SIGCHLD};
   for (int sig : signals) ::sigaction(sig, &dfl, nullptr);
+
+  // L'IMMUNITE DU DEMON NE DESCEND PAS ICI. Une mise a jour compile le
+  // projet -- c'est le processus le plus gourmand que ce bureau lance
+  // jamais, et le dernier auquel il faille promettre de ne pas mourir.
+  drop_oom_protection();
 
   // La sortie ne doit ni se perdre ni atteindre le terminal de l'utilisateur.
   const int fd = ::open(log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);

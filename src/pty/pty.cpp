@@ -1,5 +1,7 @@
 #include "pty/pty.hpp"
 
+#include "common/oom.hpp"
+
 #include <csignal>
 #include <cstring>
 #include <cerrno>
@@ -107,6 +109,14 @@ std::string Pty::spawn(const PtySpawn& s) {
       sigemptyset(&dfl.sa_mask);
       ::sigaction(sig, &dfl, nullptr);
     }
+
+    // QUATRIÈME héritage : le réglage du tueur de mémoire survit lui aussi,
+    // et à execve() en plus. Le démon se met hors d'atteinte parce qu'il
+    // porte toute la session ; un invité qui garderait cette immunité ferait
+    // tuer la base de données de la machine à la place du « make -j12 »
+    // lancé dans une fenêtre. Remonter à 0 est toujours permis, même sans
+    // privilège -- seule la descente est gardée par le noyau.
+    drop_oom_protection();
 
     // Quitter la session du démon, PUIS ouvrir l'esclave : c'est cet ordre
     // qui en fait le terminal de contrôle. L'esclave est ouvert par

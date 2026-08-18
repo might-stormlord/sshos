@@ -1,0 +1,16 @@
+#include "common/paths.hpp"
+
+#include <cstdlib>
+
+namespace sshos {
+
+std::string user_data_dir() {
+  if (const char* x = std::getenv("XDG_DATA_HOME")) {
+    if (*x != '\0') return std::string(x) + "/sshos";
+  }
+  const char* home = std::getenv("HOME");
+  if (home == nullptr || *home == '\0') return {};
+  return std::string(home) + "/.local/share/sshos";
+}
+
+}  // namespace sshos
