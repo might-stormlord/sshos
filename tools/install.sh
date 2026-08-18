@@ -589,6 +589,39 @@ fi
 # --- 5. la pose ------------------------------------------------------------
 step "Pose"
 
+# UN BUREAU DEJA OUVERT. Installer, c'est repartir a neuf : un demon en cours
+# tourne sur l'ANCIEN binaire et continuerait de le faire apres la pose, sans
+# que rien ne le signale. On demande, et on l'arrete.
+#
+# ICI, et pas plus haut : a ce point la suite est verte et le binaire est bon.
+# Demander avant la compilation ferait perdre un bureau pour une compilation
+# qui echoue ensuite.
+if [ -x "$EXE" ] && SSHOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
+     | grep -q 'demon actif'; then
+  say ""
+  say "  Un bureau de l'instance $INSTANCE tourne : il sera ARRETE."
+  say "  Ses fenetres et les programmes qui y tournent seront perdus."
+  _d=non
+  [ "$ASSUME_YES" = yes ] && _d=oui
+  _r=$(ask "  Continuer ?" "$_d")
+  case "$_r" in
+    oui|o|yes|y) ;;
+    *) die "installation abandonnee, le bureau est intact" ;;
+  esac
+
+  say "  arret du bureau..."
+  SSHOS_BOOT_ID="$INSTANCE" "$EXE" --kill >/dev/null 2>&1 || true
+  _n=50
+  while [ "$_n" -gt 0 ]; do
+    SSHOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
+      | grep -q 'demon actif' || break
+    sleep 0.1 2>/dev/null || sleep 1
+    _n=$((_n - 1))
+  done
+  [ "$_n" -eq 0 ] && die "le bureau refuse de s'arreter, rien n'a ete installe"
+  say "  bureau arrete"
+fi
+
 # COPIE vers .previous, puis ecriture dans .new, puis rename. Une ecriture
 # EN PLACE sur un binaire en cours d'execution rend ETXTBSY a tous les
 # coups, c'est-a-dire exactement dans le cas ou l'on met a jour ; et deux

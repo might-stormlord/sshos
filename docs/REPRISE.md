@@ -287,6 +287,7 @@ sh tools/install.sh --yes --source git # sans rien demander
 |---|---|
 | `sh tools/install.sh` | installe. **Assistant en mode texte** sur un terminal (flèches, clic, `←` pour revenir) ; questions simples sinon — c'est ce que la CI et les sondes empruntent. Échelle git → binaire publié → archive → arbre local |
 | `python3 tools/verif_installeur.py` | pilote l'assistant par un PTY et **mesure la largeur de chaque ligne du cadre** |
+| `python3 tools/verif_bureau_ouvert.py` | réinstaller pendant qu'un bureau tourne : prévenu, arrêté, installé — et intact si l'on refuse |
 | `sh tools/update.sh --check\|--apply\|--rollback` | posé à l'installation sous `~/.local/libexec/sshos-update` |
 | `python3 tools/verif_isolation.py <HOME>` | **le test qui juge tout** : le binaire de dev ne doit ni voir ni tuer le bureau installé |
 | `python3 tools/sonde_update.py` | la sonde bout-en-bout, sur un faux dépôt git — 26 vérifications |
