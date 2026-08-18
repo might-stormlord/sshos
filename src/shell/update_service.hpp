@@ -80,6 +80,18 @@ class UpdateService {
   bool has_report() const { return !report_.empty(); }
   std::string take_report();
 
+  // DEUX MORCEAUX, ET C'EST L'APPELANT QUI COMPOSE. Une confirmation doit
+  // dire ce qu'elle FAIT (« Installer la mise a jour ? ») ; un constat dit
+  // ce qui EST (« Mise a jour disponible »). La meme phrase ne peut pas
+  // servir aux deux, et l'avoir essaye a fait disparaitre le verbe de la
+  // confirmation.
+  //
+  // « 7 nouveautes », ou vide si le compte est inconnu.
+  std::string news() const;
+  // « Version 1.12 -> 1.13 », ou « cce9d11 -> 3512ffe » a defaut de numeros,
+  // ou vide. On n'invente jamais un numero.
+  std::string version_line() const;
+
  private:
   void reload();
   void launch(std::string_view mode, bool manual);

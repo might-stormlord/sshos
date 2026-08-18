@@ -32,6 +32,17 @@ struct UpdateState {
   std::string installed_commit;
   std::string previous_commit;
   std::string remote_commit;
+  // DES VERSIONS, ET NON DES EMPREINTES. « cce9d11 -> 3512ffe » ne dit rien
+  // a personne ; « 1.12 -> 1.13 » se lit. Le majeur est declare dans le
+  // fichier VERSION du depot, le mineur est compte depuis ce jour-la (voir
+  // tools/version.sh). Vide veut dire « inconnue » : on n'invente pas un
+  // numero a afficher.
+  //
+  // Le C++ ne les CALCULE pas -- c'est du domaine de git -- il les lit.
+  std::string installed_version;
+  std::string remote_version;
+  // Combien de commits separent les deux. Zero veut dire « on ne sait pas ».
+  int commits_ahead = 0;
   std::int64_t checked_at = 0;
   // -1 quand aucun travail ne court. Renseigné seulement pour `checking` et
   // `applying`, et c'est ce qui permet de distinguer un travail en cours

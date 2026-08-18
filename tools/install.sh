@@ -421,6 +421,7 @@ LIBEXEC="$PREFIX/libexec"
 EXE="$LIBEXEC/sshos"
 LAUNCHER="$BIN_DIR/sshos"
 UPDATER="$LIBEXEC/sshos-update"
+VERSIONER="$LIBEXEC/sshos-version"
 SRC="$SHARE/src"
 GOLDEN="$SHARE/golden"
 STATE="$SHARE/state"
@@ -671,6 +672,14 @@ if [ -f "$SRC/tools/update.sh" ]; then
   mv -f "$UPDATER.new" "$UPDATER"
   say "  mise a jour : $UPDATER"
 fi
+# Le calcul de version vit dans UN SEUL endroit, et il est pose a cote :
+# l'installeur comme le script de mise a jour l'appellent, aucun des deux ne
+# le recopie.
+if [ -f "$SRC/tools/version.sh" ]; then
+  cp "$SRC/tools/version.sh" "$VERSIONER.new"
+  chmod 0755 "$VERSIONER.new"
+  mv -f "$VERSIONER.new" "$VERSIONER"
+fi
 
 : > "$LOG" 2>/dev/null || true
 
@@ -686,6 +695,13 @@ case "$PREFIX" in
      MESSAGE="prefixe systeme : mise a jour depuis le bureau desactivee" ;;
 esac
 
+VERSION_STR=""
+if [ -x "$VERSIONER" ] && [ -d "$SRC/.git" ]; then
+  VERSION_STR=$("$VERSIONER" "$SRC" "$COMMIT" 2>/dev/null || true)
+elif [ -f "$LOCAL_TREE/VERSION" ] && [ -d "$LOCAL_TREE/.git" ]; then
+  VERSION_STR=$(sh "$SELF_DIR/version.sh" "$LOCAL_TREE" "$COMMIT" 2>/dev/null || true)
+fi
+
 cat > "$STATE.tmp" <<FIN
 schema=1
 prefix=$PREFIX
@@ -693,6 +709,9 @@ source=$SOURCE
 installed_commit=$COMMIT
 previous_commit=
 remote_commit=
+installed_version=$VERSION_STR
+remote_version=
+commits_ahead=
 checked_at=$(date +%s)
 status=$STATUS
 pid=
@@ -711,6 +730,7 @@ if [ "$WANT_LINGER" = yes ]; then
 fi
 
 step "Termine"
+[ -n "$VERSION_STR" ] && say "  Version installee : $VERSION_STR"
 say "  Lancez : $LAUNCHER"
 say "  Instance : SSHOS_BOOT_ID=$INSTANCE"
 if [ "$STATUS" = updates-disabled ]; then

@@ -13,6 +13,11 @@ enum class ModalHit { None, Body, Cancel, Confirm };
 // Le dialogue de confirmation. Une seule question à la fois : empiler des
 // dialogues sur un bureau texte ne mène nulle part, et l'utilisateur ne
 // saurait plus auquel il répond.
+//
+// Le corps accepte des RETOURS À LA LIGNE : la boîte grandit d'autant et les
+// boutons descendent avec. Une mise à jour a plusieurs choses à dire -- ce
+// qu'elle apporte, d'où elle vient, ce qu'elle coûte -- et les serrer sur une
+// seule ligne les rend illisibles.
 class Modal {
  public:
   void ask(std::string question, WindowId target);
@@ -45,6 +50,7 @@ class Modal {
   ModalHit hit(int x, int y) const;
 
  private:
+  int buttons_y() const;
   Rect cancel_rect() const;
   Rect confirm_rect() const;
 

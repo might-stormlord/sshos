@@ -208,3 +208,34 @@ TEST(update_state_refuses_a_number_too_large_for_its_type) {
   CHECK_EQ(parse("schema=1\nchecked_at=-99999999999999999999\n").checked_at,
            static_cast<std::int64_t>(0));
 }
+
+// DES VERSIONS, PAS DES EMPREINTES. « cce9d11 -> 3512ffe » ne dit rien a
+// personne ; « 1.12 -> 1.13 » se lit.
+TEST(update_state_reads_version_numbers) {
+  const UpdateState s = parse(
+      "schema=1\ninstalled_version=1.12\nremote_version=1.13\n"
+      "commits_ahead=1\n");
+  CHECK_EQ(s.installed_version, std::string("1.12"));
+  CHECK_EQ(s.remote_version, std::string("1.13"));
+  CHECK_EQ(s.commits_ahead, 1);
+}
+
+// UNE VERSION SE DESSINE DANS UNE MODALE. Elle vient d'un script, donc tout
+// ce qui n'est pas chiffres et points est REJETE plutot qu'affiche -- un
+// texte arbitraire dans un cadre est un defaut que ce projet a deja paye.
+TEST(update_state_refuses_a_version_that_is_not_a_number) {
+  CHECK(parse("schema=1\ninstalled_version=1.2; rm -rf /\n").installed_version.empty());
+  CHECK(parse("schema=1\ninstalled_version=v1.2\n").installed_version.empty());
+  CHECK(parse("schema=1\ninstalled_version=\033[31m\n").installed_version.empty());
+  CHECK(parse("schema=1\ninstalled_version=1234567890123\n").installed_version.empty());
+  CHECK(parse("schema=1\ninstalled_version=\n").installed_version.empty());
+  // Et ce qui est legitime passe.
+  CHECK_EQ(parse("schema=1\ninstalled_version=12.345\n").installed_version,
+           std::string("12.345"));
+}
+
+TEST(update_state_ignores_an_absurd_commit_count) {
+  CHECK_EQ(parse("schema=1\ncommits_ahead=abc\n").commits_ahead, 0);
+  CHECK_EQ(parse("schema=1\ncommits_ahead=-4\n").commits_ahead, 0);
+  CHECK_EQ(parse("schema=1\ncommits_ahead=7\n").commits_ahead, 7);
+}

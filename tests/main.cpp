@@ -505,7 +505,28 @@ struct SeedOnce {
 } g_seed_once;
 }  // namespace
 
+// LA SUITE NE DOIT RIEN SAVOIR DE LA MACHINE QUI LA FAIT TOURNER.
+//
+// `Session` lit l'etat de la mise a jour dans
+// `${XDG_DATA_HOME:-$HOME/.local/share}/sshos/state`. Sans cette
+// redirection, chaque test qui construit une Session lisait l'INSTALLATION
+// REELLE de l'utilisateur : le jour ou son etat est passe a « available »,
+// la pastille est apparue dans la barre et sept references golden ont
+// echoue -- sur une machine, pas sur une autre, sans qu'une seule ligne de
+// code ait bouge.
+//
+// C'est la meme famille de defaut que le fuseau horaire fige dans les
+// scenarios golden, et la meme parade : on pointe la variable sur un
+// repertoire jetable, une fois, pour tout le binaire. Les cas qui VEULENT
+// un fichier d'etat la reposent eux-memes (voir UpdateFixture).
+void isolate_from_the_real_installation() {
+  static char dir[] = "/tmp/sshos-tests-xdg-XXXXXX";
+  if (::mkdtemp(dir) == nullptr) return;
+  ::setenv("XDG_DATA_HOME", dir, 1);
+}
+
 int main(int argc, char** argv) {
+  isolate_from_the_real_installation();
   const char* filter = argc > 1 ? argv[1] : nullptr;
   const std::vector<const th::Case*> cases = build_cases(filter);
 

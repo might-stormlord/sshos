@@ -323,7 +323,17 @@ void Session::run_update_command(std::string_view id) {
     // Rien ne se ferme ici : la question est legere, mais elle existe parce
     // qu'une compilation et une suite complete vont demarrer.
     modal_kind_ = ModalKind::ApplyUpdate;
-    modal_.ask("Installer la mise a jour ? Vos fenetres restent ouvertes.", 0);
+    // Ce qu'elle FAIT d'abord -- une confirmation sans verbe ne dit pas a
+    // quoi on repond -- puis ce qu'elle apporte, d'ou elle vient, et ce
+    // qu'elle coute. Trois lignes : les serrer sur une seule les rend
+    // illisibles.
+    std::string q = "Installer la mise a jour ?";
+    const std::string n = update_.news();
+    if (!n.empty()) q += " " + n + ".";
+    const std::string v = update_.version_line();
+    if (!v.empty()) q += "\n" + v;
+    q += "\nVos fenetres restent ouvertes.";
+    modal_.ask(q, 0);
     dirty_ = true;
     return;
   }

@@ -1,6 +1,8 @@
 #include "shell/modal.hpp"
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include "render/width.hpp"
 
@@ -13,9 +15,30 @@ constexpr char kAcknowledge[] = "[ OK ]";
 constexpr int kCancelW = sizeof(kCancel) - 1;
 constexpr int kConfirmW = sizeof(kConfirm) - 1;
 
-// Cadre, question, ligne vide, boutons, ligne vide, cadre.
-constexpr int kHeight = 6;
+// Cadre, LES LIGNES DE TEXTE, ligne vide, boutons, ligne vide, cadre. Le
+// corps peut tenir sur plusieurs lignes : « il existe 7 mises a jour » et
+// « cce9d11 -> 3512ffe » ne se lisent pas serrees sur une seule.
+constexpr int kChromeHeight = 5;
 constexpr int kMinWidth = kCancelW + kConfirmW + 5;
+
+// Decoupe le corps sur les retours a la ligne. Rendre un vecteur plutot que
+// d'indexer a la volee : rect(), draw() et les boutons ont tous besoin du
+// MEME compte de lignes, et le recalculer trois fois invite a la divergence.
+std::vector<std::string> body_lines(const std::string& s) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+  while (start <= s.size()) {
+    const std::size_t nl = s.find('\n', start);
+    if (nl == std::string::npos) {
+      out.push_back(s.substr(start));
+      break;
+    }
+    out.push_back(s.substr(start, nl - start));
+    start = nl + 1;
+  }
+  if (out.empty()) out.push_back(std::string());
+  return out;
+}
 
 }  // namespace
 
@@ -48,22 +71,33 @@ void Modal::dismiss() {
 }
 
 Rect Modal::rect(int cols, int rows) const {
-  const int want = static_cast<int>(question_.size()) + 4;
+  const std::vector<std::string> lines = body_lines(question_);
+  std::size_t longest = 0;
+  for (const std::string& l : lines) longest = std::max(longest, l.size());
+
+  const int want = static_cast<int>(longest) + 4;
   int w = std::max(kMinWidth, want);
   w = std::min(w, std::max(kMinWidth, cols - 4));
   w = std::min(w, cols);
-  const int h = std::min(kHeight, rows);
+  const int h = std::min(kChromeHeight + static_cast<int>(lines.size()), rows);
   return Rect{(cols - w) / 2, (rows - h) / 2, w, h};
+}
+
+// Les boutons descendent avec le corps : une ligne de plus les pousse d'une
+// ligne. Sans ce calcul commun, hit() cliquerait ailleurs que ce que draw()
+// a peint -- la discipline du panneau, appliquee ici.
+int Modal::buttons_y() const {
+  return rect_.y + static_cast<int>(body_lines(question_).size()) + 2;
 }
 
 void Modal::layout(int cols, int rows) { rect_ = rect(cols, rows); }
 
 Rect Modal::confirm_rect() const {
-  return Rect{rect_.x + rect_.w - 2 - kConfirmW, rect_.y + 3, kConfirmW, 1};
+  return Rect{rect_.x + rect_.w - 2 - kConfirmW, buttons_y(), kConfirmW, 1};
 }
 
 Rect Modal::cancel_rect() const {
-  return Rect{confirm_rect().x - 1 - kCancelW, rect_.y + 3, kCancelW, 1};
+  return Rect{confirm_rect().x - 1 - kCancelW, buttons_y(), kCancelW, 1};
 }
 
 void Modal::draw(View v, const Theme& th, Border b) const {
@@ -80,12 +114,15 @@ void Modal::draw(View v, const Theme& th, Border b) const {
   hot.fg = th.modal_bg;
 
   // ÉLIDÉ À LA LARGEUR DE LA BOÎTE. rect() borne bien le cadre à l'écran,
-  // mais draw() reçoit une View pleine largeur : sans cette coupe, une
-  // question plus longue que la boîte débordait par-dessus le bureau
-  // jusqu'au bord droit. Le tilde plutôt qu'une ellipse Unicode : Modal ne
-  // sait pas si le client accepte l'UTF-8.
-  v.text(rect_.x + 2, rect_.y + 1,
-         elide_to_cells(question_, rect_.w - 4, "~"), st);
+  // mais draw() reçoit une View pleine largeur : sans cette coupe, une ligne
+  // plus longue que la boîte débordait par-dessus le bureau jusqu'au bord
+  // droit. Le tilde plutôt qu'une ellipse Unicode : Modal ne sait pas si le
+  // client accepte l'UTF-8.
+  const std::vector<std::string> lines = body_lines(question_);
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    v.text(rect_.x + 2, rect_.y + 1 + static_cast<int>(i),
+           elide_to_cells(lines[i], rect_.w - 4, "~"), st);
+  }
   if (info_) {
     // Un seul bouton, centré : il n'y a rien à décider.
     const int w = static_cast<int>(sizeof(kAcknowledge) - 1);

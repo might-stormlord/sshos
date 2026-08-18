@@ -43,6 +43,7 @@ GOLDEN="$STATE_DIR/golden"
 
 EXE="$PREFIX/libexec/sshos"
 UPDATER="$PREFIX/libexec/sshos-update"
+VERSIONER="$PREFIX/libexec/sshos-version"
 
 mkdir -p "$STATE_DIR" "$PREFIX/libexec"
 
@@ -56,6 +57,9 @@ get() { # get <cle>
   sed -n "s/^$1=\\(.*\\)$/\\1/p" "$STATE" | head -1
 }
 
+INSTALLED_VERSION=$(get installed_version)
+REMOTE_VERSION=$(get remote_version)
+COMMITS_AHEAD=$(get commits_ahead)
 SOURCE=$(get source);            [ -n "$SOURCE" ] || SOURCE=git
 INSTALLED=$(get installed_commit); [ -n "$INSTALLED" ] || INSTALLED=unknown
 PREVIOUS=$(get previous_commit)
@@ -81,6 +85,9 @@ source=$SOURCE
 installed_commit=$INSTALLED
 previous_commit=$PREVIOUS
 remote_commit=$REMOTE
+installed_version=$INSTALLED_VERSION
+remote_version=$REMOTE_VERSION
+commits_ahead=$COMMITS_AHEAD
 checked_at=$CHECKED
 status=$_st
 pid=$_pid
@@ -132,6 +139,13 @@ ensure_git_tree() {
   fi
 }
 
+# « 1.12 » plutot que « cce9d11 ». Le calcul vit dans un seul endroit,
+# sshos-version, que l'installeur pose a cote de ce script.
+version_of() { # version_of <arbre> <ref>
+  [ -x "$VERSIONER" ] || return 1
+  "$VERSIONER" "$1" "$2" 2>/dev/null
+}
+
 remote_head() {
   case "$SOURCE" in
     git)
@@ -175,6 +189,16 @@ do_check() {
   if [ "$REMOTE" = "$INSTALLED" ]; then
     write_state up-to-date ""
     return 0
+  fi
+
+  # Les numeros ne se calculent qu'avec un arbre git sous la main. Sans lui
+  # ils restent vides, et l'affichage retombe sur ce qu'il sait dire.
+  if [ "$SOURCE" = git ] && have git && ensure_git_tree; then
+    _iv=$(version_of "$SRC" "$INSTALLED" || true)
+    _rv=$(version_of "$SRC" "$REMOTE" || true)
+    [ -n "$_iv" ] && INSTALLED_VERSION="$_iv"
+    [ -n "$_rv" ] && REMOTE_VERSION="$_rv"
+    COMMITS_AHEAD=$(git -C "$SRC" rev-list --count "$INSTALLED..$REMOTE" 2>/dev/null || echo "")
   fi
 
   # LE CONTROLE DE DESCENDANCE. Ce depot a force-pousse main deux fois ; sans
@@ -287,6 +311,11 @@ do_apply() {
   PREVIOUS="$INSTALLED"
   INSTALLED="$_new"
   REMOTE="$_new"
+  if [ -d "$SRC/.git" ]; then
+    _nv=$(version_of "$SRC" "$_new" || true)
+    [ -n "$_nv" ] && INSTALLED_VERSION="$_nv" && REMOTE_VERSION="$_nv"
+  fi
+  COMMITS_AHEAD=""
   CHECKED=$(date +%s)
   rm -rf "$_tmp"
   # RESTART-PENDING, PAS UP-TO-DATE. Le binaire pose n'est pas celui qui
@@ -329,6 +358,13 @@ do_rollback() {
   # chaque mise a jour.
   INSTALLED="${PREVIOUS:-unknown}"
   PREVIOUS=""
+  if [ -d "$SRC/.git" ] && [ "$INSTALLED" != unknown ]; then
+    _pv=$(version_of "$SRC" "$INSTALLED" || true)
+    INSTALLED_VERSION="${_pv:-}"
+  else
+    INSTALLED_VERSION=""
+  fi
+  COMMITS_AHEAD=""
   write_state available "version precedente restauree"
 }
 

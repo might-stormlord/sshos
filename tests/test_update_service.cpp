@@ -544,3 +544,62 @@ TEST(update_service_reports_a_manual_check_that_concluded_nothing) {
   CHECK(svc.take_report().find("update.log") != std::string::npos);
   std::remove(path.c_str());
 }
+
+// « 1.12 -> 1.13 » PLUTOT QUE « cce9d11 -> 3512ffe ». Les empreintes ne
+// disent rien a personne ; elles ne servent que de repli quand les numeros
+// manquent, et on n'en invente jamais.
+TEST(update_service_prefers_version_numbers_over_commit_hashes) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body(
+      "available",
+      "installed_commit=cce9d11e28ffaea5255fdcde2fb509446c3b899b\n"
+      "remote_commit=3512ffefe23fe03e53708324d1b955876926b91c\n"
+      "installed_version=1.12\nremote_version=1.13\ncommits_ahead=7\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  CHECK_EQ(svc.news(), std::string("7 nouveautes"));
+  CHECK_EQ(svc.version_line(), std::string("Version 1.12 -> 1.13"));
+  std::remove(path.c_str());
+}
+
+TEST(update_service_falls_back_to_short_hashes_without_versions) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body(
+      "available",
+      "installed_commit=cce9d11e28ffaea5255fdcde2fb509446c3b899b\n"
+      "remote_commit=3512ffefe23fe03e53708324d1b955876926b91c\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  CHECK_EQ(svc.version_line(), std::string("cce9d11 -> 3512ffe"));
+  // Sans compte, on ne dit pas « 0 nouveaute » : on ne dit rien.
+  CHECK(svc.news().empty());
+  std::remove(path.c_str());
+}
+
+// LE SINGULIER SE DIT AU SINGULIER. Une seule nouveaute annoncee comme
+// « 1 nouveautes » fait bacle.
+TEST(update_service_says_one_novelty_in_the_singular) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path =
+      write_state(state_body("available", "commits_ahead=1\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+  CHECK_EQ(svc.news(), std::string("1 nouveaute"));
+  std::remove(path.c_str());
+}
+
+TEST(update_service_says_nothing_about_versions_when_it_knows_nothing) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body("available"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+  CHECK(svc.news().empty());
+  CHECK(svc.version_line().empty());
+  std::remove(path.c_str());
+}

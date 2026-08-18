@@ -71,7 +71,8 @@ jobs:
             echo "release $tag deja publiee, rien a faire"
             exit 0
           fi
+          version=$(sh tools/version.sh . "$GITHUB_SHA")
           gh release create "$tag" \
-            --title "$GITHUB_SHA" \
-            --notes "Publication automatique depuis main. Compile dans ubuntu:26.04, suite complete au vert." \
+            --title "version $version" \
+            --notes "Version $version, compilee dans ubuntu:26.04, suite complete au vert." \
             sshos sshos_tests golden.tar.gz SHA256SUMS

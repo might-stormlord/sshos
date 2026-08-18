@@ -4404,7 +4404,9 @@ TEST(session_shows_no_badge_when_it_is_up_to_date) {
 // pastille qui annonce sans rien faire au clic serait le contre-exemple
 // exact de la regle du projet.
 TEST(session_clicking_the_update_badge_opens_the_confirmation) {
-  UpdateFixture fix("available", "#!/bin/sh\nexit 0\n");
+  UpdateFixture fix("available", "#!/bin/sh\nexit 0\n",
+                    "installed_version=1.12\nremote_version=1.13\n"
+                    "commits_ahead=7\n");
   FakePlatform plat;
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
@@ -4416,7 +4418,15 @@ TEST(session_clicking_the_update_badge_opens_the_confirmation) {
 
   Surface after(80, 24);
   sess.render(after);
+  // LA CONFIRMATION DIT CE QU'ELLE FAIT, PUIS CE QU'ELLE APPORTE. Un
+  // « Confirmer » sous un simple constat ne dit pas a quoi l'on repond.
   CHECK(surface_contains(after, "Installer la mise a jour"));
+  CHECK(surface_contains(after, "7 nouveautes"));
+  CHECK(surface_contains(after, "Version 1.12 -> 1.13"));
+  CHECK(surface_contains(after, "Vos fenetres restent ouvertes"));
+  // Et les trois lignes tiennent DANS le cadre : la boite grandit avec le
+  // corps, elle ne deborde pas sur le bureau.
+  CHECK(surface_contains(after, "[ Annuler ]"));
 }
 
 // LA CONFIRMATION DU REDEMARRAGE COMPTE CE QUI VA MOURIR, et elle s'ouvre

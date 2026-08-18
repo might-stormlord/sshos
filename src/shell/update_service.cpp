@@ -223,6 +223,34 @@ void UpdateService::launch(std::string_view mode, bool manual) {
   }
 }
 
+namespace {
+
+// Sept caracteres : ce que git montre, et assez pour etre unique en pratique.
+std::string short_commit(const std::string& c) {
+  if (c.empty() || c == "unknown") return {};
+  return c.substr(0, std::min<std::size_t>(7, c.size()));
+}
+
+}  // namespace
+
+std::string UpdateService::news() const {
+  if (state_.commits_ahead <= 0) return {};
+  return std::to_string(state_.commits_ahead) +
+         (state_.commits_ahead > 1 ? " nouveautes" : " nouveaute");
+}
+
+std::string UpdateService::version_line() const {
+  if (!state_.installed_version.empty() && !state_.remote_version.empty()) {
+    return "Version " + state_.installed_version + " -> " + state_.remote_version;
+  }
+  // A defaut de numeros, les empreintes courtes : elles ne disent pas
+  // grand-chose, mais elles disent au moins que ce n'est pas la meme.
+  const std::string a = short_commit(state_.installed_commit);
+  const std::string b = short_commit(state_.remote_commit);
+  if (a.empty() || b.empty()) return {};
+  return a + " -> " + b;
+}
+
 std::string UpdateService::take_report() {
   std::string r;
   r.swap(report_);
@@ -239,9 +267,15 @@ void UpdateService::build_report() {
     case UpdateStatus::UpToDate:
       report_ = "Vous etes a jour.";
       break;
-    case UpdateStatus::Available:
-      report_ = "Une mise a jour est disponible.";
+    case UpdateStatus::Available: {
+      report_ = "Mise a jour disponible";
+      const std::string n = news();
+      if (!n.empty()) report_ += " : " + n;
+      report_ += ".";
+      const std::string v = version_line();
+      if (!v.empty()) report_ += "\n" + v;
       break;
+    }
     case UpdateStatus::RestartPending:
       report_ = "Mise a jour installee. Redemarrez pour terminer.";
       break;

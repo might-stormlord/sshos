@@ -47,6 +47,18 @@ bool read_int64(std::string_view s, std::int64_t& out) {
   return true;
 }
 
+// Une version se DESSINE dans une modale : elle ne doit contenir que des
+// chiffres et des points, et rester courte. Tout le reste est rejete plutot
+// qu'affiche -- la valeur vient d'un script, et un texte arbitraire dans un
+// cadre est exactement ce que le projet a deja paye une fois.
+std::string_view clean_version(std::string_view s) {
+  if (s.empty() || s.size() > 12) return {};
+  for (const char c : s) {
+    if ((c < '0' || c > '9') && c != '.') return {};
+  }
+  return s;
+}
+
 bool read_status(std::string_view s, UpdateStatus& out) {
   static constexpr std::pair<std::string_view, UpdateStatus> kTable[] = {
       {"idle", UpdateStatus::Idle},
@@ -115,6 +127,15 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
       parsed.previous_commit = std::string(value);
     } else if (key == "remote_commit") {
       parsed.remote_commit = std::string(value);
+    } else if (key == "installed_version") {
+      parsed.installed_version = std::string(clean_version(value));
+    } else if (key == "remote_version") {
+      parsed.remote_version = std::string(clean_version(value));
+    } else if (key == "commits_ahead") {
+      std::int64_t v = 0;
+      if (read_int64(value, v) && v > 0 && v < 1000000) {
+        parsed.commits_ahead = static_cast<int>(v);
+      }
     } else if (key == "checked_at") {
       std::int64_t v = 0;
       // Hors de [0, maintenant] : ramené à zéro. Une valeur dans le futur
