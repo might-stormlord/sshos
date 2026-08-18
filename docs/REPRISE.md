@@ -273,7 +273,7 @@ sh tools/install.sh --yes --source git # sans rien demander
 
 | | |
 |---|---|
-| **L'isolation** | `~/.local/bin/sshos` est un **lanceur de quatre lignes**, pas le binaire. Il pose `SSHOS_BOOT_ID` (le nom du socket) et `SSHOS_EXE` (le chemin de relance). Le vrai binaire est dans `~/.local/libexec/`. |
+| **L'isolation** | `~/.local/bin/sshos` est un **lanceur de quatre lignes**, pas le binaire. Il pose `SSHOS_BOOT_ID` (défaut `bureau01`) et `SSHOS_EXE` (le chemin de relance). Le vrai binaire est dans `~/.local/libexec/`. L'adresse du socket devient `sshos/<uid>/bureau01` ; l'arbre de dev, lui, garde l'uuid du noyau — **c'est la seule chose qui les sépare**. ⚠️ Le fichier d'état, lui, n'est **pas** séparé par instance : deux bureaux partageraient leur état de mise à jour. |
 | **Les deux variables ne descendent PAS dans les shells** | Elles sont dans `kBanned` (`src/pty/env.cpp`). Sans ça, `./build-release/sshos --kill` tapé dans un terminal du bureau installé **tuait ce bureau**. Conséquence assumée : `sshos` tapé dans une fenêtre vise l'instance de développement. |
 | **Le démon se relance par CHEMIN** | `daemon_exe_path()` (`src/daemon/daemonize.hpp`) préfère `SSHOS_EXE` à `/proc/self/exe`, qui désigne une **inode** : après une mise à jour, celle du client est l'ancienne version. |
 | **`sshos --daemon` NE REND PAS LA MAIN** | `become_daemon()` ne forke pas ; il exécute la boucle dans le processus appelant. Le détachement vient de `spawn_detached`, côté client. Pour lancer un démon dans un script, passer par le chemin client (`pty.fork()` + exec du binaire **sans** drapeau), comme `tools/sonde.py`. |

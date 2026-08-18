@@ -19,7 +19,7 @@ WGET_OPTS="--https-only -q -O"
 
 # --- valeurs par defaut, modifiables par drapeau ---------------------------
 PREFIX="${HOME}/.local"
-INSTANCE="local"
+INSTANCE="bureau01"
 WANT_SOURCE="auto"      # auto | git | release | archive | local
 ASSUME_YES="no"
 # loginctl enable-linger n'est PLUS demande. Le demon avertit lui-meme, au
@@ -36,7 +36,7 @@ usage() {
 usage: install.sh [options]
 
   --prefix CHEMIN     ou installer (defaut : ~/.local)
-  --instance NOM      valeur de SSHOS_BOOT_ID (defaut : local)
+  --instance NOM      nom de cette instance (defaut : bureau01)
   --source QUOI       auto | git | release | archive | local (defaut : auto)
   --local-tree CHEMIN arbre a utiliser pour --source local (defaut : celui du script)
   --linger yes|no     poser ou non loginctl enable-linger, sans demander
@@ -180,19 +180,25 @@ CLICK1=0; CLICK2=0; CLICK3=0
 wiz_load() { # wiz_load <etape>
   CN=0; SEL_MAX=0
   CH1=""; CD1=""; CH2=""; CD2=""; CH3=""; CD3=""
-  NOTE=""
+  NOTE=""; NOTE2=""
   MODE=choix
   case "$1" in
     1) QUESTION="Ou installer ?"
-       CH1="~/.local";    CD1="votre home, sans root"
-       CH2="/usr/local";  CD2="tout le systeme, sudo requis"
-       CH3="autre...";    CD3="saisir un chemin"
+       NOTE="Le binaire et le lanceur vont la. Votre etat de mise a jour,"
+       NOTE2="lui, reste toujours sous votre home."
+       CH1="~/.local";    CD1="votre home, aucun droit root"
+       CH2="/usr/local";  CD2="toute la machine, sudo, et pas de maj auto"
+       CH3="autre...";    CD3="saisir un chemin absolu"
        CN=3 ;;
     2) QUESTION="Ajouter au PATH ?"
-       CH1="oui";  CD1="pour taper sshos de n'importe ou"
-       CH2="non";  CD2="lancer par le chemin complet"
+       NOTE="La ligne ira dans ~/.profile, que tout shell de connexion lit."
+       NOTE2="Sans elle, il faut taper le chemin complet a chaque fois."
+       CH1="oui";  CD1="taper sshos depuis n'importe ou"
+       CH2="non";  CD2="lancer par son chemin complet"
        CN=2 ;;
     3) QUESTION="Nom d'instance"
+       NOTE="Ce nom compose l'adresse du socket, et c'est la SEULE chose"
+       NOTE2="qui separe ce bureau de l'arbre de dev et des autres."
        MODE=saisie
        CN=0 ;;
   esac
@@ -239,6 +245,13 @@ wiz_draw() {
     ui_pad "$NOTE" $((UI_COLS - 6))
     printf '\033[0m %s\n' "$G_V"
     R=$((R + 1))
+    if [ -n "$NOTE2" ]; then
+      printf '%s   \033[2m' "$G_V"
+      ui_pad "$NOTE2" $((UI_COLS - 6))
+      printf '\033[0m %s\n' "$G_V"
+      R=$((R + 1))
+    fi
+    ui_blank; R=$((R + 1))
   else
     ui_blank; R=$((R + 1))
   fi
@@ -251,7 +264,7 @@ wiz_draw() {
     ui_pad "" $((UI_COLS - 29))
     printf ' %s\n' "$G_V"
     R=$((R + 1))
-    ui_row ' ' "  la valeur de SSHOS_BOOT_ID, qui separe deux bureaux"
+    ui_row ' ' "  adresse du socket : sshos/$(id -u)/$BUF"
     R=$((R + 1))
   else
     [ "$CN" -ge 1 ] && { CLICK1=$R; wiz_choice_row 1 "$CH1" "$CD1"; R=$((R + 1)); }
@@ -388,7 +401,7 @@ wiz_plain() {
     WANT_PATH=no
     say "  $PREFIX/bin est deja joignable."
   fi
-  INSTANCE=$(ask "Nom d'instance (valeur de SSHOS_BOOT_ID)" "$INSTANCE")
+  INSTANCE=$(ask "Nom d'instance (separe ce bureau des autres)" "$INSTANCE")
 }
 
 if ui_possible; then

@@ -31,7 +31,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = "/var/tmp/sshos-verif-bureau-ouvert"
-INSTANCE = "local"
+INSTANCE = "bureau01"  # le defaut de l installeur ; la detection passe par HOME
 
 ok_all = True
 
