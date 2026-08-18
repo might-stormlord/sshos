@@ -4265,6 +4265,84 @@ TEST(session_lets_a_new_press_out_of_a_stale_mouse_grab) {
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
 
+// LA MOLETTE VA À LA FENÊTRE SOUS LE POINTEUR. Elle n'est pas un appui, et
+// tombait donc dans le « au-delà, tout est un appui » ci-dessus : AUCUNE
+// application n'en voyait jamais une. Le terminal savait pourtant déjà
+// remonter son historique sur un coup de molette, et le gestionnaire de
+// fichiers faire défiler sa liste -- les deux étaient morts par le haut.
+TEST(session_hands_the_wheel_to_the_window_under_the_pointer) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+    const sshos::Window& w = *sess.windows_for_tests()[0];
+    const sshos::Rect cr = sshos::client_rect(w.display_rect);
+    auto* app = static_cast<Grabby*>(w.app.get());
+
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::WheelUp, 0, cr.x + 2, cr.y + 3, 0}});
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::WheelDown, 0, cr.x + 2, cr.y + 3, 0}});
+
+    REQUIRE_EQ(app->seen.size(), size_t{2});
+    CHECK(app->seen[0].action == sshos::MouseAction::WheelUp);
+    CHECK(app->seen[1].action == sshos::MouseAction::WheelDown);
+    // EN COORDONNÉES LOCALES, comme l'appui : une application ne connaît
+    // que sa vue.
+    CHECK_EQ(app->seen[0].x, 2);
+    CHECK_EQ(app->seen[0].y, 3);
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// LA MOLETTE NE PREND PAS LA SOURIS. Une prise dure jusqu'au relâchement,
+// et la molette n'en a pas : la prendre sur un coup de molette enfermerait
+// tous les mouvements suivants dans cette fenêtre, pour toujours.
+TEST(session_does_not_grab_the_mouse_on_a_wheel) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    const sshos::Window& w = *sess.windows_for_tests()[0];
+    const sshos::Rect cr = sshos::client_rect(w.display_rect);
+    auto* app = static_cast<Grabby*>(w.app.get());
+
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::WheelUp, 0, cr.x + 2, cr.y + 3, 0}});
+    REQUIRE_EQ(app->seen.size(), size_t{1});
+
+    // Un survol du bureau, loin de la fenêtre : il ne lui appartient pas.
+    sess.on_input(sshos::InputEvent{
+        sshos::MouseEvent{sshos::MouseAction::Motion, 0, 1, 1, 0}});
+    CHECK_EQ(app->seen.size(), size_t{1});
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// LE PANNEAU N'EST PAS UNE FENÊTRE : une molette sur la barre des tâches
+// ne descend pas dans l'application qui se trouve dessous.
+TEST(session_keeps_the_wheel_out_of_the_panel) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    auto* app = static_cast<Grabby*>(sess.windows_for_tests()[0]->app.get());
+
+    sess.on_input(sshos::InputEvent{
+        sshos::MouseEvent{sshos::MouseAction::WheelUp, 0, 2, 19, 0}});
+    CHECK_EQ(app->seen.size(), size_t{0});
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+
 // ---------------------------------------------------------------------------
 // Le service de mise a jour, vu depuis la session.
 // ---------------------------------------------------------------------------

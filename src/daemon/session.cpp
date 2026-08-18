@@ -958,11 +958,40 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // LA MOLETTE, AVANT L'INVARIANT : elle n'est pas un appui, et elle a
+  // pourtant un destinataire. Sans cette branche elle mourait à la ligne
+  // suivante, et le terminal comme le gestionnaire de fichiers savaient
+  // tous deux la traiter SANS EN RECEVOIR UNE SEULE : remonter dans
+  // l'historique à la molette était impossible depuis le bureau.
+  //
+  // Elle va à la fenêtre SOUS LE POINTEUR, pas à celle qui a le focus, et
+  // ne le lui donne pas : c'est ce que fait tout bureau, et faire suivre
+  // le focus rendrait un défilement au survol capable de voler le clavier.
+  // Elle ne prend pas la souris non plus -- une prise se rend au
+  // relâchement, et une molette n'en a pas.
+  if (m.action == MouseAction::WheelUp || m.action == MouseAction::WheelDown) {
+    // Rien ne défile derrière un dialogue ni sous un menu ouvert : ils
+    // recouvrent, et ce qui est recouvert n'est pas atteignable.
+    if (modal_.is_open() || menu_.is_open()) return;
+    Window* wp = wm_.hit(m.x, m.y);
+    if (wp == nullptr || wp->app == nullptr) return;
+    const WinHitResult h = hit_window(*wp, m.x, m.y);
+    // Le cadre n'a rien à faire défiler : seul le corps reçoit.
+    if (h.what != WinHit::Client) return;
+    MouseEvent local = m;
+    local.x = h.lx;
+    local.y = h.ly;
+    wp->app->on_mouse(local);
+    dirty_ = true;
+    return;
+  }
+
   // INVARIANT : au-delà de cette ligne, tout est un appui. Les glissements
-  // ont consommé leurs relâchements plus haut, et rien d'autre ne réagit
-  // au relâchement ni au survol. Les branches qui suivent ne re-testent
-  // donc PAS `m.action` -- le faire suggérerait que l'invariante ne tient
-  // pas, et masquerait sa disparition si quelqu'un la supprimait.
+  // ont consommé leurs relâchements plus haut, la molette vient de partir,
+  // et rien d'autre ne réagit au relâchement ni au survol. Les branches qui
+  // suivent ne re-testent donc PAS `m.action` -- le faire suggérerait que
+  // l'invariante ne tient pas, et masquerait sa disparition si quelqu'un la
+  // supprimait.
   if (m.action != MouseAction::Press) return;
 
   // Et la modale passe devant le menu : rien derrière un dialogue modal
