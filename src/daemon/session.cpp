@@ -561,6 +561,8 @@ void Session::answer_modal(bool confirmed) {
       update_.run("update:apply");
     } else if (modal_kind_ == ModalKind::RestartForUpdate) {
       update_.run("update:restart");
+    } else if (modal_kind_ == ModalKind::Information) {
+      // Rien a decider : on a lu, on referme.
     } else if (Window* t = wm_.find(modal_.target())) {
       close_window(*t);
     }
@@ -704,6 +706,14 @@ void Session::on_child_exit(pid_t pid, int status) {
   // fenetre, et sa mort disparaitrait sans trace.
   if (update_.owns(pid)) {
     update_.on_child_exit(pid, status);
+    // L'UTILISATEUR A CLIQUE, IL ATTEND UNE REPONSE. Un pop-up, et pas une
+    // ligne dans le menu : le menu s'est ferme au moment du clic, et
+    // personne ne va le rouvrir pour verifier si quelque chose a change.
+    // « Rien ne se passe » est la pire des reponses.
+    if (update_.has_report()) {
+      modal_kind_ = ModalKind::Information;
+      modal_.inform(update_.take_report());
+    }
     dirty_ = true;
     return;
   }

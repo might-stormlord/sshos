@@ -131,7 +131,9 @@ void UpdateService::tick() {
     // le lancement échoue -- sinon un échec de fork figerait la vérification
     // pour toujours.
     have_deadline_ = false;
-    run("update:check");
+    // Automatique : silencieuse. C'est la regle -- une verification qui
+    // echoue toute seule ne doit pas harceler.
+    launch("--check", /*manual=*/false);
     if (child_ < 0) schedule_from(0);
   }
 }
@@ -203,22 +205,62 @@ void UpdateService::run(std::string_view id) {
     return;
   }
 
+  if (id == "update:check") {
+    launch("--check", /*manual=*/true);
+  } else if (id == "update:apply") {
+    launch("--apply", /*manual=*/true);
+  }
+}
+
+void UpdateService::launch(std::string_view mode, bool manual) {
   const std::string exe = updater_path();
   if (exe.empty()) return;  // on n'invente pas un chemin
-
-  std::string mode;
-  if (id == "update:check") {
-    mode = "--check";
-  } else if (id == "update:apply") {
-    mode = "--apply";
-  } else {
-    return;
-  }
-
-  const pid_t pid = launch_({exe, mode});
+  const pid_t pid = launch_({exe, std::string(mode)});
   if (pid > 0) {
     child_ = pid;
+    child_is_manual_ = manual;
     have_deadline_ = false;  // rien à attendre tant qu'il travaille
+  }
+}
+
+std::string UpdateService::take_report() {
+  std::string r;
+  r.swap(report_);
+  return r;
+}
+
+// Le texte est SANS ACCENTS, comme celui de la modale « Fermer la session ».
+// Il est aussi borne : le message vient d'un script, et une modale qui
+// deborde de son cadre a deja ete un defaut de ce projet.
+void UpdateService::build_report() {
+  const std::string why = message_.empty() ? std::string("raison inconnue")
+                                           : message_.substr(0, 60);
+  switch (state_.status) {
+    case UpdateStatus::UpToDate:
+      report_ = "Vous etes a jour.";
+      break;
+    case UpdateStatus::Available:
+      report_ = "Une mise a jour est disponible.";
+      break;
+    case UpdateStatus::RestartPending:
+      report_ = "Mise a jour installee. Redemarrez pour terminer.";
+      break;
+    case UpdateStatus::HistoryRewritten:
+      report_ = "Historique reecrit : une reinstallation est necessaire.";
+      break;
+    case UpdateStatus::CheckFailed:
+      report_ = "Verification impossible : " + why;
+      break;
+    case UpdateStatus::ApplyFailed:
+      report_ = "Mise a jour echouee : " + why;
+      break;
+    case UpdateStatus::UpdatesDisabled:
+      report_ = "Mise a jour indisponible : " + why;
+      break;
+    default:
+      // L'etat n'a pas bouge : le script est mort sans rien conclure.
+      report_ = "Verification sans resultat, voir update.log";
+      break;
   }
 }
 
@@ -238,6 +280,15 @@ void UpdateService::on_child_exit(pid_t pid, int status) {
   if (unchanged && failed) {
     message_ = "echec de la mise a jour, voir update.log";
   }
+
+  if (child_is_manual_) {
+    if (unchanged && failed) {
+      report_ = "Echec, voir update.log";
+    } else {
+      build_report();
+    }
+  }
+  child_is_manual_ = false;
 
   schedule_from(state_.checked_at);
 }

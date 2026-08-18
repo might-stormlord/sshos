@@ -33,7 +33,9 @@ namespace sshos {
 // un booléen tant qu'il n'y avait que deux cas ; il y en a quatre, et un
 // booléen de plus par cas serait le début d'un jeu de drapeaux qui se
 // contredisent.
-enum class ModalKind { CloseWindow, QuitSession, ApplyUpdate, RestartForUpdate };
+enum class ModalKind {
+  CloseWindow, QuitSession, ApplyUpdate, RestartForUpdate, Information
+};
 
 class Session : public ChildSink {
  public:

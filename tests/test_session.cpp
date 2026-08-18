@@ -4518,6 +4518,19 @@ TEST(session_routes_a_service_child_exit_to_the_update_service) {
   sess.mark_refresh_due();
   Surface after(80, 24);
   sess.render(after);
+
+  // UN POP-UP REPOND. L'utilisateur a clique ; le menu s'est referme au
+  // moment du clic, donc une ligne de menu qui change ne lui dirait rien.
+  CHECK(surface_contains(after, "Mise a jour installee"));
+  CHECK(surface_contains(after, "[ OK ]"));
+  // Un seul bouton : rien a decider, donc pas de « Annuler / Confirmer ».
+  CHECK(!surface_contains(after, "Annuler"));
+
+  // On le referme, et le bureau montre l'etat qui en resulte.
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+  Surface closed(80, 24);
+  sess.render(closed);
+  CHECK(!surface_contains(closed, "[ OK ]"));
   CHECK(find_badge(sess, 80, 24).x >= 0);
   open_menu(sess);
   Surface open(80, 24);

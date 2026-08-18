@@ -458,3 +458,89 @@ TEST(update_service_schedules_nothing_without_an_installation) {
     std::remove(path.c_str());
   }
 }
+
+// UNE VERIFICATION DEMANDEE REPOND. L'utilisateur a clique ; le menu s'est
+// referme au moment du clic, donc « rien ne se passe » est ce qu'il verrait
+// sans cela -- et c'est la pire des reponses.
+TEST(update_service_reports_the_result_of_a_manual_check) {
+  struct Row { const char* status; const char* extra; const char* needle; };
+  const Row rows[] = {
+      {"up-to-date",        "",                       "a jour"},
+      {"available",         "",                       "disponible"},
+      {"restart-pending",   "",                       "Redemarrez"},
+      {"history-rewritten", "",                       "reinstallation"},
+      {"check-failed",      "message=pas de reseau\n", "pas de reseau"},
+      {"apply-failed",      "message=tests rouges\n",  "tests rouges"},
+  };
+  for (const Row& r : rows) {
+    FakePlatform plat;
+    FakeLauncher launcher;
+    const std::string path = write_state(state_body("available"));
+    UpdateService svc(plat, path, launcher.fn());
+    svc.tick();
+
+    svc.run("update:check");
+    CHECK(!svc.has_report());  // rien tant que l'enfant travaille
+
+    // Le script a fait son travail : on reecrit l'etat sous ses pieds,
+    // comme le vrai le ferait.
+    {
+      std::ofstream out(path, std::ios::binary | std::ios::trunc);
+      out << state_body(r.status, r.extra);
+    }
+    svc.on_child_exit(launcher.next_pid, 0);
+
+    REQUIRE(svc.has_report());
+    const std::string report = svc.take_report();
+    CHECK(report.find(r.needle) != std::string::npos);
+    // Pris une fois, puis disparu : sans quoi le meme pop-up reviendrait a
+    // chaque reveil.
+    CHECK(!svc.has_report());
+    std::remove(path.c_str());
+  }
+}
+
+// UNE VERIFICATION AUTOMATIQUE SE TAIT. Elle tombe une fois par jour, sans
+// qu'on ait rien demande : un pop-up quotidien serait du harcelement.
+TEST(update_service_says_nothing_after_an_automatic_check) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path =
+      write_state(state_body("up-to-date", "checked_at=1\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  // On laisse l'echeance echoir : le service lance de lui-meme.
+  plat.advance_mono(std::chrono::seconds(31));
+  svc.tick();
+  REQUIRE_EQ(launcher.calls.size(), static_cast<std::size_t>(1));
+  CHECK_EQ(launcher.calls[0][1], std::string("--check"));
+
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << state_body("available");
+  }
+  svc.on_child_exit(launcher.next_pid, 0);
+
+  CHECK(!svc.has_report());
+  // Mais la pastille, elle, s'allume : c'est le signal discret prevu pour ca.
+  CHECK(svc.badge());
+  std::remove(path.c_str());
+}
+
+// UN ENFANT MORT SANS RIEN CONCLURE, DEMANDE PAR L'UTILISATEUR : on le dit
+// quand meme, avec le journal comme piste.
+TEST(update_service_reports_a_manual_check_that_concluded_nothing) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body("up-to-date"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  svc.run("update:check");
+  svc.on_child_exit(launcher.next_pid, 1 << 8);  // sorti avec 1, etat inchange
+
+  REQUIRE(svc.has_report());
+  CHECK(svc.take_report().find("update.log") != std::string::npos);
+  std::remove(path.c_str());
+}

@@ -71,8 +71,19 @@ class UpdateService {
   // bureau et laisse le client se rattacher.
   bool wants_restart() const { return wants_restart_; }
 
+  // CE QU'ON DOIT DIRE A L'UTILISATEUR, ET UNE SEULE FOIS.
+  //
+  // Une verification AUTOMATIQUE se tait : elle ne doit pas harceler. Une
+  // verification DEMANDEE, si -- l'utilisateur a clique, il attend une
+  // reponse, et « rien ne se passe » est la pire des reponses. Le rapport se
+  // prend une fois puis disparait.
+  bool has_report() const { return !report_.empty(); }
+  std::string take_report();
+
  private:
   void reload();
+  void launch(std::string_view mode, bool manual);
+  void build_report();
   void schedule_from(std::int64_t checked_at);
   std::string updater_path() const;
 
@@ -88,6 +99,9 @@ class UpdateService {
   std::string message_;
 
   pid_t child_ = -1;
+  // Vrai quand l'enfant courant a ete lance par un clic, pas par l'echeance.
+  bool child_is_manual_ = false;
+  std::string report_;
   bool have_deadline_ = false;
   std::chrono::steady_clock::time_point deadline_{};
   bool wants_restart_ = false;

@@ -2,11 +2,14 @@
 
 #include <algorithm>
 
+#include "render/width.hpp"
+
 namespace sshos {
 namespace {
 
 constexpr char kCancel[] = "[ Annuler ]";
 constexpr char kConfirm[] = "[ Confirmer ]";
+constexpr char kAcknowledge[] = "[ OK ]";
 constexpr int kCancelW = sizeof(kCancel) - 1;
 constexpr int kConfirmW = sizeof(kConfirm) - 1;
 
@@ -26,8 +29,19 @@ void Modal::ask(std::string question, WindowId target) {
   confirm_ = false;
 }
 
+void Modal::inform(std::string message) {
+  // Même règle que ask() : la seconde demande est ignorée, pas mise en file.
+  if (open_) return;
+  open_ = true;
+  info_ = true;
+  question_ = std::move(message);
+  target_ = 0;
+  confirm_ = true;  // le seul bouton a le focus
+}
+
 void Modal::dismiss() {
   open_ = false;
+  info_ = false;
   question_.clear();
   target_ = 0;
   confirm_ = false;
@@ -65,7 +79,19 @@ void Modal::draw(View v, const Theme& th, Border b) const {
   hot.bg = th.accent;
   hot.fg = th.modal_bg;
 
-  v.text(rect_.x + 2, rect_.y + 1, question_, st);
+  // ÉLIDÉ À LA LARGEUR DE LA BOÎTE. rect() borne bien le cadre à l'écran,
+  // mais draw() reçoit une View pleine largeur : sans cette coupe, une
+  // question plus longue que la boîte débordait par-dessus le bureau
+  // jusqu'au bord droit. Le tilde plutôt qu'une ellipse Unicode : Modal ne
+  // sait pas si le client accepte l'UTF-8.
+  v.text(rect_.x + 2, rect_.y + 1,
+         elide_to_cells(question_, rect_.w - 4, "~"), st);
+  if (info_) {
+    // Un seul bouton, centré : il n'y a rien à décider.
+    const int w = static_cast<int>(sizeof(kAcknowledge) - 1);
+    v.text(rect_.x + (rect_.w - w) / 2, confirm_rect().y, kAcknowledge, hot);
+    return;
+  }
   const Rect c = cancel_rect();
   const Rect k = confirm_rect();
   v.text(c.x, c.y, kCancel, confirm_ ? st : hot);
@@ -74,6 +100,12 @@ void Modal::draw(View v, const Theme& th, Border b) const {
 
 ModalHit Modal::hit(int x, int y) const {
   if (!open_ || !rect_.contains(x, y)) return ModalHit::None;
+  // En mode information il n'y a qu'un bouton, et cliquer n'importe ou sur
+  // sa ligne l'atteint : c'est une reconnaissance, pas un choix.
+  if (info_) {
+    if (confirm_rect().y == y) return ModalHit::Confirm;
+    return ModalHit::Body;
+  }
   if (cancel_rect().contains(x, y)) return ModalHit::Cancel;
   if (confirm_rect().contains(x, y)) return ModalHit::Confirm;
   return ModalHit::Body;
