@@ -2,6 +2,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <string>
 
 #include "common/oom.hpp"
@@ -20,6 +21,40 @@ std::string reglage() {
   std::string s(buf, static_cast<size_t>(n));
   while (!s.empty() && (s.back() == '\n' || s.back() == ' ')) s.pop_back();
   return s;
+}
+
+// CAP_SYS_RESOURCE EST-ELLE DANS LE JEU EFFECTIF ? Lue dans
+// /proc/self/status, sans libcap -- le projet n'a aucune dependance
+// externe.
+//
+// CE N'EST PAS LA MEME CHOSE QU'ETRE ROOT, et c'est tout l'interet de cette
+// fonction : un conteneur Docker tourne en root et retire pourtant cette
+// capacite de son jeu par defaut. La CI de ce depot est exactement ce
+// cas-la, et une version anterieure de ce fichier -- qui interrogeait
+// geteuid() -- y a echoue alors qu'elle passait sur la machine de
+// developpement.
+bool peut_baisser_le_score() {
+  const int fd = ::open("/proc/self/status", O_RDONLY);
+  if (fd < 0) return false;
+  std::string tout;
+  char buf[4096];
+  ssize_t n = 0;
+  while ((n = ::read(fd, buf, sizeof buf)) > 0) tout.append(buf, static_cast<size_t>(n));
+  ::close(fd);
+
+  const size_t at = tout.find("CapEff:");
+  if (at == std::string::npos) return false;
+  size_t i = at + 7;
+  while (i < tout.size() && (tout[i] == ' ' || tout[i] == '\t')) ++i;
+  unsigned long long masque = 0;
+  for (; i < tout.size() && std::isxdigit(static_cast<unsigned char>(tout[i])); ++i) {
+    masque = masque * 16 + static_cast<unsigned long long>(
+                              std::isdigit(static_cast<unsigned char>(tout[i]))
+                                  ? tout[i] - '0'
+                                  : std::tolower(tout[i]) - 'a' + 10);
+  }
+  // CAP_SYS_RESOURCE vaut 24 (linux/capability.h).
+  return (masque >> 24 & 1ULL) != 0;
 }
 
 // DANS UN ENFANT, TOUJOURS. Le reglage du tueur de memoire s'herite : le
@@ -70,19 +105,16 @@ TEST(oom_protection_puts_the_process_out_of_reach) {
   });
 
   REQUIRE(!vu.empty());
-  if (vu.rfind("non ", 0) == 0) {
-    // Toute valeur negative demande CAP_SYS_RESOURCE. Sans privilege il n'y
-    // a rien a proteger -- et surtout, l'echec doit avoir laisse le reglage
-    // INTACT plutot que de le degrader.
-    //
-    // SOUS ROOT, EN REVANCHE, IL N'Y A PAS D'EXCUSE : sans cette garde, une
-    // protection qui n'ecrirait plus rien passerait ce cas en se faisant
-    // passer pour un manque de privilege.
-    CHECK(::geteuid() != 0);
+  // LES DEUX SENS SONT AFFIRMES, sans echappatoire : avec la capacite la
+  // protection DOIT reussir -- sans quoi une protection qui n'ecrirait plus
+  // rien passerait ce cas en se faisant passer pour un manque de privilege
+  // -- et sans elle elle DOIT echouer en laissant le reglage intact plutot
+  // qu'en le degradant.
+  if (peut_baisser_le_score()) {
+    CHECK_EQ(vu, std::string("oui -1000"));
+  } else {
     CHECK_EQ(vu, std::string("non 0"));
-    return;
   }
-  CHECK_EQ(vu, std::string("oui -1000"));
 }
 
 // ET IL LA REND. Le reglage survit a fork() ET a execve() : un enfant qui
@@ -91,7 +123,7 @@ TEST(oom_protection_puts_the_process_out_of_reach) {
 TEST(oom_protection_is_dropped_on_demand) {
   const std::string vu = dans_un_enfant([](int fd) {
     if (!sshos::protect_from_oom()) {
-      dis(fd, "sans privilege");
+      dis(fd, "sans la capacite");
       return;
     }
     sshos::drop_oom_protection();
@@ -99,17 +131,17 @@ TEST(oom_protection_is_dropped_on_demand) {
   });
 
   REQUIRE(!vu.empty());
-  if (vu == "sans privilege") return;
+  if (vu == "sans la capacite") return;
   CHECK_EQ(vu, std::string("0"));
 }
 
 // REMONTER EST TOUJOURS PERMIS. C'est ce qui rend l'abandon possible sans
-// privilege dans l'enfant, alors que la protection, elle, en demande un :
-// le noyau ne garde que la DESCENTE.
+// aucune capacite dans l'enfant, alors que la protection, elle, demande
+// CAP_SYS_RESOURCE : le noyau ne garde que la DESCENTE.
 TEST(oom_protection_can_be_dropped_by_an_unprivileged_child) {
   const std::string vu = dans_un_enfant([](int fd) {
     if (!sshos::protect_from_oom()) {
-      dis(fd, "sans privilege");
+      dis(fd, "sans la capacite");
       return;
     }
     // Un petit-fils, comme un shell d'invite : il herite de -1000 puis le
@@ -125,6 +157,6 @@ TEST(oom_protection_can_be_dropped_by_an_unprivileged_child) {
   });
 
   REQUIRE(!vu.empty());
-  if (vu == "sans privilege") return;
+  if (vu == "sans la capacite") return;
   CHECK_EQ(vu, std::string("petit-fils 0"));
 }

@@ -17,8 +17,15 @@ namespace sshos {
 inline constexpr int kOomProtected = -1000;
 
 // Met le processus courant hors d'atteinte. Rend false si le noyau refuse
-// -- toute valeur NEGATIVE demande CAP_SYS_RESOURCE -- ou si /proc est
-// absent. L'echec n'est jamais fatal : un demon non protege reste un demon.
+// ou si /proc est absent. L'echec n'est jamais fatal : un demon non protege
+// reste un demon.
+//
+// TOUTE VALEUR NEGATIVE DEMANDE CAP_SYS_RESOURCE, ce qui n'est PAS la meme
+// chose qu'etre root : un conteneur Docker tourne en root et retire
+// pourtant cette capacite de son jeu par defaut. Le demon y demarre donc
+// sans protection, et c'est le comportement voulu -- mesure sur la CI de ce
+// depot, ou la confusion entre les deux a fait echouer un test qui passait
+// sur la machine de developpement.
 bool protect_from_oom();
 
 // Rend un enfant ORDINAIRE de nouveau, et c'est indispensable : le reglage
