@@ -306,10 +306,6 @@ void Session::run_menu(const std::string& id) {
     tile_windows();
     return;
   }
-  if (id == "input:mouse") {
-    do_action(Action::ToggleMouse);
-    return;
-  }
   if (id == "session:detach") {
     // Exactement ce que fait Ctrl+Q : le client s'en va, la session
     // continue de vivre dans le démon avec toutes ses fenêtres.

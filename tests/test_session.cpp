@@ -4870,32 +4870,4 @@ TEST(session_keeps_a_paste_out_of_an_open_menu) {
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
 
-// LA SOURIS SE REND AU TERMINAL DEPUIS LE MENU, et pas seulement par un
-// accord clavier. C'est la SEULE facon de selectionner du texte pour le
-// copier ailleurs -- le bureau capte la souris -- et une fonction qui n'a
-// qu'un raccourci est une fonction incomplete.
-TEST(session_offers_the_mouse_toggle_in_the_menu) {
-  FakePlatform plat;
-  Session sess(plat, g_fds, 80, 24);
-  Surface s(80, 24);
-  sess.render(s);
-  CHECK(sess.take_out_of_band().empty());
-
-  // PAR LE VRAI CHEMIN : on ouvre le menu, on filtre, on valide. Appeler
-  // run_menu() directement prouverait que la commande marche, pas que
-  // l'entree existe et qu'on peut l'atteindre.
-  sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
-  REQUIRE(sess.menu_open_for_tests());
-  for (char c : std::string("souris")) {
-    sess.on_input(sshos::InputEvent{
-        sshos::KeyEvent{sshos::Key::Char, static_cast<char32_t>(c), 0}});
-  }
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
-
-  const std::string oob = sess.take_out_of_band();
-  CHECK(oob.find("\033[?1002l") != std::string::npos);
-  CHECK(oob.find("\033[?1006l") != std::string::npos);
-}
 
