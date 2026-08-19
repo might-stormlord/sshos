@@ -4,13 +4,13 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 19 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
+> **Dernière mise à jour :** 19 août 2026 (fin de journée), branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1261 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **1277 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
 > **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août).
 > Arbre de travail propre.
-> **243 commits** sur `main`, 120 fichiers dans `src/`.
+> **254 commits** sur `main`, 120 fichiers dans `src/`.
 > **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
@@ -117,7 +117,7 @@ cmake --build build-debug -j"$(nproc)"
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1261 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1277 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
@@ -434,8 +434,8 @@ une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 ## 3 bis. La carte du code
 
-19 012 lignes dans `src/` sur 120 fichiers, 27 517 dans `tests/` sur 59 (mesuré le
-19 août 2026). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+19 247 lignes dans `src/` sur 120 fichiers, 27 810 dans `tests/` sur 59 (mesuré le
+19 août 2026, en fin de journée). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
 campagnes de mutation possibles.
 
 | Module | Ce qu'il fait | À savoir avant d'y toucher |
