@@ -217,6 +217,16 @@ int run_daemon(std::string_view socket_name) {
     // détachement et le premier mouvement du client SUIVANT le reprendrait
     // en vol.
     session.cancel_drag();
+    // ET LE HORS-BANDE AVEC, pour exactement la même raison. Il est mis en
+    // file par do_action() et n'est vidé que par le rendu SUIVANT ; un
+    // client qui disparaît entre les deux -- lien coupé, fenêtre fermée --
+    // le laisse en file, et le suivant le reçoit collé devant sa première
+    // trame. Un « \033[?1002l » hérité TUE LA SOURIS d'une session neuve,
+    // sans que rien ne l'explique. On le prend et on le jette : ces
+    // séquences décrivent l'état du terminal de CE client-là, et il n'est
+    // plus là.
+    const std::string abandonne = session.take_out_of_band();
+    (void)abandonne;
   };
 
   // Ferme silencieusement `pending` : contrairement à drop_client(), aucun

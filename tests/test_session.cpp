@@ -2949,6 +2949,69 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
   CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "ssh_os", 3000));
 }
 
+namespace {
+
+// Accumule TOUT ce que le demon envoie pendant `ms`, trames concatenees.
+// L'inverse de wait_for_frame_containing : ici on veut prouver une ABSENCE,
+// et une absence ne se prouve qu'en ayant regarde tout ce qui est passe.
+std::string frames_during(int fd, sshos::Decoder& dec, int ms) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  std::string tout;
+  for (;;) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) return tout;
+    const int reste = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
+            .count());
+    auto m = recv_one(fd, dec, reste);
+    if (!m) return tout;
+    if (const auto* f = std::get_if<sshos::FrameMsg>(&*m)) tout += f->ansi;
+  }
+}
+
+}  // namespace
+
+// UNE BASCULE EN ATTENTE NE DOIT PAS SUIVRE LE CLIENT SUIVANT. C'est le
+// jumeau exact du glissement orphelin ci-dessus, et le meme oubli : le
+// hors-bande est mis en file par do_action() et n'est vide que par le rendu
+// SUIVANT. Un client qui disparait entre les deux -- reseau coupe, fenetre
+// fermee -- laisse la sequence en file, et le client d'apres la recoit collee
+// devant sa premiere trame. Un « \033[?1002l » herite ainsi TUE LA SOURIS
+// d'une session neuve, sans que rien ne l'explique.
+TEST(daemon_forgets_a_mode_toggle_left_behind_by_a_departed_client) {
+  const std::string name = unique_name() + "-oob-orphan";
+  DaemonHandle daemon(name);
+  REQUIRE(daemon.valid());
+
+  sshos::Hello hello = make_hello(80, 24);
+  hello.utf8 = true;
+
+  {
+    sshos::Fd a = connect_retry(name);
+    REQUIRE(a.valid());
+    REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
+    sshos::Decoder dec_a;
+    REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Bloc", "ssh_os", 3000));
+
+    // La bascule et la fermeture dans le MEME envoi : le demon traite
+    // l'entree puis constate la fermeture dans la meme fournee epoll, donc
+    // sans avoir rendu entre les deux. C'est ce que fait un lien coupe.
+    REQUIRE(send_all(a.get(),
+                     sshos::encode(sshos::Msg{sshos::Input{"\x01m"}})));
+  }  // le client se ferme ici, la bascule encore en file
+
+  sshos::Fd b = connect_retry(name);
+  REQUIRE(b.valid());
+  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
+  sshos::Decoder dec_b;
+
+  const std::string vu = frames_during(b.get(), dec_b, 1500);
+  REQUIRE(vu.find("ssh_os") != std::string::npos);  // des trames sont bien venues
+  CHECK(vu.find("\033[?1002l") == std::string::npos);
+  CHECK(vu.find("\033[?1006l") == std::string::npos);
+}
+
 // ---------------------------------------------------------------------------
 // L'aide de découvrabilité (§16 : « la touche leader est peu découvrable
 // pour qui vient d'un vrai bureau »). Elle ne se teste pas sur son contenu
