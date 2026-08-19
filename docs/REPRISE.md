@@ -1137,13 +1137,37 @@ concluait que le balayage mentait. Le rapport était affirmatif, sourcé, et fau
 **Les sept jalons sont livrés**, et depuis le 17 août 2026 **l'installation locale et
 la mise à jour depuis le bureau** le sont aussi — quatorze tâches, plan clos, §2 ter.
 
-Les 18 et 19 août 2026 s'y ajoutent trois demandes venues de l'usage : **la molette**,
+Les 18 et 19 août 2026 s'y ajoutent six demandes venues de l'usage : **la molette**,
 qui n'atteignait aucune application ; **la survie du démon** au tueur de mémoire, avec
-le journal qui dit pourquoi il s'arrête ; et **le dossier de départ du terminal**, qui
-s'ouvrait à la racine. Le détail est dans le tableau du §3.
+le journal qui dit pourquoi il s'arrête ; **le dossier de départ du terminal**, qui
+s'ouvrait à la racine ; **le collage**, qui n'atteignait personne non plus, et le garde
+du compilateur qui ferme cette famille de défaut ; **les notes de version** dans la
+fenêtre de mise à jour ; et **le retrait de la bascule souris**. Le détail est dans le
+tableau du §3.
 
 Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
 en réaction à l'usage réel.
+
+### Les fils laissés en l'air le 19 août au soir
+
+Rien d'entamé, rien de cassé — mais quatre choses qu'un contexte neuf ne devinerait pas.
+
+1. **Un échec unique, sous ASan, non identifié.** Apparu une fois pendant la journée du
+   19, jamais reproduit sur les cinq passages suivants ni dans le conteneur. La machine
+   compilait et faisait tourner des conteneurs en parallèle. Si un cas isolé tombe sans
+   raison, ce n'est probablement pas le code — le relancer avant de creuser.
+2. **La CI annote un Node 20 déprécié.** `actions/checkout@v4` tourne sur Node 24 par
+   compatibilité. Sans effet aujourd'hui ; à passer en `@v5` un jour.
+3. **Un défaut connu, délibérément NON corrigé** : sous prise de souris, les coordonnées
+   locales livrées à une application ne sont pas bornées (`Session::on_mouse`), donc un
+   glissement qui sort par le haut d'une fenêtre cesse d'atteindre son contenu **en
+   silence**. Sans conséquence observable aujourd'hui — les deux sites d'indexation de
+   Fichiers sont gardés, et le terminal n'a pas de geste de glissement. Ça ne deviendrait
+   un vrai défaut qu'avec une sélection à la souris, qui n'est pas construite (§3).
+4. **L'installation de l'utilisateur peut être en retard sur `main`.** Vérifier
+   `installed_commit` dans `<données>/state` avant de conclure qu'un correctif « ne marche
+   pas » : le 19 août, il tournait `f32161f` pendant que `main` était cinq commits plus
+   loin.
 
 ### Le jalon 7 — ce qu'il change, et la contrainte qui l'a décidé
 
