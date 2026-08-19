@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sshos {
 
@@ -53,6 +54,16 @@ struct UpdateState {
   // sans rien preciser laisse croire a un blocage.
   std::string stage;
   std::string message;
+
+  // CE QUI A CHANGE, et non seulement combien. « 5 nouveautes » ne dit pas
+  // LESQUELLES : le script extrait les sujets de commit -- il a git sous la
+  // main, le C++ ne l'aura jamais -- et les depose numerotes, `note_1` a
+  // `note_N`, du plus recent au plus ancien.
+  //
+  // Bornees en nombre ET en longueur, et assainies : la valeur vient d'un
+  // script, passe par un fichier editable a la main, et finit DESSINEE dans
+  // une modale.
+  std::vector<std::string> notes;
 };
 
 // Le fichier est lu dans le fil UNIQUE du démon. Un résumé de compilation de
@@ -68,6 +79,13 @@ inline constexpr std::size_t kMaxStateMessageBytes = 200;
 // Le seul schéma connu. Une valeur différente est traitée comme un fichier
 // absent : mieux vaut ne rien afficher que de deviner un format.
 inline constexpr int kUpdateStateSchema = 1;
+
+// Combien de notes de version on garde, et combien de caracteres chacune.
+// Six tiennent dans une modale sans la faire deborder ; au-dela, le script
+// ecrit lui-meme une derniere ligne « ... et N autres ». La longueur suit
+// celle des sujets de commit du projet, qui tiennent en 72 colonnes.
+inline constexpr std::size_t kMaxUpdateNotes = 6;
+inline constexpr std::size_t kMaxUpdateNoteChars = 76;
 
 // Analyse PURE : ni disque, ni horloge. `now_epoch` sert uniquement à borner
 // `checked_at`, et il est passé plutôt que lu pour que le cas d'une horloge

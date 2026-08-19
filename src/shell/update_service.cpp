@@ -322,6 +322,14 @@ void UpdateService::build_report() {
       report_ += ".";
       const std::string v = version_line();
       if (!v.empty()) report_ += "\n" + v;
+      // CE QUI A CHANGE, quand le script a su le dire. Une liste vide ne
+      // laisse RIEN derriere elle : un pop-up sans notes doit rester
+      // exactement celui d'avant, au caractere pres -- une installation
+      // mise a jour par un script plus ancien n'en depose aucune.
+      if (!state_.notes.empty()) {
+        report_ += "\n";
+        for (const std::string& n : state_.notes) report_ += "\n  - " + n;
+      }
       break;
     }
     case UpdateStatus::RestartPending:

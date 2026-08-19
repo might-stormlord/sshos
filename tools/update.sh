@@ -78,6 +78,73 @@ sanitize() {
   printf '%s' "$1" | tr -d '\000-\037\177' | cut -c1-200
 }
 
+# CE QUI A CHANGE, ET PAS SEULEMENT COMBIEN.
+#
+# « 5 nouveautes » ne dit pas LESQUELLES, et c'est justement ce qu'on veut
+# savoir avant de lancer une compilation de deux minutes. Le C++ n'a pas git
+# et ne l'aura jamais -- c'est la contrainte qui garde le demon vivant -- donc
+# c'est ici, et seulement ici, qu'on lit l'historique.
+#
+# On ne garde que « feat » et « fix » : docs, test et ci sont du travail
+# interne, et les lister noierait ce qui se voit. Le prefixe « type(portee): »
+# part, il ne dit rien a l'utilisateur.
+#
+# Six au plus, la septieme ligne comptant le reste. Chacune est tronquee a 76
+# caracteres, comme kMaxUpdateNoteChars du cote C++ -- une modale qui deborde
+# de son cadre a deja ete un defaut de ce projet -- et le fichier d'etat
+# entier doit rester sous kMaxStateBytes, faute de quoi il est lu comme
+# vierge.
+NOTES=""
+
+build_notes() { # build_notes <installe> <distant>
+  NOTES=""
+  [ "$SOURCE" = git ] || return 0
+  have git || return 0
+  [ -d "$SRC/.git" ] || return 0
+  [ "$1" != unknown ] || return 0
+
+  # LA FIN DE LIGNE SURVIT AU MENAGE, et c'est tout sauf un detail : `tr -d
+  # '\000-\037\177'` -- la plage qu'utilise sanitize() plus haut, sur une
+  # valeur d'UNE ligne -- emporte aussi \012, donc colle tous les sujets en
+  # un seul que `cut` tronque ensuite a 76 caracteres. Vu pour de vrai en
+  # essayant cette fonction. On garde donc \012 et on retire le reste.
+  _sujets=$(git -C "$SRC" log --format=%s "$1..$2" 2>/dev/null \
+            | grep -E '^(feat|fix)\(' \
+            | sed -E 's/^[a-z]+\([^)]*\): *//' \
+            | tr -d '\000-\011\013-\037\177' \
+            | cut -c1-76) || return 0
+  [ -n "$_sujets" ] || return 0
+
+  _total=$(printf '%s\n' "$_sujets" | wc -l | tr -d ' ')
+  _rang=0
+  # `sed -n Np` plutot qu'une boucle `read` : un `while read` derriere un
+  # tube tourne dans un SOUS-SHELL, et tout ce qu'il assignerait a NOTES
+  # serait perdu au retour. Piege classique de sh, et il ne se voit pas.
+  # LA LIGNE DE RESTE COMPTE DANS LE PLAFOND. Le lecteur en garde six et
+  # s'arrete la : en ecrire six PUIS un « ... et N autres » en septieme
+  # position ferait jeter precisement la ligne qui explique qu'il en manque.
+  # Donc six sujets quand il y en a six ou moins, cinq plus le reste sinon.
+  _garde=6
+  [ "$_total" -le 6 ] || _garde=5
+
+  _n=0
+  while [ "$_n" -lt "$_garde" ]; do
+    _n=$((_n + 1))
+    _s=$(printf '%s\n' "$_sujets" | sed -n "${_n}p")
+    [ -n "$_s" ] || break
+    _rang=$_n
+    NOTES="${NOTES}note_$_n=$_s
+"
+  done
+  if [ "$_total" -gt "$_rang" ] && [ "$_rang" -gt 0 ]; then
+    _reste=$((_total - _rang))
+    _mot=autres
+    [ "$_reste" -gt 1 ] || _mot=autre
+    NOTES="${NOTES}note_$((_rang + 1))=... et $_reste $_mot
+"
+  fi
+}
+
 write_state() { # write_state <status> <message> [pid]
   _st="$1"; _msg=$(sanitize "${2:-}"); _pid="${3:-}"
   # Le fichier temporaire est dans le MEME repertoire, donc le meme systeme
@@ -98,6 +165,12 @@ status=$_st
 pid=$_pid
 message=$_msg
 FIN
+  # LES NOTES NE VALENT QUE POUR « available » : ailleurs elles decriraient
+  # une mise a jour qui n'est plus a venir -- deja posee, ou echouee -- et un
+  # fichier qui les garderait ferait mentir la prochaine lecture.
+  if [ "$_st" = available ] && [ -n "$NOTES" ]; then
+    printf '%s' "$NOTES" >> "$STATE.tmp"
+  fi
   mv -f "$STATE.tmp" "$STATE"
 }
 
@@ -227,6 +300,7 @@ do_check() {
     fi
   fi
 
+  build_notes "$INSTALLED" "$REMOTE"
   write_state available ""
 }
 

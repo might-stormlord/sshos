@@ -83,6 +83,51 @@ bool read_status(std::string_view s, UpdateStatus& out) {
 
 }  // namespace
 
+namespace {
+
+// UNE NOTE EST DESSINEE DANS UNE MODALE : elle ne doit rien pouvoir piloter.
+// Tout octet de controle part -- un echappement qui survivrait pourrait
+// repeindre l'ecran du bureau depuis un fichier editable a la main. C'est la
+// meme raison qui fait refuser aux numeros de version tout ce qui n'est pas
+// chiffres et points.
+//
+// Puis on borne, en reculant sur une frontiere UTF-8 : couper au milieu
+// d'une sequence laisserait un demi-caractere dans le cadre.
+std::string clean_note(std::string_view v) {
+  std::string out;
+  out.reserve(v.size());
+  for (const char c : v) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (u >= 0x20 && u != 0x7f) out.push_back(c);
+  }
+  if (out.size() > kMaxUpdateNoteChars) {
+    out.resize(kMaxUpdateNoteChars);
+    while (!out.empty() &&
+           (static_cast<unsigned char>(out.back()) & 0xc0) == 0x80) {
+      out.pop_back();
+    }
+  }
+  return out;
+}
+
+// « note_12 » -> 12. Rend 0 -- donc « pas une note » -- pour tout le reste :
+// un « note_ » nu, un « note_0 », un indice qui deborde.
+std::size_t note_index(std::string_view key) {
+  constexpr std::string_view prefixe = "note_";
+  if (key.size() <= prefixe.size() || key.compare(0, prefixe.size(), prefixe) != 0) {
+    return 0;
+  }
+  std::size_t n = 0;
+  for (const char c : key.substr(prefixe.size())) {
+    if (c < '0' || c > '9') return 0;
+    n = n * 10 + static_cast<std::size_t>(c - '0');
+    if (n > 10000) return 0;
+  }
+  return n;
+}
+
+}  // namespace
+
 UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
   UpdateState out;
   if (raw.size() > kMaxStateBytes) return out;
@@ -98,6 +143,7 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
 
   bool schema_ok = false;
   UpdateState parsed;
+  std::vector<std::pair<std::size_t, std::string>> notes;
 
   std::size_t pos = 0;
   while (pos <= raw.size()) {
@@ -155,12 +201,29 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
     } else if (key == "message") {
       parsed.message = std::string(value.substr(
           0, std::min(value.size(), kMaxStateMessageBytes)));
+    } else if (const std::size_t n = note_index(key); n != 0) {
+      // Rangees telles quelles ici ; l'ORDRE est refait apres la boucle, a
+      // partir des indices -- le fichier peut les donner dans n'importe
+      // quel ordre, et une modale qui les afficherait dans celui du
+      // fichier mentirait sur la chronologie.
+      notes.emplace_back(n, clean_note(value));
     }
     // Toute autre clé est ignorée : le format peut gagner des champs sans
     // que les anciens lecteurs aient à s'en soucier.
   }
 
   if (!schema_ok) return out;  // état vierge, sans message
+
+  // LA SUITE 1, 2, 3... ET ON S'ARRETE AU PREMIER TROU. Ramasser « note_9 »
+  // apres un « note_2 » absent afficherait une liste dont l'ordre ne veut
+  // plus rien dire -- et rien ne garantit que le trou soit accidentel.
+  for (std::size_t rang = 1; rang <= kMaxUpdateNotes; ++rang) {
+    const auto it = std::find_if(notes.begin(), notes.end(),
+                                 [rang](const auto& p) { return p.first == rang; });
+    if (it == notes.end()) break;
+    if (it->second.empty()) break;  // une note vide n'a rien a dire
+    parsed.notes.push_back(it->second);
+  }
   return parsed;
 }
 

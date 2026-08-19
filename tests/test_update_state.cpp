@@ -239,3 +239,75 @@ TEST(update_state_ignores_an_absurd_commit_count) {
   CHECK_EQ(parse("schema=1\ncommits_ahead=-4\n").commits_ahead, 0);
   CHECK_EQ(parse("schema=1\ncommits_ahead=7\n").commits_ahead, 7);
 }
+
+// ---------------------------------------------------------------------------
+// Les notes de version : ce qui a change, et non seulement combien.
+// ---------------------------------------------------------------------------
+
+// « 5 nouveautes » ne dit pas LESQUELLES. Le script les extrait des sujets de
+// commit -- il a git sous la main, le C++ ne l'aura jamais -- et les depose
+// numerotees.
+TEST(update_state_reads_the_release_notes) {
+  const UpdateState s = parse(
+      "schema=1\n"
+      "status=available\n"
+      "note_1=la molette atteint enfin l application\n"
+      "note_2=le terminal s ouvre chez vous\n");
+
+  REQUIRE_EQ(s.notes.size(), size_t{2});
+  CHECK_EQ(s.notes[0], std::string("la molette atteint enfin l application"));
+  CHECK_EQ(s.notes[1], std::string("le terminal s ouvre chez vous"));
+}
+
+// LA NUMEROTATION EST UNE SUITE, et on s'arrete au premier trou. Ramasser
+// « note_9 » apres un « note_2 » absent ferait afficher une liste dont
+// l'ordre ne veut plus rien dire.
+TEST(update_state_stops_the_notes_at_the_first_gap) {
+  const UpdateState s = parse(
+      "schema=1\nstatus=available\nnote_1=une\nnote_3=trois\n");
+
+  REQUIRE_EQ(s.notes.size(), size_t{1});
+  CHECK_EQ(s.notes[0], std::string("une"));
+}
+
+// SANS NOTES, PAS DE LISTE : c'est le cas d'une installation mise a jour par
+// un script plus ancien, et ce n'est pas une erreur.
+TEST(update_state_without_notes_has_none) {
+  const UpdateState s = parse("schema=1\nstatus=available\n");
+  CHECK(s.notes.empty());
+}
+
+// ELLES SONT BORNEES EN NOMBRE. Une modale qui deborde de l'ecran a deja ete
+// un defaut de ce projet, et le fichier vient d'un script.
+TEST(update_state_caps_how_many_notes_it_keeps) {
+  std::string raw = "schema=1\nstatus=available\n";
+  for (int i = 1; i <= 40; ++i) {
+    raw += "note_" + std::to_string(i) + "=note numero " + std::to_string(i) + "\n";
+  }
+
+  const UpdateState s = parse(raw);
+  CHECK_EQ(s.notes.size(), sshos::kMaxUpdateNotes);
+}
+
+// ET EN LONGUEUR, chacune.
+TEST(update_state_elides_a_very_long_note) {
+  const UpdateState s = parse("schema=1\nstatus=available\nnote_1=" +
+                              std::string(400, 'a') + "\n");
+
+  REQUIRE_EQ(s.notes.size(), size_t{1});
+  CHECK(s.notes[0].size() <= sshos::kMaxUpdateNoteChars);
+}
+
+// UN SUJET DE COMMIT NE PILOTE PAS LE TERMINAL. La valeur vient d'un script,
+// passe par un fichier que n'importe qui peut editer, et FINIT DESSINEE dans
+// une modale : un echappement qui y survivrait pourrait repeindre l'ecran du
+// bureau. C'est exactement la raison pour laquelle les numeros de version
+// refusent tout ce qui n'est pas chiffres et points.
+TEST(update_state_strips_control_bytes_from_a_note) {
+  const UpdateState s = parse(
+      "schema=1\nstatus=available\nnote_1=avant\033[2Japres\007\n");
+
+  REQUIRE_EQ(s.notes.size(), size_t{1});
+  CHECK_EQ(s.notes[0], std::string("avant[2Japres"));
+}
+

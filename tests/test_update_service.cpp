@@ -686,3 +686,63 @@ TEST(update_service_names_the_version_when_it_says_you_are_up_to_date) {
     std::remove(path.c_str());
   }
 }
+
+// ---------------------------------------------------------------------------
+// Les notes de version.
+// ---------------------------------------------------------------------------
+
+// « 5 nouveautes » ne dit pas LESQUELLES, et c'est precisement ce que
+// l'utilisateur veut savoir avant de lancer une compilation de deux minutes.
+TEST(update_service_lists_what_changed_in_its_report) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body("available"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  svc.run("update:check");
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << state_body("available",
+                      "commits_ahead=3\n"
+                      "installed_version=1.4\n"
+                      "remote_version=1.9\n"
+                      "note_1=le terminal s ouvre chez vous\n"
+                      "note_2=le demon survit au tueur de memoire\n"
+                      "note_3=la molette atteint enfin l application\n");
+  }
+  svc.on_child_exit(launcher.next_pid, 0);
+
+  REQUIRE(svc.has_report());
+  const std::string report = svc.take_report();
+  CHECK(report.find("1.4 -> 1.9") != std::string::npos);
+  CHECK(report.find("le terminal s ouvre chez vous") != std::string::npos);
+  CHECK(report.find("le demon survit au tueur de memoire") != std::string::npos);
+  CHECK(report.find("la molette atteint enfin l application") != std::string::npos);
+  std::remove(path.c_str());
+}
+
+// SANS NOTES, LE POP-UP EST CELUI D'AVANT, au caractere pres : une
+// installation mise a jour par un script plus ancien n'en depose aucune, et
+// ce n'est pas une raison pour lui montrer une liste vide ou un cadre troue.
+TEST(update_service_says_nothing_more_without_notes) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body("available"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  svc.run("update:check");
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << state_body("available",
+                      "commits_ahead=3\ninstalled_version=1.4\nremote_version=1.9\n");
+  }
+  svc.on_child_exit(launcher.next_pid, 0);
+
+  REQUIRE(svc.has_report());
+  const std::string report = svc.take_report();
+  CHECK_EQ(report, std::string("Mise a jour disponible : 3 nouveautes.\nVersion 1.4 -> 1.9"));
+  std::remove(path.c_str());
+}
+
