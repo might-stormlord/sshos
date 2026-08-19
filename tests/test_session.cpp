@@ -1020,32 +1020,6 @@ TEST(session_never_leaks_a_leader_chord_to_the_application) {
   CHECK(typed.text_row(1).find("Bloc *") != std::string::npos);
 }
 
-// ToggleMouse n'a pas de message de protocole : la bascule voyage dans le
-// flux de trames, que le client recopie verbatim.
-TEST(session_emits_the_mouse_toggle_out_of_band) {
-  FakePlatform plat;
-  Session sess(plat, g_fds, 80, 24);
-  Surface s(80, 24);
-  sess.render(s);
-  CHECK(sess.take_out_of_band().empty());
-
-  sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'm', 0}});
-
-  const std::string oob = sess.take_out_of_band();
-  CHECK(oob.find("\033[?1002l") != std::string::npos);
-  CHECK(oob.find("\033[?1006l") != std::string::npos);
-  CHECK(sess.take_out_of_band().empty());  // consommé une seule fois
-
-  // Et la bascule bascule : le second accord remet la souris.
-  sess.on_input(sshos::InputEvent{
-      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
-  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'm', 0}});
-  const std::string back = sess.take_out_of_band();
-  CHECK(back.find("\033[?1002h") != std::string::npos);
-  CHECK(back.find("\033[?1006h") != std::string::npos);
-}
 
 TEST(session_asks_for_a_full_repaint_on_demand) {
   FakePlatform plat;
@@ -2239,81 +2213,6 @@ TEST(daemon_quits_when_the_menu_asks_for_it_over_the_wire) {
   CHECK_EQ(WEXITSTATUS(status), 0);
 }
 
-// ---------------------------------------------------------------------
-// A2 (couverture au meilleur effort, cf. rapport de tâche) : le garde-fou
-// anti-réutilisation de descripteur au sein d'un même lot epoll
-// (closed_this_batch, daemon.cpp ~lignes 103/112/117/208-231) n'avait
-// jusqu'ici aucune couverture -- remplacer sa condition par `if (false)`
-// laissait passer toute la suite.
-//
-// Un test a été tenté pour forcer le scénario que le garde-fou est censé
-// prévenir : un client A enregistré auprès d'epoll sous un descripteur X,
-// fermé PENDANT que le démon est gelé (SIGSTOP), en même temps qu'un
-// client B se connecte (l'écouteur devient prêt) -- de façon à ce qu'un
-// seul epoll_wait() rende les deux évènements dans le MÊME lot. Une
-// strace du démon (voir rapport de tâche) confirme que ce montage
-// fonctionne et produit bien une VRAIE réutilisation de X : quand
-// l'évènement de A (HUP) est traité avant celui de l'écouteur, drop_client
-// ferme X, puis accept4() -- appelé juste après, dans le traitement de
-// l'évènement de l'écouteur -- se voit effectivement redonner X par le
-// noyau (plus petit numéro libre).
-//
-// Mais ce même strace montre aussi pourquoi ce test ne peut pas
-// discriminer le garde-fou avec la boucle telle qu'elle existe
-// aujourd'hui : epoll_wait() ne rend jamais deux entrées pour le même
-// numéro de descripteur au sein d'un seul appel (chaque descripteur prêt
-// n'apparaît qu'une fois par lot), et la boucle du démon n'accepte qu'UNE
-// connexion par tour de la table des évènements (un seul client à la
-// fois : `client` est un pointeur unique, pas une collection). L'entrée
-// périmée que closed_this_batch est censé filtrer -- une DEUXIÈME
-// référence à X, postérieure à sa réutilisation, dans le MÊME evs[] --
-// n'a donc structurellement aucune occasion d'exister : dès que
-// l'évènement de A a été consommé (une seule fois), il ne reste plus rien
-// à filtrer pour ce numéro dans ce lot. Ceci a été vérifié dans les DEUX
-// ordres d'arrivée possibles (écouteur avant X, et X avant écouteur) --
-// aucun des deux ne produit de doublon. Remplacer la condition du
-// garde-fou par `if (false)` ne fait donc échouer ni la suite existante
-// ni le test ci-dessous, qui pourtant force la coexistence des deux
-// évènements dans un seul lot ET la réutilisation réelle du descripteur :
-// ce n'est pas un défaut du test, la fonctionnalité qui rendrait le
-// garde-fou atteignable (vidage de plusieurs connexions en attente par
-// tour, ou plusieurs clients simultanés) n'existe simplement pas encore
-// dans ce jalon. Voir le rapport de tâche pour le détail des deux
-// montages strace qui ont mené à cette conclusion.
-//
-// Le test est conservé malgré cette absence de discrimination : il
-// couvre un scénario réel et non trivial (relais vers un nouveau client
-// dont le descriptor réutilise EXACTEMENT le numéro de l'ancien, y
-// compris le epoll_ctl DEL/ADD et le protocole applicatif qui suit), et
-// sa valeur de non-régression pour ce chemin de relais reste entière même
-// si le garde-fou n'est, pour l'instant, prouvé nécessaire par aucun test
-// boîte noire.
-// Le hors-bande et le repeint force ne traversent le demon que par le flux
-// de trames : ni l'un ni l'autre n'a de message de protocole. Ces deux cas
-// sont les seuls qui exercent ce cablage de bout en bout.
-TEST(daemon_carries_the_mouse_toggle_ahead_of_the_frame) {
-  const std::string name = unique_name() + "-oob";
-  DaemonHandle daemon(name);
-  REQUIRE(daemon.valid());
-
-  sshos::Fd client = connect_retry(name);
-  REQUIRE(client.valid());
-  sshos::Hello hello = make_hello(80, 24);
-  hello.term = "xterm";
-  hello.utf8 = true;
-  REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{hello})));
-
-  sshos::Decoder dec;
-  auto welcome = recv_one(client.get(), dec, 2000);
-  REQUIRE(welcome.has_value());
-
-  // Ctrl+A puis 'm' : la bascule souris (spec §7.4). \x01 est Ctrl+A sur
-  // le fil.
-  REQUIRE(send_all(client.get(),
-                   sshos::encode(sshos::Msg{sshos::Input{"\x01m"}})));
-  CHECK(wait_for_frame_containing(client.get(), dec, "\033[?1002l",
-                                  "\033[?1006l", 3000));
-}
 
 TEST(daemon_repaints_everything_when_the_desktop_asks_for_it) {
   const std::string name = unique_name() + "-repaint";
@@ -2949,68 +2848,7 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
   CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "ssh_os", 3000));
 }
 
-namespace {
 
-// Accumule TOUT ce que le demon envoie pendant `ms`, trames concatenees.
-// L'inverse de wait_for_frame_containing : ici on veut prouver une ABSENCE,
-// et une absence ne se prouve qu'en ayant regarde tout ce qui est passe.
-std::string frames_during(int fd, sshos::Decoder& dec, int ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-  std::string tout;
-  for (;;) {
-    const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline) return tout;
-    const int reste = static_cast<int>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
-            .count());
-    auto m = recv_one(fd, dec, reste);
-    if (!m) return tout;
-    if (const auto* f = std::get_if<sshos::FrameMsg>(&*m)) tout += f->ansi;
-  }
-}
-
-}  // namespace
-
-// UNE BASCULE EN ATTENTE NE DOIT PAS SUIVRE LE CLIENT SUIVANT. C'est le
-// jumeau exact du glissement orphelin ci-dessus, et le meme oubli : le
-// hors-bande est mis en file par do_action() et n'est vide que par le rendu
-// SUIVANT. Un client qui disparait entre les deux -- reseau coupe, fenetre
-// fermee -- laisse la sequence en file, et le client d'apres la recoit collee
-// devant sa premiere trame. Un « \033[?1002l » herite ainsi TUE LA SOURIS
-// d'une session neuve, sans que rien ne l'explique.
-TEST(daemon_forgets_a_mode_toggle_left_behind_by_a_departed_client) {
-  const std::string name = unique_name() + "-oob-orphan";
-  DaemonHandle daemon(name);
-  REQUIRE(daemon.valid());
-
-  sshos::Hello hello = make_hello(80, 24);
-  hello.utf8 = true;
-
-  {
-    sshos::Fd a = connect_retry(name);
-    REQUIRE(a.valid());
-    REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
-    sshos::Decoder dec_a;
-    REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Bloc", "ssh_os", 3000));
-
-    // La bascule et la fermeture dans le MEME envoi : le demon traite
-    // l'entree puis constate la fermeture dans la meme fournee epoll, donc
-    // sans avoir rendu entre les deux. C'est ce que fait un lien coupe.
-    REQUIRE(send_all(a.get(),
-                     sshos::encode(sshos::Msg{sshos::Input{"\x01m"}})));
-  }  // le client se ferme ici, la bascule encore en file
-
-  sshos::Fd b = connect_retry(name);
-  REQUIRE(b.valid());
-  REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
-  sshos::Decoder dec_b;
-
-  const std::string vu = frames_during(b.get(), dec_b, 1500);
-  REQUIRE(vu.find("ssh_os") != std::string::npos);  // des trames sont bien venues
-  CHECK(vu.find("\033[?1002l") == std::string::npos);
-  CHECK(vu.find("\033[?1006l") == std::string::npos);
-}
 
 // ---------------------------------------------------------------------------
 // L'aide de découvrabilité (§16 : « la touche leader est peu découvrable

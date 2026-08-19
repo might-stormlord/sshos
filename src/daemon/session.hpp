@@ -138,11 +138,6 @@ class Session : public ChildSink {
   // sale et ne pourrait donc jamais se salir elle-même.
   bool take_dirty();
 
-  // Octets à écrire tels quels sur le terminal du client, devant la trame
-  // suivante. La bascule souris n'a pas de message de protocole : elle
-  // voyage ici. Consommée une seule fois.
-  std::string take_out_of_band();
-
   // Le client doit-il tout repeindre ? Consommé une seule fois.
   bool take_repaint();
 
@@ -333,8 +328,6 @@ class Session : public ChildSink {
   // Les modes souris DEC sont posés par le client à l'attache ; la bascule
   // les retire et les remet. TtyGuard les restaure à la sortie, donc une
   // souris laissée coupée ne survit pas à la session.
-  bool mouse_on_ = true;
-  std::string out_of_band_;
   bool repaint_ = false;
   bool detach_ = false;
   // La modale sert à deux choses : fermer une fenêtre, ou fermer la

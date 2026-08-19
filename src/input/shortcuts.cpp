@@ -20,7 +20,7 @@ constexpr Binding kBindings[] = {
     {U'n', Action::NextWindow},      {U'p', Action::PrevWindow},
     {U'w', Action::Close},           {U'-', Action::Minimize},
     {U'z', Action::MaximizeToggle},  {U'f', Action::FullscreenToggle},
-    {U' ', Action::OpenMenu},        {U'm', Action::ToggleMouse},
+    {U' ', Action::OpenMenu},
     {U'r', Action::ForceRepaint},    {U'd', Action::Detach},
     {U'?', Action::ShowHelp},
 };
@@ -161,7 +161,6 @@ const std::vector<HelpRow>& binding_help() {
       {"z", "Maximiser (bascule)", {Action::MaximizeToggle}},
       {"f", "Plein écran (bascule)", {Action::FullscreenToggle}},
       {"Espace", "Ouvrir le menu", {Action::OpenMenu}},
-      {"m", "Souris : bureau ou terminal", {Action::ToggleMouse}},
       {"r", "Tout repeindre", {Action::ForceRepaint}},
       {"d", "Détacher (la session survit)", {Action::Detach}},
       {"?", "Cette aide", {Action::ShowHelp}},

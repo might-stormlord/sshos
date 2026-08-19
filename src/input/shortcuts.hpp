@@ -37,7 +37,6 @@ enum class Action {
   // le rattachement suivant retrouve le bureau tel quel. C'est la
   // fonctionnalité phare du projet, et il lui faut un geste.
   Detach,
-  ToggleMouse,
   ForceRepaint,
   // La table elle-même, affichée. Le §16 de la spec donne « la touche
   // leader est peu découvrable » comme risque, et cette aide comme parade.

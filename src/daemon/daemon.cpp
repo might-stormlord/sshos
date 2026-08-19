@@ -217,16 +217,6 @@ int run_daemon(std::string_view socket_name) {
     // détachement et le premier mouvement du client SUIVANT le reprendrait
     // en vol.
     session.cancel_drag();
-    // ET LE HORS-BANDE AVEC, pour exactement la même raison. Il est mis en
-    // file par do_action() et n'est vidé que par le rendu SUIVANT ; un
-    // client qui disparaît entre les deux -- lien coupé, fenêtre fermée --
-    // le laisse en file, et le suivant le reçoit collé devant sa première
-    // trame. Un « \033[?1002l » hérité TUE LA SOURIS d'une session neuve,
-    // sans que rien ne l'explique. On le prend et on le jette : ces
-    // séquences décrivent l'état du terminal de CE client-là, et il n'est
-    // plus là.
-    const std::string abandonne = session.take_out_of_band();
-    (void)abandonne;
   };
 
   // Ferme silencieusement `pending` : contrairement à drop_client(), aucun
@@ -741,11 +731,7 @@ int run_daemon(std::string_view socket_name) {
       // Le repeint forcé se décide AVANT la trame : invalider après
       // l'avoir calculée ne servirait à rien de ce tour-ci.
       if (session.take_repaint()) client->differ->invalidate();
-      // Le hors-bande passe DEVANT la trame : ce sont des modes de terminal
-      // (la bascule souris), et ils doivent être posés avant tout dessin qui
-      // en dépend. Le client recopie FrameMsg::ansi verbatim.
-      const std::string oob = session.take_out_of_band();
-      const std::string ansi = oob + client->differ->frame(screen, session.cursor());
+      const std::string ansi = client->differ->frame(screen, session.cursor());
       if (!ansi.empty()) client->out.push(encode(Msg{FrameMsg{ansi}}));
       clock.note_render(now);
 

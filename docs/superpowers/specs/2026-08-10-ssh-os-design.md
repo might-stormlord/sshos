@@ -446,6 +446,29 @@ Tout `switch (cb)` écrit sur des valeurs littérales se trompe dès le premier 
 
 `F12` coupe et remet le tracking, pour récupérer la sélection et le copier-coller natifs du terminal local. Comme `F12` est lui-même peu fiable (§7.4), `<leader>m` fait la même chose.
 
+> ⛔ **RETIRÉ le 19 août 2026.** Ce paragraphe décrit une décision qui a été
+> défaite par l'usage ; il reste ici parce qu'une spec datée s'annote et ne se
+> réécrit pas. Ni `F12` ni `<leader>m` n'existent plus, et la bascule elle-même
+> a disparu avec eux.
+>
+> **Pourquoi :** l'utilisateur travaille sous Konsole, dont le `Maj`+glisser rend
+> la sélection native **sans** couper le tracking. Le troc que ce paragraphe
+> propose — la souris du bureau contre la sélection — n'a donc jamais eu de
+> contrepartie pour lui, et il l'a rencontré non comme un outil mais comme un
+> piège : « je suis coincé dans le mode pas de souris ». Une fonction qui
+> enferme sans rien dire et qui ne sert personne sur la seule machine où ce
+> logiciel tourne est du poids mort.
+>
+> **Ce que le retrait a emporté :** l'action, son raccourci, sa ligne d'aide, et
+> le mécanisme HORS-BANDE tout entier (`Session::take_out_of_band`,
+> `out_of_band_`, la concaténation devant la trame) — la bascule en était le seul
+> producteur, et le garder sans lui aurait fabriqué précisément le code sans
+> appelant que le §9 bis du dossier de reprise traque depuis quinze fois.
+>
+> **Si le besoin revient** (un terminal sans `Maj`+glisser, ou une sélection
+> possédée par le bureau avec OSC 52), c'est le hors-bande qu'il faut
+> ressusciter : voir le §3 du dossier de reprise, qui garde la conception.
+
 ### 7.3 L'ambiguïté de Échap
 
 `ESC` seul et le début de `ESC [ A` commencent par le même octet, et la latence SSH peut couper une séquence en deux paquets — « la suite est arrivée dans le même bloc » n'est donc pas un critère fiable.
@@ -898,7 +921,7 @@ C'est le seul qui expose une erreur de `setsid`, de double `fork` ou de redirect
 
 ### 13.6 Liste manuelle irréductible
 
-À cocher avant chaque version : `vim`, `htop`, `less`, un `tmux` imbriqué dans une fenêtre, un nom de fichier en japonais et un emoji ZWJ, un client en 300 colonnes, un redimensionnement en pleine compilation, un copier-coller natif après `<leader>m`, le collage d'un transcript coloré de plusieurs milliers de lignes, `yes | head -1` dans une fenêtre, `make -j8` dans une autre, et une déconnexion SSH franche pendant que les deux tournent.
+À cocher avant chaque version : `vim`, `htop`, `less`, un `tmux` imbriqué dans une fenêtre, un nom de fichier en japonais et un emoji ZWJ, un client en 300 colonnes, un redimensionnement en pleine compilation, un copier-coller natif (par `Maj`+glisser du terminal local — `<leader>m` a été retiré, voir §7.2), le collage d'un transcript coloré de plusieurs milliers de lignes, `yes | head -1` dans une fenêtre, `make -j8` dans une autre, et une déconnexion SSH franche pendant que les deux tournent.
 
 ---
 

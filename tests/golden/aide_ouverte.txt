@@ -9,7 +9,6 @@
 | z                     Maximiser (bascule)                |
 | f                     Plein ecran (bascule)              |
 | Espace                Ouvrir le menu                     |
-| m                     Souris : bureau ou terminal        |
 | r                     Tout repeindre                     |
 | d                     Detacher (la session survit)       |
 | ?                     Cette aide                         |
@@ -17,4 +16,5 @@
 | Sans accord :                                            |
 | Ctrl+Q                Detacher (la session survit)       |
 | Ctrl+fleches          Ancrer sur une moitie d'ecran      |
+| Alt+t / w / fleches   Terminal : onglet neuf, ferme, sui~|
 +----------------------------------------------------------+

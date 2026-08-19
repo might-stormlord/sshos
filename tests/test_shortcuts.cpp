@@ -102,7 +102,7 @@ TEST(leader_covers_every_action_of_the_table) {
       {plain(U'n'), Action::NextWindow},      {plain(U'p'), Action::PrevWindow},
       {plain(U'w'), Action::Close},           {plain(U'-'), Action::Minimize},
       {plain(U'z'), Action::MaximizeToggle},  {plain(U'f'), Action::FullscreenToggle},
-      {plain(U' '), Action::OpenMenu},        {plain(U'm'), Action::ToggleMouse},
+      {plain(U' '), Action::OpenMenu},
       {plain(U'r'), Action::ForceRepaint},    {plain(U'd'), Action::Detach},
       {plain(U'?'), Action::ShowHelp},
       // Le chemin principal de la spec §7.4, celui qu'un utilisateur venu
@@ -294,7 +294,7 @@ TEST(only_the_gestures_one_actually_repeats_are_repeatable) {
   const Action no[] = {Action::Close,      Action::Minimize,
                        Action::MaximizeToggle, Action::FullscreenToggle,
                        Action::OpenMenu,   Action::Detach,
-                       Action::ToggleMouse, Action::ForceRepaint,
+                       Action::ForceRepaint,
                        Action::ShowHelp,   Action::LiteralLeader};
   for (const Action a : yes) CHECK(sshos::is_repeatable(a));
   for (const Action a : no) CHECK(!sshos::is_repeatable(a));

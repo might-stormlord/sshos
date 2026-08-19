@@ -204,12 +204,6 @@ void Session::tick_update() {
   dirty_ = true;
 }
 
-std::string Session::take_out_of_band() {
-  std::string out;
-  out.swap(out_of_band_);
-  return out;
-}
-
 bool Session::take_repaint() {
   const bool r = repaint_;
   repaint_ = false;
@@ -468,13 +462,6 @@ void Session::do_action(Action a) {
     case Action::OpenMenu:
       refresh_menu_extras();
       menu_.open();
-      return;
-    case Action::ToggleMouse:
-      mouse_on_ = !mouse_on_;
-      // Pas de message de protocole pour ça : les séquences DEC voyagent
-      // dans le flux de trames, que le client recopie verbatim.
-      out_of_band_ += mouse_on_ ? "\033[?1002h\033[?1006h"
-                                : "\033[?1002l\033[?1006l";
       return;
     case Action::ForceRepaint:
       repaint_ = true;
