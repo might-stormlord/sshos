@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "app/catalog.hpp"
+#include "daemon/config.hpp"
 #include "common/oom.hpp"
 #include "common/paths.hpp"
 #include "daemon/daemonize.hpp"
 #include "daemon/host.hpp"
+#include "pty/env.hpp"
 #include "render/width.hpp"
 #include "wm/decor.hpp"
 #include "wm/tile.hpp"
@@ -155,7 +157,10 @@ pid_t launch_updater(const std::vector<std::string>& argv) {
 Session::Session(Platform& plat, FdRegistrar& fds, int, int)
     : plat_(&plat),
       fds_(&fds),
-      update_(plat, update_state_path(), launch_updater) {
+      update_(plat, update_state_path(), launch_updater),
+      // home_dir() vient de getpwuid, PAS de $HOME : l'environnement du
+      // demon est un fossile de la premiere session SSH (pty/env.hpp).
+      settings_(desktop_config_path(), home_dir()) {
   theme_ = Theme::defaults().for_profile(out_);
   // UNE SEULE LECTURE, ICI. Sans elle, la pastille et le libellé de l'entrée
   // resteraient vides jusqu'au premier réveil périodique -- soit une seconde
@@ -575,7 +580,7 @@ WindowId Session::open_from_catalog(std::string_view id) {
   // adresse définitive, et AVANT attach() : c'est attach() qui fait poser
   // son titre à l'application.
   w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_,
-                                      pending_apps_);
+                                       pending_apps_, settings_);
   w->app->attach(*w->host);
   return w->id;
 }
@@ -838,7 +843,7 @@ void Session::ensure_window(const Rect& work) {
     // `attach()`, qui fait poser son titre à l'application.
     if (Window* w = wm_.open(seed_factory()(), last_work_)) {
       w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_, children_,
-                                      pending_apps_);
+                                       pending_apps_, settings_);
       w->app->attach(*w->host);
     }
     return;
@@ -1404,7 +1409,8 @@ void Session::render(Surface& out) {
     if (Window* w = wm_.open(std::move(req.app), last_work_)) {
       w->app_id = req.app_id;
       w->host = std::make_unique<HostImpl>(*w, *fds_, fd_gen_, dirty_,
-                                           children_, pending_apps_);
+                                           children_, pending_apps_,
+                                           settings_);
       w->app->attach(*w->host);
     }
     dirty_ = true;

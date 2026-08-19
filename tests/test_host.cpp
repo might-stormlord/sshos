@@ -19,6 +19,10 @@ using sshos::HostImpl;
 using sshos::IoStatus;
 using sshos::Window;
 
+// Des reglages SANS FICHIER : les cas de ce fichier ne touchent pas au
+// disque, et un chemin vide desactive la persistance.
+sshos::Settings g_settings{"", "/home/essai"};
+
 namespace {
 
 struct FakeRegistrar : FdRegistrar {
@@ -70,7 +74,8 @@ std::unique_ptr<Window> make_window(sshos::WindowId id, std::unique_ptr<App> app
   auto w = std::make_unique<Window>();
   w->id = id;
   w->app = std::move(app);
-  w->host = std::make_unique<HostImpl>(*w, reg, gen, dirty, children, g_pending);
+  w->host = std::make_unique<HostImpl>(*w, reg, gen, dirty, children, g_pending,
+                                      g_settings);
   return w;
 }
 

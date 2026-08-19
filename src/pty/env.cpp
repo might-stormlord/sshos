@@ -45,28 +45,46 @@ bool in(const auto& table, std::string_view key) {
   return std::find(std::begin(table), std::end(table), key) != std::end(table);
 }
 
+// L'ENTREE DE L'UTILISATEUR DANS LA BASE DE COMPTES, lue une bonne fois.
+// getpwuid_r plutôt que getpwuid : le démon est mono-thread, mais rendre un
+// pointeur vers un tampon statique qu'un appel suivant écrasera est
+// exactement le genre de piège qu'on ne veut pas laisser derrière soi.
+//
+// `retenu` porte la mémoire des chaînes : `pw` ne fait que pointer dedans.
+bool account_entry(passwd& pw, std::vector<char>& retenu) {
+  const uid_t uid = ::getuid();
+  retenu.assign(4096, '\0');
+  passwd* found = nullptr;
+  for (int tries = 0; tries < 4; ++tries) {
+    const int rc = ::getpwuid_r(uid, &pw, retenu.data(), retenu.size(), &found);
+    if (rc == 0) return found != nullptr;
+    if (rc != ERANGE) return false;
+    retenu.resize(retenu.size() * 2);
+  }
+  return false;
+}
+
 }  // namespace
 
 bool is_session_variable(std::string_view key) { return in(kSessionVars, key); }
 
 std::string login_shell() {
-  // getpwuid_r plutôt que getpwuid : le démon est mono-thread, mais rendre
-  // un pointeur vers un tampon statique qu'un appel suivant écrasera est
-  // exactement le genre de piège qu'on ne veut pas laisser derrière soi.
-  const uid_t uid = ::getuid();
-  std::vector<char> buf(4096);
   passwd pw{};
-  passwd* found = nullptr;
-  for (int tries = 0; tries < 4; ++tries) {
-    const int rc = ::getpwuid_r(uid, &pw, buf.data(), buf.size(), &found);
-    if (rc == 0) break;
-    if (rc != ERANGE) return "/bin/sh";
-    buf.resize(buf.size() * 2);
-  }
-  if (found == nullptr || pw.pw_shell == nullptr || pw.pw_shell[0] != '/') {
-    return "/bin/sh";
-  }
+  std::vector<char> retenu;
+  if (!account_entry(pw, retenu)) return "/bin/sh";
+  if (pw.pw_shell == nullptr || pw.pw_shell[0] != '/') return "/bin/sh";
   return pw.pw_shell;
+}
+
+std::string home_dir() {
+  passwd pw{};
+  std::vector<char> retenu;
+  if (!account_entry(pw, retenu)) return "/";
+  // UN CHEMIN ABSOLU OU RIEN. Un « home » relatif -- ça existe dans des
+  // bases de comptes malmenées -- ferait démarrer le shell à un endroit qui
+  // dépend du répertoire courant du démon, c'est-à-dire nulle part de sûr.
+  if (pw.pw_dir == nullptr || pw.pw_dir[0] != '/') return "/";
+  return pw.pw_dir;
 }
 
 std::vector<std::string> child_env(const std::vector<std::string>& base,

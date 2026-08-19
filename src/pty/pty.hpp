@@ -15,6 +15,13 @@ struct PtySpawn {
   std::string path;
   std::vector<std::string> argv;
   std::vector<std::string> env;  // « CLE=valeur », cf. child_env()
+  // OU L'INVITE COMMENCE. Vide veut dire « la ou on est » -- c'est-a-dire,
+  // pour un enfant du demon, « / » : become_daemon() l'y place pour ne
+  // retenir aucun point de montage, et le repertoire courant s'herite.
+  // Un chemin qu'on ne peut pas atteindre n'empeche PAS le lancement : le
+  // shell s'ouvre la ou il serait tombe, ce qui laisse au moins de quoi
+  // corriger le reglage.
+  std::string cwd;
   unsigned short cols = 80;
   unsigned short rows = 24;
 };

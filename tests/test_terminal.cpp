@@ -1,4 +1,7 @@
+#include <unistd.h>
+
 #include <csignal>
+#include <cstdlib>
 #include <ctime>
 #include <cstdio>
 #include <string>
@@ -1368,3 +1371,148 @@ TEST(terminal_ignores_a_tab_clear_it_does_not_know) {
   const std::string screen = painted(t, 40, 3);
   CHECK_EQ(screen.find('Y'), size_t{8});
 }
+
+// ---------------------------------------------------------------------------
+// Le dossier de depart, et la roue qui le regle.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Un hote qui porte un reglage, comme le bureau en vrai. FakeHost rend des
+// chaines vides : c'est le cas « pas de configuration derriere », qui doit
+// continuer de marcher.
+struct HostWithSettings : FakeHost {
+  std::string effectif;             // ce qu'on donnerait a un PTY
+  std::string tape;                 // ce que l'utilisateur avait ecrit
+  std::vector<std::string> poses;   // tout ce que set_start_dir a recu
+  std::string start_dir() const override { return effectif; }
+  std::string configured_start_dir() const override { return tape; }
+  void set_start_dir(std::string d) override {
+    tape = d;
+    poses.push_back(std::move(d));
+  }
+};
+
+// La barre d'onglets, telle qu'elle serait peinte.
+std::string bar_of(Terminal& t, int w) {
+  sshos::Surface s(w, 3);
+  t.render(s.root());
+  std::string out;
+  for (int x = 0; x < w; ++x) out += static_cast<char>(s.at(x, 0).ch);
+  return out;
+}
+
+}  // namespace
+
+// LA ROUE EST DANS LA BARRE, et le `+` reste a l'extreme droite : c'est la
+// ou la main le cherche depuis toujours.
+TEST(terminal_bar_carries_a_settings_button) {
+  HostWithSettings host;
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+
+  const std::string barre = bar_of(t, 40);
+  CHECK(barre.find("[*]") != std::string::npos);
+  CHECK_EQ(barre[39], '+');
+  REQUIRE(t.settings_column_for_tests() >= 0);
+  CHECK(t.settings_column_for_tests() < 39);
+}
+
+// UN CLIC DESSUS OUVRE LA SAISIE, pre-remplie avec ce que l'utilisateur
+// avait TAPE -- pas avec le chemin developpe : lui rendre « /home/moi/dev »
+// quand il avait ecrit « ~/dev » donnerait l'impression que le bureau a
+// change son choix dans son dos.
+TEST(terminal_opens_the_path_editor_from_the_gear) {
+  HostWithSettings host;
+  host.effectif = "/home/moi/dev";
+  host.tape = "~/dev";
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, t.settings_column_for_tests(), 0, 0});
+
+  CHECK(t.mode_for_tests() == Terminal::Mode::EditingPath);
+  CHECK(bar_of(t, 40).find("~/dev") != std::string::npos);
+}
+
+// ENTREE POSE LE REGLAGE.
+TEST(terminal_stores_the_typed_path_on_enter) {
+  HostWithSettings host;
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, t.settings_column_for_tests(), 0, 0});
+  for (char c : std::string("/tmp/ici")) {
+    t.on_key(KeyEvent{Key::Char, static_cast<char32_t>(c), 0});
+  }
+  t.on_key(KeyEvent{Key::Enter, 0, 0});
+
+  REQUIRE_EQ(host.poses.size(), size_t{1});
+  CHECK_EQ(host.poses[0], std::string("/tmp/ici"));
+  CHECK(t.mode_for_tests() == Terminal::Mode::Normal);
+}
+
+// ECHAP N'EN POSE AUCUN. Une saisie qu'on abandonne ne doit rien laisser
+// derriere elle -- surtout pas un reglage ecrit sur disque.
+TEST(terminal_forgets_the_typed_path_on_escape) {
+  HostWithSettings host;
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, t.settings_column_for_tests(), 0, 0});
+  t.on_key(KeyEvent{Key::Char, U'/', 0});
+  t.on_key(KeyEvent{Key::Escape, 0, 0});
+
+  CHECK(host.poses.empty());
+  CHECK(t.mode_for_tests() == Terminal::Mode::Normal);
+}
+
+// TOUT CLIC VALIDE, exactement comme le renommage d'onglet : une saisie en
+// place que rien ne termine suivrait la selection au lieu de se poser.
+TEST(terminal_commits_the_typed_path_on_any_click) {
+  HostWithSettings host;
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, t.settings_column_for_tests(), 0, 0});
+  for (char c : std::string("/tmp")) {
+    t.on_key(KeyEvent{Key::Char, static_cast<char32_t>(c), 0});
+  }
+  // Un clic dans le CORPS, loin de la barre.
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, 5, 3, 0});
+
+  REQUIRE_EQ(host.poses.size(), size_t{1});
+  CHECK_EQ(host.poses[0], std::string("/tmp"));
+  CHECK(t.mode_for_tests() == Terminal::Mode::Normal);
+}
+
+// ET LE POINT DE TOUT CECI : le shell demarre LA. Sans reglage, il heritait
+// du repertoire du demon, que become_daemon() met a « / ».
+TEST(terminal_opens_a_new_tab_in_the_configured_directory) {
+  char tpl[] = "/tmp/sshos-depart-XXXXXX";
+  const char* bac = ::mkdtemp(tpl);
+  REQUIRE(bac != nullptr);
+
+  HostWithSettings host;
+  host.effectif = bac;
+  Terminal t({"/bin/sh", "-c", "pwd; sleep 5"});
+  t.on_resize(Size{60, 6});
+  t.attach(host);
+
+  std::string vu;
+  for (int i = 0; i < 300 && vu.find(bac) == std::string::npos; ++i) {
+    t.on_io(1, 0);
+    vu = painted(t, 60, 5);
+    if (vu.find(bac) != std::string::npos) break;
+    nap_ms(10);
+  }
+  ::rmdir(bac);
+
+  CHECK(vu.find(bac) != std::string::npos);
+}
+

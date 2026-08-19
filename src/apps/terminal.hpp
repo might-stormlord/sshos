@@ -92,7 +92,7 @@ class Terminal : public App, public ParserSink {
   void osc(std::string_view data) override;
 
   // Ce que le Terminal est en train de faire.
-  enum class Mode { Normal, Renaming };
+  enum class Mode { Normal, Renaming, EditingPath };
 
   // --- pour les tests ---
   // Le liant n'a AUCUN effet observable sans un vrai PTY : ces accès
@@ -106,6 +106,8 @@ class Terminal : public App, public ParserSink {
   std::string take_written_for_tests(size_t i);
   // Les colonnes des croix de fermeture, dans l'ordre de la barre.
   std::vector<int> cross_columns_for_tests() const;
+  // La colonne de la roue, ou -1 si elle ne tient pas.
+  int settings_column_for_tests() const;
   const Screen& screen_for_tests() const { return active().screen; }
   const Scrollback& scrollback_for_tests() const { return active().history; }
   const Modes& modes_for_tests() const { return active().modes; }
@@ -149,6 +151,14 @@ class Terminal : public App, public ParserSink {
   // qu'on regarde, pas ce qu'on regardait.
   void retitle();
   void begin_rename();
+  // OUVRE LA SAISIE DU DOSSIER DE DEPART. La barre entiere devient le
+  // champ : un chemin ne tient pas dans une case d'onglet, et le couper au
+  // dixieme caractere rendrait la saisie inutilisable.
+  void begin_path_edit();
+  // Pose le chemin saisi sur le bureau et sort du mode. Appelee par Entree
+  // et par TOUT clic, meme regle que le renommage.
+  void commit_path_edit();
+  void path_key(const KeyEvent& k);
   // Pose le nom saisi sur l'onglet renomme et sort du mode. Appelee par
   // Entree, et par TOUT clic : une saisie en place que rien ne termine
   // suit la selection au lieu de se poser.
@@ -159,7 +169,7 @@ class Terminal : public App, public ParserSink {
   // le clic : deux calculs separes finissent toujours par diverger d'une
   // cellule, et un onglet qu'on ne peut pas cliquer la ou on le voit est
   // pire qu'une barre absente.
-  enum class SlotKind { Select, Close, New };
+  enum class SlotKind { Select, Close, New, Settings };
   struct Slot {
     int x = 0;
     int w = 0;

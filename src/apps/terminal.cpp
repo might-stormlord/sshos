@@ -27,12 +27,26 @@ constexpr int kBarRows = 1;
 // chaque frappe d'un renommage qu'on n'a pas validé.
 constexpr size_t kMaxName = 64;
 
+// Un chemin est plus long qu'un nom d'onglet. PATH_MAX vaut 4096 sous
+// Linux, mais un chemin qu'on tape à la main n'en approche jamais : ce qui
+// compte est qu'une touche restée enfoncée ne fasse pas grossir la session
+// sans limite.
+constexpr size_t kMaxPath = 512;
+
 // La croix de fermeture. Un « x » ASCII se lit comme une LETTRE au milieu
 // des noms d'onglets -- la sonde a montré « 1:root@dockernx x », où deux
 // des trois « x » de la ligne appartenaient au nom de la machine. Le
 // projet écrit déjà de l'Unicode depuis les applications (l'élision de
 // Fichiers pose un U+2026 sans se demander ce que le client sait lire).
 constexpr char kCross[] = "\u00d7";
+
+// LA ROUE, EN ASCII PUR. Une vraie roue dentée (U+2699) est un caractère
+// d'emoji : la moitié des terminaux la rendent sur deux colonnes, l'autre
+// moitié sur une, et la barre se décalerait d'une cellule selon la machine
+// -- un bouton qu'on ne peut plus cliquer là où on le voit. Trois ASCII se
+// dessinent partout pareil, et les crochets disent « ceci se clique ».
+constexpr char kGear[] = "[*]";
+constexpr int kGearCells = 3;
 
 // Le premier paramètre d'une séquence, avec son défaut, et jamais moins de
 // 1 : `CSI 0 A` doit monter d'une ligne, pas de zéro.
@@ -106,10 +120,19 @@ std::string Terminal::tab_label_for_tests(size_t i) const {
 std::vector<Terminal::Slot> Terminal::bar_slots() const {
   std::vector<Slot> out;
   const int w = std::max(1, size_.w);
+
+  // PENDANT LA SAISIE DU CHEMIN, la barre EST le champ. Un chemin ne tient
+  // pas dans une case d'onglet, et les onglets ne servent à rien tant qu'on
+  // écrit : les cacher donne toute la largeur au seul geste en cours.
+  if (mode_ == Mode::EditingPath) {
+    out.push_back(Slot{0, w, 0, SlotKind::Settings, std::string(kGear) + " " + edit_});
+    return out;
+  }
+
   const int n = static_cast<int>(tabs_.size());
-  // La dernière colonne porte le `+`, et celle d'avant le sépare du dernier
-  // onglet : ce qui reste se partage entre les onglets.
-  const int avail = std::max(1, w - 2);
+  // La dernière colonne porte le `+`, les trois d'avant la roue, et celle
+  // qui reste les sépare du dernier onglet : le reste est aux onglets.
+  const int avail = std::max(1, w - (kGearCells + 3));
   // UN SEUL ONGLET N'A PAS DE CROIX. La fenêtre a déjà son [×], et une
   // croix d'onglet qui fermerait la fenêtre entière serait un piège.
   const bool crosses = n > 1;
@@ -150,8 +173,20 @@ std::vector<Terminal::Slot> Terminal::bar_slots() const {
       x += 1;
     }
   }
+  // LA ROUE JUSTE AVANT LE `+`, jamais à sa place : le `+` reste à
+  // l'extrême droite, là où la main le cherche depuis toujours.
+  if (w > kGearCells + 1) {
+    out.push_back(Slot{w - 1 - kGearCells, kGearCells, 0, SlotKind::Settings, kGear});
+  }
   out.push_back(Slot{w - 1, 1, 0, SlotKind::New, "+"});
   return out;
+}
+
+int Terminal::settings_column_for_tests() const {
+  for (const Slot& s : bar_slots()) {
+    if (s.kind == SlotKind::Settings) return s.x;
+  }
+  return -1;
 }
 
 Terminal::~Terminal() {
@@ -268,6 +303,58 @@ void Terminal::commit_rename() {
   if (host_ != nullptr) host_->invalidate();
 }
 
+void Terminal::begin_path_edit() {
+  mode_ = Mode::EditingPath;
+  // ON REPART DE CE QU'IL A TAPE, pas du chemin développé : lui remontrer
+  // « /home/moi/dev » quand il avait écrit « ~/dev » donnerait l'impression
+  // que le bureau a changé son choix dans son dos.
+  edit_ = host_ != nullptr ? host_->configured_start_dir() : std::string();
+  if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::commit_path_edit() {
+  if (mode_ != Mode::EditingPath) return;
+  if (host_ != nullptr) host_->set_start_dir(edit_);
+  mode_ = Mode::Normal;
+  edit_.clear();
+  if (host_ != nullptr) host_->invalidate();
+}
+
+void Terminal::path_key(const KeyEvent& k) {
+  switch (k.key) {
+    case Key::Enter:
+      commit_path_edit();
+      break;
+    case Key::Escape:
+      // RIEN N'EST POSE. Une saisie qu'on abandonne ne doit rien laisser
+      // derrière elle, surtout pas un réglage écrit sur disque.
+      mode_ = Mode::Normal;
+      edit_.clear();
+      break;
+    case Key::Backspace: {
+      // Un CARACTÈRE, pas un octet : un chemin peut porter de l'accentué,
+      // et couper une séquence UTF-8 en deux laisserait un demi-caractère.
+      while (!edit_.empty() &&
+             (static_cast<unsigned char>(edit_.back()) & 0xc0) == 0x80) {
+        edit_.pop_back();
+      }
+      if (!edit_.empty()) edit_.pop_back();
+      break;
+    }
+    case Key::Char:
+      // Un chemin est plus long qu'un nom d'onglet, mais pas sans fin : la
+      // borne existe pour qu'une touche restée enfoncée ne fasse pas
+      // grossir la session sans limite.
+      if (edit_.size() < kMaxPath) edit_ += encode_utf8(k.ch);
+      break;
+    default:
+      // Tout le reste est AVALÉ, même règle que le renommage : une flèche
+      // qui partirait à l'invité déplacerait son curseur à l'aveugle.
+      break;
+  }
+  if (host_ != nullptr) host_->invalidate();
+}
+
 void Terminal::rename_key(const KeyEvent& k) {
   switch (k.key) {
     case Key::Enter:
@@ -311,6 +398,10 @@ bool Terminal::open_tab_into(Tab& t) {
     spec.argv = argv_;
   }
   spec.env = child_env(daemon_env(), EnvDelta{});
+  // OU IL COMMENCE. Le bureau seul le sait : c'est un réglage de
+  // l'utilisateur, écrit sur disque, et une application n'a pas à savoir où
+  // ce fichier vit. Vide -- un hôte de test -- veut dire « là où on est ».
+  if (host_ != nullptr) spec.cwd = host_->start_dir();
   spec.cols = static_cast<unsigned short>(std::max(1, size_.w));
   spec.rows = static_cast<unsigned short>(std::max(1, size_.h - kBarRows));
 
@@ -463,6 +554,10 @@ void Terminal::on_key(const KeyEvent& k) {
     rename_key(k);
     return;
   }
+  if (mode_ == Mode::EditingPath) {
+    path_key(k);
+    return;
+  }
 
   // LES GESTES D'ONGLET D'ABORD, et ils ne descendent JAMAIS à l'invité :
   // `Alt+t` transpose deux mots dans readline, et le laisser passer en plus
@@ -531,6 +626,9 @@ void Terminal::bar_click(int x) {
       case SlotKind::New:
         open_tab();
         return;
+      case SlotKind::Settings:
+        begin_path_edit();
+        return;
       case SlotKind::Close:
         close_tab(s.tab);
         return;
@@ -555,7 +653,10 @@ void Terminal::on_mouse(const MouseEvent& m) {
   // qu'on venait de nommer revenait à son titre d'invité. C'est ce que
   // font toutes les saisies en place -- on est passé à autre chose, le nom
   // tapé ne reste pas en suspens.
-  if (m.action == MouseAction::Press) commit_rename();
+  if (m.action == MouseAction::Press) {
+    commit_rename();
+    commit_path_edit();
+  }
 
   // LA BARRE EST AU BUREAU, PAS À L'INVITÉ -- et avant la garde de mort
   // ci-dessous, sans quoi un clic sur `+` dans un onglet dont le shell est
@@ -618,6 +719,13 @@ bool Terminal::wants_cursor(Pos& out) const {
     }
     return false;
   }
+  if (mode_ == Mode::EditingPath) {
+    // Au bout de ce qu'on tape : une saisie sans curseur a l'air d'une
+    // application figée.
+    const int x = kGearCells + 1 + text_cells(edit_);
+    out = Pos{std::min(x, std::max(0, size_.w - 1)), 0};
+    return true;
+  }
   const Tab& t = active();
   if (!t.modes.cursor_visible || t.pty.exited()) return false;
   // Remonté dans l'historique, le curseur n'est pas à l'écran : le montrer
@@ -653,6 +761,15 @@ void Terminal::draw_bar(View v) const {
         break;
       case SlotKind::Close:
         st.fg = Color::indexed(1);
+        break;
+      case SlotKind::Settings:
+        if (mode_ == Mode::EditingPath) {
+          // La barre EST le champ : on la peint en entier, sinon la partie
+          // non écrite garderait le fond du cadre et le champ aurait l'air
+          // de s'arrêter au dernier caractère tapé.
+          st.attrs = attr::Reverse;
+          v.fill(Rect{s.x, 0, s.w, kBarRows}, st);
+        }
         break;
       case SlotKind::Select:
         if (s.tab == active_) {

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "app/app.hpp"
+#include "daemon/config.hpp"
 #include "wm/window.hpp"
 
 namespace sshos {
@@ -79,13 +80,14 @@ class HostImpl : public Host {
  public:
   HostImpl(Window& win, FdRegistrar& fds, uint32_t& gen, bool& dirty,
            std::vector<ChildWatch>& children,
-           std::vector<PendingApp>& pending)
+           std::vector<PendingApp>& pending, Settings& settings)
       : win_(&win),
         fds_(&fds),
         gen_(&gen),
         dirty_(&dirty),
         children_(&children),
-        pending_(&pending) {}
+        pending_(&pending),
+        settings_(&settings) {}
 
   void set_title(std::string title) override;
   void request_close() override;
@@ -95,6 +97,12 @@ class HostImpl : public Host {
   void unwatch(uint64_t token) override;
   void watch_child(pid_t pid) override;
   void open_app(std::unique_ptr<App> app, std::string app_id) override;
+
+  // Les reglages traversent ici, et seulement ici : ils vivent dans la
+  // session, un exemplaire pour tout le demon.
+  std::string start_dir() const override;
+  std::string configured_start_dir() const override;
+  void set_start_dir(std::string dir) override;
 
   // Cette clé désigne-t-elle encore une surveillance vivante ? Répondre non
   // est tout l'intérêt des générations : un événement livré par epoll pour
@@ -118,6 +126,7 @@ class HostImpl : public Host {
   bool* dirty_;
   std::vector<ChildWatch>* children_;
   std::vector<PendingApp>* pending_;
+  Settings* settings_;
   std::vector<std::pair<uint64_t, int>> watched_;
 };
 

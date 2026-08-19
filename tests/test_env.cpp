@@ -167,3 +167,26 @@ TEST(child_env_never_leaks_the_desktop_identity_to_a_shell) {
   // On bannit deux variables, pas l'environnement : le reste passe.
   CHECK_EQ(value_of(env, "PATH"), std::string("/usr/bin"));
 }
+
+// LE DOSSIER DE L'UTILISATEUR VIENT DE LA BASE DE COMPTES, pas de $HOME --
+// exactement la meme raison que pour le shell de connexion : le $HOME du
+// demon est un fossile de la PREMIERE session SSH, et le suivre reviendrait
+// a obeir a ce que le tout premier client avait ce jour-la.
+TEST(home_dir_ignores_a_stale_HOME_in_the_environment) {
+  const char* avant = ::getenv("HOME");
+  const std::string sauve = avant != nullptr ? avant : "";
+  ::setenv("HOME", "/fossile-de-la-premiere-session", 1);
+
+  const std::string vu = sshos::home_dir();
+
+  if (avant != nullptr) {
+    ::setenv("HOME", sauve.c_str(), 1);
+  } else {
+    ::unsetenv("HOME");
+  }
+
+  CHECK(vu != "/fossile-de-la-premiere-session");
+  REQUIRE(!vu.empty());
+  CHECK_EQ(vu[0], '/');
+}
+

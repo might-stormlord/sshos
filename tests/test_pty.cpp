@@ -584,3 +584,40 @@ TEST(pty_destructor_takes_the_whole_group_of_a_shell_that_refused_the_hangup) {
   if (!dead) ::kill(background, SIGKILL);  // rien ne traîne derrière un echec
   CHECK(dead);
 }
+
+// LE DOSSIER DE DEPART. Sans lui, l'invite herite du repertoire courant du
+// DEMON -- que become_daemon() met a « / » pour ne retenir aucun point de
+// montage. Tous les terminaux s'ouvraient donc a la racine.
+TEST(pty_starts_the_child_in_the_requested_directory) {
+  char tpl[] = "/tmp/sshos-cwd-XXXXXX";
+  const char* bac = ::mkdtemp(tpl);
+  REQUIRE(bac != nullptr);
+
+  Pty p;
+  PtySpawn s = shell_running("pwd");
+  s.cwd = bac;
+  const std::string err = p.spawn(s);
+  const std::string out = read_until(p, bac);
+  ::rmdir(bac);
+
+  REQUIRE_EQ(err, std::string());
+  CHECK(out.find(bac) != std::string::npos);
+  CHECK(reaped_within(p));
+}
+
+// ET UN DOSSIER DISPARU N'EMPECHE PAS LE TERMINAL D'EXISTER. Le reglage est
+// persistant : le dossier qu'il nomme peut avoir ete efface entre deux
+// sessions, et une fenetre qui refuserait de s'ouvrir pour ca serait un
+// cul-de-sac -- on ne pourrait meme plus taper de quoi corriger le reglage.
+TEST(pty_still_starts_when_the_directory_is_gone) {
+  Pty p;
+  PtySpawn s = shell_running("echo vivant");
+  s.cwd = "/nexiste-vraiment-pas-du-tout";
+  const std::string err = p.spawn(s);
+  const std::string out = read_until(p, "vivant");
+
+  REQUIRE_EQ(err, std::string());
+  CHECK(out.find("vivant") != std::string::npos);
+  CHECK(reaped_within(p));
+}
+

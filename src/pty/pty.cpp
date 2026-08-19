@@ -72,7 +72,11 @@ std::string Pty::spawn(const PtySpawn& s) {
     return "pipe2 a echoue : " + e;
   }
 
-  // Tout ce qui alloue est fait ici, avant le fork.
+  // Tout ce qui alloue est fait ici, avant le fork -- y compris le pointeur
+  // du dossier de depart : `c_str()` sur un std::string vide rend une chaine
+  // valide, donc l'enfant n'a qu'un octet a regarder pour savoir s'il y a
+  // quelque chose a faire.
+  const char* const start_dir = s.cwd.c_str();
   std::vector<std::string> argv_store;
   std::vector<std::string> env_store;
   std::vector<char*> argv = flatten(s.argv, argv_store);
@@ -108,6 +112,15 @@ std::string Pty::spawn(const PtySpawn& s) {
       dfl.sa_handler = SIG_DFL;
       sigemptyset(&dfl.sa_mask);
       ::sigaction(sig, &dfl, nullptr);
+    }
+
+    // LE DOSSIER DE DEPART, avant tout le reste du décor : rien de ce qui
+    // suit n'en dépend, et le faire tôt garde l'échec sans conséquence.
+    // On IGNORE l'échec -- un dossier effacé entre deux sessions ne doit pas
+    // coûter la fenêtre, seulement l'endroit où elle s'ouvre.
+    if (start_dir[0] != '\0') {
+      const int ignored_chdir = ::chdir(start_dir);
+      (void)ignored_chdir;
     }
 
     // QUATRIÈME héritage : le réglage du tueur de mémoire survit lui aussi,

@@ -67,4 +67,19 @@ void HostImpl::unwatch_all() {
   watched_.clear();
 }
 
+std::string HostImpl::start_dir() const { return settings_->start_dir(); }
+
+std::string HostImpl::configured_start_dir() const {
+  return settings_->configured();
+}
+
+void HostImpl::set_start_dir(std::string dir) {
+  // L'ECHEC D'ECRITURE EST AVALE ICI, et c'est voulu : Settings garde la
+  // valeur pour la session en cours de toute facon, et une fenetre de
+  // terminal n'a rien a faire d'un message sur les droits d'un fichier
+  // qu'elle ne connait pas. Le reglage vaut tout de suite ; seul son
+  // souvenir est en jeu.
+  settings_->set_start_dir(std::move(dir));
+}
+
 }  // namespace sshos

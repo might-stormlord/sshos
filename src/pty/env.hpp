@@ -24,6 +24,13 @@ bool is_session_variable(std::string_view key);
 // ce jour-là. Rend "/bin/sh" si la base de comptes ne dit rien.
 std::string login_shell();
 
+// Le dossier de l'utilisateur, lu dans getpwuid -- PAS dans $HOME, et pour
+// exactement la meme raison que ci-dessus. C'est la ou s'ouvre un terminal
+// quand l'utilisateur n'a rien regle : `become_daemon()` place le demon a
+// « / » pour ne retenir aucun point de montage, et l'invite en heritait.
+// Rend "/" si la base de comptes ne dit rien.
+std::string home_dir();
+
 // L'environnement d'un nouvel enfant : la base du démon, moins ses
 // fossiles de session, plus le delta du client, plus ce que nous imposons.
 //

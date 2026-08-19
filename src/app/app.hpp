@@ -64,6 +64,22 @@ class Host {
     (void)app;
     (void)app_id;
   }
+
+  // OU S'OUVRE UN NOUVEAU TERMINAL. C'est un reglage de l'UTILISATEUR, garde
+  // par le bureau et ecrit sur disque : une application ne sait ni ou vit ce
+  // fichier ni quand le relire, et deux applications qui le liraient chacune
+  // de leur cote finiraient par ne plus etre d'accord.
+  //
+  // `start_dir()` rend le chemin EFFECTIF -- `~` developpe, dossier de
+  // l'utilisateur a defaut -- c'est celui qu'on donne a un PTY.
+  // `configured_start_dir()` rend ce que l'utilisateur a TAPE, qui est ce
+  // qu'on lui remontre quand il rouvre la saisie.
+  //
+  // Defaut : vide de part et d'autre. Un hote de test n'a pas de
+  // configuration derriere lui, et vide veut dire « la ou on est ».
+  virtual std::string start_dir() const { return {}; }
+  virtual std::string configured_start_dir() const { return {}; }
+  virtual void set_start_dir(std::string dir) { (void)dir; }
 };
 
 // Le contrat applicatif du projet, valable jusqu'au jalon 6. Tout est

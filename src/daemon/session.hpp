@@ -295,6 +295,11 @@ class Session : public ChildSink {
   Menu menu_;
   Modal modal_;
   UpdateService update_;
+
+  // LES REGLAGES DE L'UTILISATEUR, un exemplaire pour tout le demon. Les
+  // applications y accedent par leur Host, jamais directement : deux
+  // lecteurs du meme fichier finiraient par ne plus etre d'accord.
+  Settings settings_;
   Help help_;
   LeaderDispatch leader_;
 
