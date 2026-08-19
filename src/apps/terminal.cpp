@@ -83,6 +83,46 @@ std::string encode_mouse_sgr(const MouseEvent& m, int x, int y) {
          std::to_string(y + 1) + final_byte;
 }
 
+// CE QU'UN COLLAGE A LE DROIT DE CONTENIR.
+//
+// Un texte colle vient du DEHORS -- d'une page web, d'un courriel, de
+// n'importe ou -- et il ne doit pas pouvoir piloter le terminal. On garde
+// la tabulation et les fins de ligne, qui sont du texte ; on retire tout le
+// reste des octets de controle.
+//
+// L'ECHAPPEMENT EST LE DANGER PRINCIPAL, et il y en a deux : un « \033]0; »
+// renommerait la fenetre a l'insu de tous, et surtout un « \033[201~ »
+// fabrique REFERMERAIT l'encadrement du collage -- tout ce qui suit
+// redeviendrait de la frappe, donc des commandes EXECUTEES. C'est la faille
+// classique du collage encadre, et la seule parade est de ne jamais laisser
+// passer l'octet d'echappement.
+//
+// Les retours a la ligne, eux, passent : coller trois lignes dans un shell
+// les execute, c'est exactement ce que l'utilisateur demande en le faisant.
+std::string clean_paste(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (u == 0x7f) continue;              // DEL
+    if (u >= 0x20 || c == '\t' || c == '\n' || c == '\r') out.push_back(c);
+  }
+  return out;
+}
+
+// La meme chose pour une saisie du bureau -- nom d'onglet, dossier de
+// depart : elle tient sur UNE ligne, et une fin de ligne collee dedans
+// n'aurait aucun sens.
+std::string clean_paste_one_line(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : clean_paste(text)) {
+    if (c == '\n' || c == '\r' || c == '\t') continue;
+    out.push_back(c);
+  }
+  return out;
+}
+
 }  // namespace
 
 Terminal::Terminal() {
@@ -704,6 +744,42 @@ void Terminal::on_mouse(const MouseEvent& m) {
   // l'invité, et lui donner un `y` décalé ferait cliquer `htop` une ligne
   // trop bas.
   to_guest(encode_mouse_sgr(m, m.x, m.y - kBarRows));
+}
+
+void Terminal::on_paste(std::string_view text, bool complete) {
+  // PENDANT UNE SAISIE DU BUREAU, le collage va dans le CHAMP, pas a
+  // l'invite : c'est meme le geste le plus utile des deux -- coller un
+  // chemin dans le champ de la roue plutot que le retaper.
+  if (mode_ == Mode::Renaming || mode_ == Mode::EditingPath) {
+    const size_t plafond = mode_ == Mode::Renaming ? kMaxName : kMaxPath;
+    const std::string ajout = clean_paste_one_line(text);
+    if (edit_.size() < plafond) {
+      edit_ += ajout.substr(0, plafond - edit_.size());
+    }
+    if (host_ != nullptr) host_->invalidate();
+    return;
+  }
+
+  Tab& t = active();
+  if (t.pty.exited()) return;
+
+  // Coller, c'est ecrire : on revient au present, comme pour une frappe.
+  // Personne ne colle en aveugle dans une page d'historique.
+  t.history.scroll_to_bottom();
+
+  if (!pasting_) {
+    // LE CHOIX D'ENCADRER SE FIGE ICI, a l'ouverture, et vaut pour tous les
+    // morceaux : un invite qui basculerait le mode 2004 au milieu laisserait
+    // sinon un « \033[200~ » sans son « \033[201~ », et le shell resterait
+    // en attente pour toujours.
+    paste_bracketed_ = t.modes.bracketed_paste;
+    if (paste_bracketed_) to_guest("\033[200~");
+  }
+  pasting_ = !complete;
+
+  to_guest(clean_paste(text));
+
+  if (complete && paste_bracketed_) to_guest("\033[201~");
 }
 
 bool Terminal::wants_cursor(Pos& out) const {

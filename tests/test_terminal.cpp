@@ -1516,3 +1516,105 @@ TEST(terminal_opens_a_new_tab_in_the_configured_directory) {
   CHECK(vu.find(bac) != std::string::npos);
 }
 
+// ---------------------------------------------------------------------------
+// Le collage.
+// ---------------------------------------------------------------------------
+
+// IL ARRIVE A L'INVITE, tout simplement. C'est ce qui ne marchait pas : le
+// bureau fabriquait des PasteEvent que personne ne lisait.
+TEST(terminal_writes_a_paste_to_the_guest) {
+  Terminal t;
+  t.on_resize(Size{20, 5});
+
+  t.on_paste("echo bonjour", true);
+
+  CHECK_EQ(t.take_written_for_tests(), std::string("echo bonjour"));
+}
+
+// ENCADRE SI ET SEULEMENT SI L'INVITE L'A DEMANDE (mode 2004). Sans sa
+// demande, l'encadrement apparaitrait tel quel a l'ecran d'un shell qui ne
+// le comprend pas.
+TEST(terminal_brackets_a_paste_only_when_the_guest_asked_for_it) {
+  Terminal t;
+  t.on_resize(Size{20, 5});
+  t.feed_for_tests("\033[?2004h");
+
+  t.on_paste("ls", true);
+
+  CHECK_EQ(t.take_written_for_tests(), std::string("\033[200~ls\033[201~"));
+}
+
+// LA FAILLE CLASSIQUE DU COLLAGE ENCADRE, et la seule qui compte ici : un
+// texte qui contient « \033[201~ » refermerait l'encadrement lui-meme, et
+// tout ce qui suit redeviendrait de la FRAPPE -- donc des commandes
+// executees sans que personne les ait tapees. L'octet d'echappement ne
+// passe jamais.
+TEST(terminal_never_lets_a_paste_forge_the_end_of_a_paste) {
+  Terminal t;
+  t.on_resize(Size{20, 5});
+  t.feed_for_tests("\033[?2004h");
+
+  t.on_paste("innocent\033[201~rm -rf /\r", true);
+
+  const std::string vu = t.take_written_for_tests();
+  // Un SEUL « \033[201~ » : le notre, celui de la fin.
+  size_t combien = 0;
+  for (size_t at = vu.find("\033[201~"); at != std::string::npos;
+       at = vu.find("\033[201~", at + 1)) {
+    ++combien;
+  }
+  CHECK_EQ(combien, size_t{1});
+  CHECK(vu.find("\033") == 0);                    // le notre ouvre
+  CHECK(vu.find("[201~rm") != std::string::npos);  // l'autre est devenu du texte
+}
+
+// UN OSC NE DOIT PAS PASSER NON PLUS : « \033]0;titre » renommerait la
+// fenetre a l'insu de tous.
+TEST(terminal_strips_control_bytes_from_a_paste) {
+  Terminal t;
+  t.on_resize(Size{20, 5});
+
+  t.on_paste("a\033]0;pirate\007b\tc\nd", true);
+
+  // Tabulation et fin de ligne restent : ce sont du texte, et coller
+  // plusieurs lignes dans un shell les execute -- c'est ce qu'on demande.
+  CHECK_EQ(t.take_written_for_tests(), std::string("a]0;pirateb\tc\nd"));
+}
+
+// UN GROS COLLAGE ARRIVE EN MORCEAUX : l'encadrement s'ouvre au premier et
+// ne se ferme qu'au dernier. Une paire par morceau ferait voir a l'invite
+// plusieurs collages la ou il n'y en a qu'un.
+TEST(terminal_opens_and_closes_a_fragmented_paste_only_once) {
+  Terminal t;
+  t.on_resize(Size{20, 5});
+  t.feed_for_tests("\033[?2004h");
+
+  t.on_paste("un ", false);
+  t.on_paste("deux ", false);
+  t.on_paste("trois", true);
+
+  CHECK_EQ(t.take_written_for_tests(),
+           std::string("\033[200~un deux trois\033[201~"));
+}
+
+// ET PENDANT UNE SAISIE DU BUREAU, il va dans le CHAMP -- c'est meme le
+// geste le plus utile des deux : coller un chemin dans la roue plutot que
+// le retaper. Rien ne part a l'invite.
+TEST(terminal_pastes_into_the_start_directory_field) {
+  HostWithSettings host;
+  Terminal t;
+  t.on_resize(Size{40, 5});
+  t.attach(host);
+  t.take_written_for_tests();  // on jette ce que l'ouverture a pu ecrire
+
+  t.on_mouse(MouseEvent{MouseAction::Press, 0, t.settings_column_for_tests(), 0, 0});
+  t.on_paste("/home/moi/dev\n", true);
+  t.on_key(KeyEvent{Key::Enter, 0, 0});
+
+  REQUIRE_EQ(host.poses.size(), size_t{1});
+  // La fin de ligne est retiree : un champ tient sur UNE ligne, et un
+  // « \n » colle dedans n'aurait aucun sens.
+  CHECK_EQ(host.poses[0], std::string("/home/moi/dev"));
+  CHECK_EQ(t.take_written_for_tests(), std::string(""));
+}
+

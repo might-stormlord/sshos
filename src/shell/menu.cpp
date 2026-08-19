@@ -44,6 +44,14 @@ void Menu::open() {
   all_.push_back({"panel:left", "Panneau : gauche"});
   all_.push_back({"panel:right", "Panneau : droite"});
   all_.push_back({"wm:tile", "Ranger les fenetres"});
+  // LA SOURIS RENDUE AU TERMINAL, ET C'EST LA SEULE FACON DE COPIER. Le
+  // bureau capte la souris (?1002h), ce qui neutralise la selection native
+  // du terminal de l'utilisateur : sans cette bascule, impossible de
+  // selectionner du texte pour le copier ailleurs. Elle n'existait qu'en
+  // accord clavier -- une fonction qui n'a qu'un raccourci est une fonction
+  // incomplete, et c'est la regle « la souris d'abord » du projet. Le
+  // raccourci reste ecrit en face, pour qu'on l'apprenne en le cliquant.
+  all_.push_back({"input:mouse", "Souris : bureau ou terminal (^A m)"});
   // DEUX SORTIES, ET ELLES NE FONT PAS LA MEME CHOSE. La premiere rend la
   // main en gardant tout ; la seconde detruit. Les nommer « Quitter » et
   // « Quitter la session » les rendait indistinguables -- et c'est la

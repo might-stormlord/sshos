@@ -25,6 +25,17 @@
 namespace sshos {
 namespace {
 
+// L'IDIOME QUI REND L'OUBLI IMPOSSIBLE. Assemble des lambdas en un seul
+// objet appelable ; std::visit exige alors qu'UNE surcharge existe pour
+// chaque alternative du variant, sans quoi la resolution echoue -- a la
+// COMPILATION. Voir la note en tete de Session::on_input.
+template <class... Ts>
+struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 constexpr int kMinCols = 40;
 constexpr int kMinRows = 12;
 
@@ -293,6 +304,10 @@ void Session::run_menu(const std::string& id) {
   }
   if (id == "wm:tile") {
     tile_windows();
+    return;
+  }
+  if (id == "input:mouse") {
+    do_action(Action::ToggleMouse);
     return;
   }
   if (id == "session:detach") {
@@ -1208,136 +1223,178 @@ void Session::on_mouse(const MouseEvent& m) {
   }
 }
 
+// LE CLAVIER. Sorti de on_input pour que la distribution des evenements
+// tienne en quatre lignes que le compilateur sait verifier -- voir la note
+// en tete de on_input.
+void Session::on_key(const KeyEvent& k) {
+  // Toute frappe annule un glissement en cours -- Échap comme les autres.
+  // Continuer à déplacer une fenêtre pendant que l'utilisateur tape serait
+  // au mieux surprenant.
+  if (!std::holds_alternative<Idle>(drag_)) {
+    cancel_drag();
+    return;
+  }
+  // Ctrl+Q DÉTACHE, il ne détruit rien. C'est le geste que la main fait
+  // pour « quitter », et le laisser tuer la session serait le contraire de
+  // ce que ce projet promet : on revient, tout est là. Détruire la session
+  // pour de bon se demande explicitement, par l'entrée « Quitter la
+  // session » du menu.
+  if (k.key == Key::Char && k.ch == U'q' && (k.mods & mod::Ctrl) != 0) {
+    detach_ = true;
+    return;
+  }
+  // La modale passe avant tout le reste : c'est ce que « modal » veut
+  // dire. Ni le menu, ni les raccourcis, ni l'application ne voient rien
+  // tant qu'on n'a pas répondu.
+  if (modal_.is_open()) {
+    switch (k.key) {
+      case Key::Escape:
+        modal_.dismiss();
+        break;
+      case Key::Tab:
+      case Key::BackTab:
+      case Key::Left:
+      case Key::Right:
+        modal_.focus_next();
+        break;
+      case Key::Enter:
+        answer_modal(modal_.confirm_focused());
+        break;
+      default:
+        break;
+    }
+    dirty_ = true;
+    return;
+  }
+
+  // Le menu capture tout tant qu'il est ouvert : une application ne doit
+  // jamais recevoir les frappes qui pilotent le bureau.
+  if (menu_.is_open()) {
+    menu_key(k);
+    return;
+  }
+  // La série a-t-elle expiré ? Relue ici, à la frappe, plutôt que sur une
+  // minuterie : tant que personne ne tape, une série finie ne change rien
+  // à ce qui est à l'écran.
+  if (leader_.repeating() && plat_->steady_now() > repeat_until_) {
+    leader_.reset();
+  }
+
+  // L'aide se retire à la PREMIÈRE touche, et cette touche garde son
+  // effet : elle s'est ouverte parce que l'accord traînait, pas pour
+  // installer un mode dont il faudrait ressortir.
+  if (help_.is_open()) {
+    help_.close();
+    dirty_ = true;
+  }
+
+  // La proposition d'ancrage suit la même règle, et pour la même raison :
+  // elle s'est ouverte parce qu'on venait d'ancrer, pas pour installer un
+  // mode. Un nouvel ancrage la rouvrira aussitôt -- c'est snap_focused()
+  // qui décide, et elle est appelée plus bas.
+  if (assist_.is_open()) {
+    assist_.close();
+    dirty_ = true;
+  }
+
+  // L'ANCRAGE, SANS ACCORD. `Ctrl+fleche` est le geste des bureaux
+  // modernes, et le faire passer par le leader le rendait inutilisable :
+  // trois touches pour un geste qu'on repete.
+  //
+  // CE QUE CA COUTE, et c'est assume : `Ctrl+gauche` et `Ctrl+droite`
+  // deplacent par MOT dans readline, donc dans tout shell. Le bureau les
+  // prend a l'invite. Les fleches nues et `Maj+fleche` lui restent, comme
+  // tout le reste du clavier.
+  if (k.key == Key::Left || k.key == Key::Right || k.key == Key::Up ||
+      k.key == Key::Down) {
+    if ((k.mods & 0x07) == mod::Ctrl) {
+      // Un accord en cours est annule : on vient de faire autre chose.
+      leader_.reset();
+      switch (k.key) {
+        case Key::Left:
+          snap_focused(SnapDir::Left);
+          break;
+        case Key::Right:
+          snap_focused(SnapDir::Right);
+          break;
+        case Key::Up:
+          snap_focused(SnapDir::Up);
+          break;
+        default:
+          snap_focused(SnapDir::Down);
+          break;
+      }
+      return;
+    }
+  }
+
+  const LeaderResult lr = leader_.feed(k);
+  if (lr.action.has_value()) {
+    do_action(*lr.action);
+    // Un geste qui s'enchaîne rouvre sa fenêtre à chaque fois : c'est
+    // l'ÉCART entre deux gestes qui est borné, pas la durée totale de la
+    // série. Pousser une fenêtre à l'autre bout de l'écran ne demande donc
+    // qu'un seul accord.
+    if (leader_.repeating()) {
+      repeat_until_ = plat_->steady_now() + kRepeatWindow;
+    }
+    return;
+  }
+  if (lr.consumed) {
+    // Le leader vient d'armer : c'est d'ici que part le compte à rebours.
+    if (leader_.armed()) leader_stamp_ = plat_->steady_now();
+    return;
+  }
+  if (Window* w = wm_.find(wm_.focused())) w->app->on_key(k);
+  return;
+}
+
+// LE COLLAGE VA A LA FENETRE FOCALISEE, jamais a celle qui est sous le
+// pointeur : on colle la ou on tape. Aucune application du bureau ne le
+// traitait avant que cette route existe -- le terminal est le premier.
+void Session::on_paste(const PasteEvent& p) {
+  // Un collage pendant un glissement l'annule, comme une frappe : le geste
+  // en cours n'a plus rien a voir avec ce qui arrive.
+  if (!std::holds_alternative<Idle>(drag_)) cancel_drag();
+  // Rien ne colle derriere un dialogue, sous un menu ouvert ou pendant une
+  // saisie du bureau : ce sont des modes, et ils prennent tout.
+  if (modal_.is_open() || menu_.is_open()) return;
+  Window* w = wm_.find(wm_.focused());
+  if (w == nullptr || w->app == nullptr) return;
+  w->app->on_paste(p.text, p.complete);
+  dirty_ = true;
+}
+
+void Session::on_focus(const FocusEvent& f) {
+  if (!f.focused) cancel_drag();
+}
+
 void Session::on_input(const InputEvent& e) {
   watchdog();
 
-  if (const auto* k = std::get_if<KeyEvent>(&e)) {
-    // Toute frappe annule un glissement en cours -- Échap comme les autres.
-    // Continuer à déplacer une fenêtre pendant que l'utilisateur tape serait
-    // au mieux surprenant.
-    if (!std::holds_alternative<Idle>(drag_)) {
-      cancel_drag();
-      return;
-    }
-    // Ctrl+Q DÉTACHE, il ne détruit rien. C'est le geste que la main fait
-    // pour « quitter », et le laisser tuer la session serait le contraire de
-    // ce que ce projet promet : on revient, tout est là. Détruire la session
-    // pour de bon se demande explicitement, par l'entrée « Quitter la
-    // session » du menu.
-    if (k->key == Key::Char && k->ch == U'q' && (k->mods & mod::Ctrl) != 0) {
-      detach_ = true;
-      return;
-    }
-    // La modale passe avant tout le reste : c'est ce que « modal » veut
-    // dire. Ni le menu, ni les raccourcis, ni l'application ne voient rien
-    // tant qu'on n'a pas répondu.
-    if (modal_.is_open()) {
-      switch (k->key) {
-        case Key::Escape:
-          modal_.dismiss();
-          break;
-        case Key::Tab:
-        case Key::BackTab:
-        case Key::Left:
-        case Key::Right:
-          modal_.focus_next();
-          break;
-        case Key::Enter:
-          answer_modal(modal_.confirm_focused());
-          break;
-        default:
-          break;
-      }
-      dirty_ = true;
-      return;
-    }
-
-    // Le menu capture tout tant qu'il est ouvert : une application ne doit
-    // jamais recevoir les frappes qui pilotent le bureau.
-    if (menu_.is_open()) {
-      menu_key(*k);
-      return;
-    }
-    // La série a-t-elle expiré ? Relue ici, à la frappe, plutôt que sur une
-    // minuterie : tant que personne ne tape, une série finie ne change rien
-    // à ce qui est à l'écran.
-    if (leader_.repeating() && plat_->steady_now() > repeat_until_) {
-      leader_.reset();
-    }
-
-    // L'aide se retire à la PREMIÈRE touche, et cette touche garde son
-    // effet : elle s'est ouverte parce que l'accord traînait, pas pour
-    // installer un mode dont il faudrait ressortir.
-    if (help_.is_open()) {
-      help_.close();
-      dirty_ = true;
-    }
-
-    // La proposition d'ancrage suit la même règle, et pour la même raison :
-    // elle s'est ouverte parce qu'on venait d'ancrer, pas pour installer un
-    // mode. Un nouvel ancrage la rouvrira aussitôt -- c'est snap_focused()
-    // qui décide, et elle est appelée plus bas.
-    if (assist_.is_open()) {
-      assist_.close();
-      dirty_ = true;
-    }
-
-    // L'ANCRAGE, SANS ACCORD. `Ctrl+fleche` est le geste des bureaux
-    // modernes, et le faire passer par le leader le rendait inutilisable :
-    // trois touches pour un geste qu'on repete.
-    //
-    // CE QUE CA COUTE, et c'est assume : `Ctrl+gauche` et `Ctrl+droite`
-    // deplacent par MOT dans readline, donc dans tout shell. Le bureau les
-    // prend a l'invite. Les fleches nues et `Maj+fleche` lui restent, comme
-    // tout le reste du clavier.
-    if (k->key == Key::Left || k->key == Key::Right || k->key == Key::Up ||
-        k->key == Key::Down) {
-      if ((k->mods & 0x07) == mod::Ctrl) {
-        // Un accord en cours est annule : on vient de faire autre chose.
-        leader_.reset();
-        switch (k->key) {
-          case Key::Left:
-            snap_focused(SnapDir::Left);
-            break;
-          case Key::Right:
-            snap_focused(SnapDir::Right);
-            break;
-          case Key::Up:
-            snap_focused(SnapDir::Up);
-            break;
-          default:
-            snap_focused(SnapDir::Down);
-            break;
-        }
-        return;
-      }
-    }
-
-    const LeaderResult lr = leader_.feed(*k);
-    if (lr.action.has_value()) {
-      do_action(*lr.action);
-      // Un geste qui s'enchaîne rouvre sa fenêtre à chaque fois : c'est
-      // l'ÉCART entre deux gestes qui est borné, pas la durée totale de la
-      // série. Pousser une fenêtre à l'autre bout de l'écran ne demande donc
-      // qu'un seul accord.
-      if (leader_.repeating()) {
-        repeat_until_ = plat_->steady_now() + kRepeatWindow;
-      }
-      return;
-    }
-    if (lr.consumed) {
-      // Le leader vient d'armer : c'est d'ici que part le compte à rebours.
-      if (leader_.armed()) leader_stamp_ = plat_->steady_now();
-      return;
-    }
-    if (Window* w = wm_.find(wm_.focused())) w->app->on_key(*k);
-    return;
-  }
-  if (const auto* f = std::get_if<FocusEvent>(&e)) {
-    if (!f->focused) cancel_drag();
-    return;
-  }
-  if (const auto* m = std::get_if<MouseEvent>(&e)) on_mouse(*m);
+  // LE COMPILATEUR EST LE GARDE, et c'est tout l'interet de ce visit.
+  //
+  // Ces lignes etaient une chaine de `get_if` : trois sortes d'evenements
+  // traitees, la quatrieme -- le COLLAGE -- oubliee. Ca compilait
+  // parfaitement et se taisait a l'execution : le parseur fabriquait des
+  // PasteEvent que PERSONNE ne lisait, et coller dans le bureau ne faisait
+  // rien du tout. Quinzieme occurrence du defaut « ne sans appelant » de ce
+  // projet (dossier de reprise, §9 bis).
+  //
+  // Avec std::visit sur un ensemble de surcharges, une alternative ajoutee a
+  // InputEvent et non traitee ici NE COMPILE PLUS. Le garde n'est ni un
+  // script de balayage -- le precedent etait faux -- ni une relecture : c'est
+  // une erreur de compilation, sur toutes les machines, a chaque build.
+  //
+  // NE JAMAIS ajouter de `default`, de `auto&&` fourre-tout ni de surcharge
+  // generique ici : chacun de ces trois gestes redonne le silence.
+  std::visit(overloaded{
+                 [this](const KeyEvent& k) { on_key(k); },
+                 [this](const MouseEvent& m) { on_mouse(m); },
+                 [this](const PasteEvent& p) { on_paste(p); },
+                 [this](const FocusEvent& f) { on_focus(f); },
+             },
+             e);
 }
 
 void Session::draw_empty_hint(View v, const Rect& work) const {

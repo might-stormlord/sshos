@@ -258,7 +258,13 @@ class Session : public ChildSink {
   // configurée, jamais écrits en dur.
   std::string leader_label() const;
   std::string panel_hint() const;
+  // Les quatre sortes d'evenements, une methode chacune. La distribution
+  // est un std::visit EXHAUSTIF (session.cpp) : ajouter une alternative a
+  // InputEvent sans une methode ici ne compile plus.
+  void on_key(const KeyEvent& k);
   void on_mouse(const MouseEvent& m);
+  void on_paste(const PasteEvent& p);
+  void on_focus(const FocusEvent& f);
   void watchdog();
 
   // Clôt le geste en gardant ce qu'il a produit -- l'inverse exact de

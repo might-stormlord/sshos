@@ -907,7 +907,7 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 9 bis. Le défaut signature du projet — et comment le trouver en deux minutes
 
-**Quatorze fois**, du code a existé sans aucun appelant en production. Aucune suite de
+**Quinze fois**, du code a existé sans aucun appelant en production. Aucune suite de
 tests ne l'a jamais signalé, parce que ce qui manque n'est pas la couverture : c'est
 **l'appel**. Un test unitaire ne peut pas le voir. Une campagne de mutation non plus —
 muter du code mort ne casse rien, et la mutation se déclare « équivalente ».
@@ -931,11 +931,35 @@ message du commit qui compte mal, pas la liste.)*
 | 8 | `Screen::set_tab()` et sa famille | `ESC H` et `CSI g` non traités : `tabs -4` ne faisait rien |
 | 9 | `Files::display_label()` | Devenue une duplication silencieuse de la règle de nommage |
 | 10 | **Les mouvements de souris** | `Session::on_mouse` : *« au-delà de cette ligne, tout est un appui »*. Aucune application n'a jamais reçu un mouvement. Tout un glisser-déposer écrit au-dessus d'un canal inexistant |
+| 15 | **Le collage** | `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` : touches, souris, focus — et **pas** le collage. Le parseur fabriquait des `PasteEvent` que personne ne lisait, donc **coller dans le bureau ne faisait rien**, jamais. La molette (n° 14, `2b4dfc0`) est la même histoire, côté souris |
 
 **Le n° 10 est le plus instructif.** Ses six cas unitaires appelaient
 `files.on_mouse(Motion…)` **directement**. Ils prouvaient que le gestionnaire réagit
 bien à un mouvement ; ils ne prouvaient rien sur le fait que quelqu'un lui en envoie.
 **Un test qui appelle la méthode lui-même ne teste jamais son appelant.**
+
+### ⛔ Le garde permanent — le compilateur, pas un script
+
+**Depuis `430517d`, la quinzième ne peut plus se reproduire à cette porte-là.**
+`Session::on_input` ne démonte plus `InputEvent` à la main : il fait un
+`std::visit` sur un ensemble de surcharges **exhaustif** (l'idiome `overloaded`,
+en tête de `session.cpp`).
+
+Ajouter une alternative au `variant` sans la traiter **ne compile plus** — vérifié en
+ajoutant un `EssaiEvent` de test, qui produit `no matching function ... const
+sshos::EssaiEvent&`. Le garde n'est ni une relecture, ni le balayage ci-dessous — il
+tombe sur **toutes** les machines, à **chaque** compilation, et il nomme le type oublié.
+
+> **Ne jamais** ajouter de `default`, de surcharge générique `auto&&` ni de fourre-tout
+> dans ce `visit` : chacun de ces trois gestes rend le silence à la porte d'entrée du
+> bureau, et le seizième arrivera par là.
+
+Ce que le garde ne couvre PAS, et qu'il faut donc continuer à surveiller : les
+**virtuelles** de `App` et de `Host`. Une méthode virtuelle est référencée par la
+vtable même si personne ne l'appelle — ni le compilateur ni l'éditeur de liens ne
+peuvent la dire morte. Les n° 4, 5 et 10 étaient de celles-là. Pour elles, la seule
+parade reste un test qui entre par la **vraie** porte (`Session::on_input`) plutôt
+que d'appeler la méthode lui-même, plus le balayage ci-dessous.
 
 ### Le balayage, à repasser après tout gros ajout
 

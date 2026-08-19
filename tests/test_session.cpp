@@ -4776,3 +4776,126 @@ TEST(session_offers_the_update_right_in_the_check_result) {
   // La pastille reste : on a dit plus tard, pas non.
   CHECK(find_badge(sess, 80, 24).x >= 0);
 }
+
+// ---------------------------------------------------------------------------
+// Le collage, et la souris qu'on rend au terminal.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class Colleuse : public sshos::App {
+ public:
+  void render(sshos::View) override {}
+  void on_paste(std::string_view t, bool complete) override {
+    recu += std::string(t);
+    dernier_complete = complete;
+    ++appels;
+  }
+  std::string recu;
+  bool dernier_complete = false;
+  int appels = 0;
+};
+
+std::unique_ptr<sshos::App> make_colleuse() { return std::make_unique<Colleuse>(); }
+
+}  // namespace
+
+// LE COLLAGE ATTEINT L'APPLICATION. Il n'atteignait PERSONNE : le parseur
+// fabriquait des PasteEvent, et la distribution -- une chaine de get_if --
+// n'en traitait aucun. Quinzieme « ne sans appelant » du projet, et c'est
+// pour ca que on_input est desormais un std::visit exhaustif : la meme
+// omission ne compilerait plus.
+TEST(session_hands_a_paste_to_the_focused_window) {
+  Session::set_seed_factory_for_tests(&make_colleuse);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    REQUIRE_EQ(sess.windows_for_tests().size(), size_t{1});
+    auto* app = static_cast<Colleuse*>(sess.windows_for_tests()[0]->app.get());
+
+    sess.on_input(sshos::InputEvent{sshos::PasteEvent{"echo bonjour", true}});
+
+    CHECK_EQ(app->recu, std::string("echo bonjour"));
+    CHECK(app->dernier_complete);
+    CHECK_EQ(app->appels, 1);
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// LES MORCEAUX ARRIVENT DANS L'ORDRE, avec leur drapeau : c'est ce qui
+// permet a l'application d'ouvrir l'encadrement au premier et de ne le
+// fermer qu'au dernier.
+TEST(session_hands_every_fragment_of_a_paste_in_order) {
+  Session::set_seed_factory_for_tests(&make_colleuse);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    auto* app = static_cast<Colleuse*>(sess.windows_for_tests()[0]->app.get());
+
+    sess.on_input(sshos::InputEvent{sshos::PasteEvent{"un ", false}});
+    sess.on_input(sshos::InputEvent{sshos::PasteEvent{"deux", true}});
+
+    CHECK_EQ(app->recu, std::string("un deux"));
+    CHECK_EQ(app->appels, 2);
+    CHECK(app->dernier_complete);
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// RIEN NE COLLE SOUS UN MENU OUVERT. Le menu est un mode : il prend le
+// clavier tout entier, et laisser un collage passer dessous ecrirait dans
+// une fenetre que l'utilisateur ne regarde meme pas.
+TEST(session_keeps_a_paste_out_of_an_open_menu) {
+  Session::set_seed_factory_for_tests(&make_colleuse);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    auto* app = static_cast<Colleuse*>(sess.windows_for_tests()[0]->app.get());
+
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+    sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+    REQUIRE(sess.menu_open_for_tests());
+
+    sess.on_input(sshos::InputEvent{sshos::PasteEvent{"rm -rf /", true}});
+
+    CHECK_EQ(app->appels, 0);
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
+
+// LA SOURIS SE REND AU TERMINAL DEPUIS LE MENU, et pas seulement par un
+// accord clavier. C'est la SEULE facon de selectionner du texte pour le
+// copier ailleurs -- le bureau capte la souris -- et une fonction qui n'a
+// qu'un raccourci est une fonction incomplete.
+TEST(session_offers_the_mouse_toggle_in_the_menu) {
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+  CHECK(sess.take_out_of_band().empty());
+
+  // PAR LE VRAI CHEMIN : on ouvre le menu, on filtre, on valide. Appeler
+  // run_menu() directement prouverait que la commande marche, pas que
+  // l'entree existe et qu'on peut l'atteindre.
+  sess.on_input(sshos::InputEvent{
+      sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U' ', 0}});
+  REQUIRE(sess.menu_open_for_tests());
+  for (char c : std::string("souris")) {
+    sess.on_input(sshos::InputEvent{
+        sshos::KeyEvent{sshos::Key::Char, static_cast<char32_t>(c), 0}});
+  }
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  const std::string oob = sess.take_out_of_band();
+  CHECK(oob.find("\033[?1002l") != std::string::npos);
+  CHECK(oob.find("\033[?1006l") != std::string::npos);
+}
+

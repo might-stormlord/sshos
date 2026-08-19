@@ -103,6 +103,17 @@ class App {
   // Coordonnées LOCALES à la zone cliente, jamais celles de l'écran.
   virtual void on_mouse(const MouseEvent& m) { (void)m; }
 
+  // UN COLLAGE. Le terminal de l'utilisateur encadre ce qu'on lui colle
+  // (mode 2004) ; le bureau le reconnait et le tend ici, deja decode.
+  //
+  // `complete` vaut false sur tous les fragments sauf le dernier : un gros
+  // collage arrive en plusieurs morceaux, et une application qui encadre
+  // pour son invite doit ouvrir au premier et ne fermer qu'au dernier.
+  virtual void on_paste(std::string_view text, bool complete) {
+    (void)text;
+    (void)complete;
+  }
+
   virtual void on_resize(Size s) { (void)s; }
 
   // L'enfant confié à `Host::watch_child()` est mort. `status` est celui

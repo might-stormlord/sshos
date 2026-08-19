@@ -74,6 +74,7 @@ class Terminal : public App, public ParserSink {
   void render(View v) override;
   void on_key(const KeyEvent& k) override;
   void on_mouse(const MouseEvent& m) override;
+  void on_paste(std::string_view text, bool complete) override;
   void on_resize(Size s) override;
   void on_child_exit(int status) override;
   IoStatus on_io(uint64_t token, uint32_t events) override;
@@ -196,6 +197,14 @@ class Terminal : public App, public ParserSink {
   size_t active_ = 0;
   Tab* feeding_ = nullptr;
   Mode mode_ = Mode::Normal;
+  // UN COLLAGE EN COURS. Un gros collage arrive en plusieurs morceaux :
+  // l'encadrement s'ouvre au premier et ne se ferme qu'au dernier, sinon
+  // l'invite verrait plusieurs collages la ou il n'y en a qu'un.
+  bool pasting_ = false;
+  // Le choix d'encadrer, fige a l'OUVERTURE. Un invite qui basculerait le
+  // mode 2004 au milieu laisserait sinon un « \033[200~ » sans son
+  // « \033[201~ » -- et le shell resterait en attente pour toujours.
+  bool paste_bracketed_ = false;
   std::string edit_;
 
   Host* host_ = nullptr;
