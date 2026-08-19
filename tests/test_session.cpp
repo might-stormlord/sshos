@@ -4870,4 +4870,35 @@ TEST(session_keeps_a_paste_out_of_an_open_menu) {
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
 
+// UNE PRISE PERDUE NE DOIT PAS EMPORTER LA MOLETTE. Le relachement se perd
+// -- le code le dit lui-meme en face de la prise, et un cas de ce fichier
+// est deja ecrit pour ca. Mais la branche de la prise passe AVANT celle de
+// la molette : tant que la prise colle, chaque cran de molette part a la
+// fenetre qui l'a prise, ou qu'aille le pointeur -- et se perd tout a fait
+// si cette fenetre n'existe plus.
+TEST(session_does_not_send_the_wheel_to_a_stale_grab) {
+  Session::set_seed_factory_for_tests(&make_grabby);
+  {
+    FakePlatform plat;
+    Session sess(plat, g_fds, 60, 20);
+    Surface s(60, 20);
+    sess.render(s);
+    const sshos::Window& w = *sess.windows_for_tests()[0];
+    const sshos::Rect cr = sshos::client_rect(w.display_rect);
+    auto* app = static_cast<Grabby*>(w.app.get());
+
+    // On prend la souris, et le relachement se perd.
+    sess.on_input(sshos::InputEvent{sshos::MouseEvent{
+        sshos::MouseAction::Press, 0, cr.x + 2, cr.y + 2, 0}});
+    REQUIRE_EQ(app->seen.size(), size_t{1});
+
+    // Un cran de molette SUR LE PANNEAU, loin de la fenetre : il ne lui
+    // appartient pas.
+    sess.on_input(sshos::InputEvent{
+        sshos::MouseEvent{sshos::MouseAction::WheelUp, 0, 2, 19, 0}});
+
+    CHECK_EQ(app->seen.size(), size_t{1});
+  }
+  Session::set_seed_factory_for_tests(&make_plain_double);
+}
 

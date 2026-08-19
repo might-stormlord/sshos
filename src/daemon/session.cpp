@@ -960,29 +960,20 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
-  // LA FENÊTRE QUI TIENT LA SOURIS d'abord : un appui dans son corps lui
-  // donne aussi les mouvements et le relâchement, où qu'ils tombent. Sans
-  // cela, aucune application ne peut faire glisser quoi que ce soit --
-  // elle ne verrait jamais que des appuis isolés.
-  if (mouse_grab_ != 0 && m.action != MouseAction::Press) {
-    Window* held = wm_.find(mouse_grab_);
-    if (held != nullptr && held->app != nullptr) {
-      const Rect cr = client_rect(held->display_rect);
-      MouseEvent local = m;
-      local.x = m.x - cr.x;
-      local.y = m.y - cr.y;
-      held->app->on_mouse(local);
-      dirty_ = true;
-    }
-    if (m.action == MouseAction::Release) mouse_grab_ = 0;
-    return;
-  }
-
-  // LA MOLETTE, AVANT L'INVARIANT : elle n'est pas un appui, et elle a
-  // pourtant un destinataire. Sans cette branche elle mourait à la ligne
-  // suivante, et le terminal comme le gestionnaire de fichiers savaient
-  // tous deux la traiter SANS EN RECEVOIR UNE SEULE : remonter dans
-  // l'historique à la molette était impossible depuis le bureau.
+  // LA MOLETTE PASSE DEVANT LA PRISE, et l'ordre est le correctif.
+  //
+  // Une molette n'a pas de relâchement -- le parseur le dit en face de
+  // son encodage -- donc elle ne peut appartenir à AUCUN geste de bouton.
+  // Derrière la prise, elle en héritait : un relâchement perdu, ce qui
+  // arrive et ce que le code dit lui-même plus bas, et chaque cran partait
+  // à la fenêtre qui tenait la souris où qu'aille le pointeur -- ou se
+  // perdait tout à fait si cette fenêtre n'existait plus, la prise n'étant
+  // rendue qu'au relâchement qui ne venait jamais.
+  //
+  // Elle n'est pas un appui non plus, et elle a pourtant un destinataire :
+  // sans cette branche elle mourait à l'invariant plus bas, et le terminal
+  // comme le gestionnaire de fichiers savaient tous deux la traiter SANS
+  // EN RECEVOIR UNE SEULE.
   //
   // Elle va à la fenêtre SOUS LE POINTEUR, pas à celle qui a le focus, et
   // ne le lui donne pas : c'est ce que fait tout bureau, et faire suivre
@@ -1006,9 +997,28 @@ void Session::on_mouse(const MouseEvent& m) {
     return;
   }
 
+  // LA FENÊTRE QUI TIENT LA SOURIS d'abord : un appui dans son corps lui
+  // donne aussi les mouvements et le relâchement, où qu'ils tombent. Sans
+  // cela, aucune application ne peut faire glisser quoi que ce soit --
+  // elle ne verrait jamais que des appuis isolés.
+  if (mouse_grab_ != 0 && m.action != MouseAction::Press) {
+    Window* held = wm_.find(mouse_grab_);
+    if (held != nullptr && held->app != nullptr) {
+      const Rect cr = client_rect(held->display_rect);
+      MouseEvent local = m;
+      local.x = m.x - cr.x;
+      local.y = m.y - cr.y;
+      held->app->on_mouse(local);
+      dirty_ = true;
+    }
+    if (m.action == MouseAction::Release) mouse_grab_ = 0;
+    return;
+  }
+
+
   // INVARIANT : au-delà de cette ligne, tout est un appui. Les glissements
-  // ont consommé leurs relâchements plus haut, la molette vient de partir,
-  // et rien d'autre ne réagit au relâchement ni au survol. Les branches qui
+  // ont consommé leurs relâchements plus haut, la molette est partie avant
+  // la prise, et rien d'autre ne réagit au relâchement ni au survol. Les branches qui
   // suivent ne re-testent donc PAS `m.action` -- le faire suggérerait que
   // l'invariante ne tient pas, et masquerait sa disparition si quelqu'un la
   // supprimait.
