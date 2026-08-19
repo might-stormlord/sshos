@@ -4,12 +4,13 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 17 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
+> **Dernière mise à jour :** 19 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1206 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
-> **aussi dans un conteneur `ubuntu:26.04` nu**. Arbre de travail propre.
-> **228 commits** sur `main`, 112 fichiers dans `src/`.
+> **1261 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août).
+> Arbre de travail propre.
+> **243 commits** sur `main`, 120 fichiers dans `src/`.
 > **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
@@ -111,12 +112,12 @@ cmake --build build-debug -j"$(nproc)"
 ```
 
 ```bash
-./build-release/sshos_tests            # 19,6 s
-./build-debug/sshos_tests              # 47,3 s (ASan + UBSan, facteur 2,4)
+./build-release/sshos_tests            # 19,6 s (mesure du 15 août)
+./build-debug/sshos_tests              # 52,3 s (ASan + UBSan ; 47,3 s le 15 août)
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1146 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1261 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
@@ -359,6 +360,9 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | **Assistance à l'ancrage** | Ancrer laisse une moitié vide ; le bureau y propose les autres fenêtres, un clic en amarre une | `b888ec5` |
 | L'aide dit les gestes directs | Section « Sans accord : » — `Ctrl+Q`, `Ctrl+flèches`, les onglets, `F2` | `2121e43` |
 | Hygiène du balayage | Un signal n'est plus annoncé comme un code de sortie ; `hit_window_at` délègue au chemin du clic ; **HTS et TBC** branchés (`tabs -4` marche) | `7f8de71`, `0a32551`, `222cd7c` |
+| **La molette** | `Session::on_mouse` posait un invariant pour le glisser-déposer — « au-delà, tout est un appui » — et rejetait tout le reste **avant** la distribution aux fenêtres. Le terminal savait pourtant déjà faire défiler son historique, et Fichiers sa liste : deux fonctions complètes **sans en recevoir une seule**. La molette va désormais à la fenêtre **sous le pointeur**, sans lui donner le focus et sans prendre la souris. Même famille que le §9 bis, vue depuis le chemin d'ENTRÉE : les tests unitaires appelaient `Terminal::on_mouse` en direct, sans passer par le bureau | `2b4dfc0` |
+| **Le démon survit au tueur de mémoire, et se dit** | Une session de travail a disparu sans laisser de trace : ni `dmesg` dans le conteneur, ni image mémoire, ni journal. `run_daemon()` se pose donc à `oom_score_adj = -1000` (mesuré avant : 6,4 Mo pour un `oom_score` de 666, contre 704 pour un processus de 543 Mo). **Le réglage s'hérite et survit à `execve`** : les trois endroits qui donnent naissance à un processus étranger le rendent (`Pty`, le lanceur de mise à jour, `spawn_detached`), sans quoi un `make -j12` lancé dans une fenêtre deviendrait immortel. Et un journal — `<données>/journal.log` — dit `demarrage pid=…` puis la raison de l'arrêt. **Ce qu'il ne peut pas dire est ce qui le rend utile :** un SIGKILL n'écrit rien, donc une vie qui commence et ne se termine par aucune ligne EST la signature d'une mort brutale | `2f4232d` |
+| **Le terminal s'ouvre chez vous** | Il s'ouvrait dans `/` : `become_daemon()` fait `chdir("/")` et le répertoire courant s'hérite. `PtySpawn` gagne un `cwd` (échec ignoré — un dossier effacé ne doit pas coûter la fenêtre), le défaut est `home_dir()` lu dans `getpwuid()`, et une case **`[*]`** dans la barre d'onglets, juste avant le `+`, ouvre une saisie en place qui prend toute la barre. ASCII assumé : `U+2699` est un emoji, rendu sur une ou deux colonnes selon le terminal, et la barre se décalerait. Persisté dans `<données>/config` (`cle = valeur`, écrit par temporaire + `rename()`) | `d40a1ba` |
 
 **Ce que l'ancrage coûte, et c'est assumé :** `Ctrl+gauche` et `Ctrl+droite`
 déplacent par mot dans `readline`, donc dans tout shell. Le bureau les prend à
@@ -417,29 +421,33 @@ une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 ## 3 bis. La carte du code
 
-16 736 lignes dans `src/` sur 108 fichiers, 24 799 dans `tests/` sur 54. **Le rapport
-n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+19 012 lignes dans `src/` sur 120 fichiers, 27 517 dans `tests/` sur 59 (mesuré le
+19 août 2026). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
 campagnes de mutation possibles.
 
 | Module | Ce qu'il fait | À savoir avant d'y toucher |
 |---|---|---|
-| `src/common/` | Descripteurs, sockets UNIX abstraits, file de sortie, protocole, UTF-8, horloge de trame | `OutQueue` a un plafond ; son dépassement se classe *Clean* ou *Dirty* et la réaction diffère (A7) |
+| `src/common/` | Descripteurs, sockets UNIX abstraits, file de sortie, protocole, UTF-8, horloge de trame, **protection contre le tueur de mémoire** (`oom.hpp`), **chemin des données de l'utilisateur** (`paths.hpp`) | `OutQueue` a un plafond ; son dépassement se classe *Clean* ou *Dirty* et la réaction diffère (A7). `oom.hpp` : le réglage s'HÉRITE et survit à `execve` — tout endroit qui donne naissance à un processus étranger doit appeler `drop_oom_protection()` |
 | `src/render/` | `Surface` (grille de cellules), `View` (sous-rectangle clippé), `Differ` (trames ANSI), thème, largeurs Unicode | Une application ne reçoit **jamais** autre chose qu'une `View` — elle ne peut pas peindre hors de sa fenêtre |
 | `src/input/` | Machine à états du clavier et de la souris, table des accords `<leader>` | `\033` seul est ambigu : le démon arme un délai de 50 ms. Sans lui, `vim` est inutilisable |
 | `src/vt/` | Émulation VT : parseur DEC, écran, historique, SGR, modes, réponses, jeux de caractères | `Screen` est pure : ni descripteur, ni horloge. C'est ce qui la rend fuzzable |
 | `src/pty/` | Pseudo-terminal, environnement de l'enfant | `Pty::shutdown()` porte **toute** la politique de fermeture (SIGHUP, maître, SIGKILL) : le destructeur et la fermeture d'onglet l'appellent tous deux |
 | `src/wm/` | Fenêtres, pile, décorations, hit-test, ancrage, rangement | `hit_window()` est l'inverse exact de `draw_decor()` ; les deux lisent la **même** géométrie |
 | `src/shell/` | Panneau, menu, modale, aide, horloge, moniteur de fond, assistance à l'ancrage | Chaque composant calcule sa géométrie **une fois** dans `layout()`, et `draw()` comme `hit()` la relisent |
-| `src/daemon/` | Boucle `epoll`, session, hôte applicatif, démonisation, récolte | `Session::render()` compose **toute** la géométrie ; `Session::on_mouse()` route les gestes |
+| `src/daemon/` | Boucle `epoll`, session, hôte applicatif, démonisation, récolte, **journal** (`journal.hpp`), **réglages de l'utilisateur** (`config.hpp`) | `Session::render()` compose **toute** la géométrie ; `Session::on_mouse()` route les gestes. `config.hpp` est l'inverse de `shell/update_state.hpp` : ici le C++ ÉCRIT, et le fichier reste modifiable à la main |
 | `src/app/` | Le contrat `App` / `Host`, le catalogue du menu | Tout est virtuel avec un défaut utilisable : une application qui ne sait que dessiner n'écrit qu'une méthode |
 | `src/apps/` | Terminal (à onglets), Fichiers (façon Dolphin), Éditeur | Chacune ne connaît que `View`, `Host` et les événements |
 
 ### Ce qu'une application a le droit de demander (`src/app/app.hpp`)
 
 `set_title`, `request_close`, `invalidate`, `watch`/`unwatch` (un jeton opaque, jamais
-l'epoll), `watch_child` (la récolte est globale au démon), et **`open_app`** — « ouvre
+l'epoll), `watch_child` (la récolte est globale au démon), **`open_app`** — « ouvre
 ça dans sa propre fenêtre », par quoi Fichiers ouvre l'Éditeur sans rien savoir du
-bureau.
+bureau — et **`start_dir` / `configured_start_dir` / `set_start_dir`**, le dossier où
+s'ouvre un nouveau terminal : un réglage de l'utilisateur, écrit sur disque, qu'une
+application ne doit ni localiser ni relire elle-même. Le premier rend le chemin
+EFFECTIF (`~` développé, dossier de l'utilisateur à défaut), le second ce qu'il avait
+TAPÉ — c'est ce qu'on lui remontre quand il rouvre la saisie.
 
 Côté `App` : `attach`, `render`, `on_key`, `on_mouse`, `on_resize`, `on_io`,
 `on_child_exit`, `wants_cursor`, `min_size`, `can_close`, `refresh_ms` et
@@ -1091,6 +1099,11 @@ concluait que le balayage mentait. Le rapport était affirmatif, sourcé, et fau
 
 **Les sept jalons sont livrés**, et depuis le 17 août 2026 **l'installation locale et
 la mise à jour depuis le bureau** le sont aussi — quatorze tâches, plan clos, §2 ter.
+
+Les 18 et 19 août 2026 s'y ajoutent trois demandes venues de l'usage : **la molette**,
+qui n'atteignait aucune application ; **la survie du démon** au tueur de mémoire, avec
+le journal qui dit pourquoi il s'arrête ; et **le dossier de départ du terminal**, qui
+s'ouvrait à la racine. Le détail est dans le tableau du §3.
 
 Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
 en réaction à l'usage réel.
