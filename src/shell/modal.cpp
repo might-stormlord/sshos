@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "render/gauge.hpp"
 #include "render/width.hpp"
 
 namespace sshos {
@@ -68,6 +69,7 @@ void Modal::ask(std::string question, WindowId target, std::string cancel_label,
   question_ = std::move(question);
   target_ = target;
   confirm_ = false;
+  percent_ = -1;
 }
 
 void Modal::progress(std::string message) {
@@ -77,6 +79,7 @@ void Modal::progress(std::string message) {
   question_ = std::move(message);
   target_ = 0;
   confirm_ = false;
+  percent_ = -1;
 }
 
 void Modal::set_body(std::string message) {
@@ -93,6 +96,7 @@ void Modal::inform(std::string message) {
   question_ = std::move(message);
   target_ = 0;
   confirm_ = true;  // le seul bouton a le focus
+  percent_ = -1;
 }
 
 void Modal::dismiss() {
@@ -103,6 +107,7 @@ void Modal::dismiss() {
   question_.clear();
   target_ = 0;
   confirm_ = false;
+  percent_ = -1;
 }
 
 Rect Modal::rect(int cols, int rows) const {
@@ -160,7 +165,28 @@ void Modal::draw(View v, const Theme& th, Border b) const {
     v.text(rect_.x + 2, rect_.y + 1 + static_cast<int>(i),
            elide_to_cells(lines[i], rect_.w - 4, "~"), st);
   }
-  if (style_ == ModalStyle::Progress) return;  // aucun bouton : ca travaille
+  if (style_ == ModalStyle::Progress) {
+    // LA BARRE PREND LA PLACE DES BOUTONS. Une progression n'en a aucun, et
+    // se servir de leur ligne evite a la boite de changer de hauteur entre
+    // « je ne sais pas ou j'en suis » et « j'en suis a 47% » -- un cadre qui
+    // grandit d'une ligne en cours de travail clignote.
+    if (percent_ >= 0) {
+      const std::string pc = std::to_string(percent_) + "%";
+      // Deux colonnes de respiration entre la barre et le chiffre, et le
+      // chiffre calibre sur « 100% » pour que la barre ne se decale pas en
+      // passant de 9 a 10 pour cent.
+      const int chiffre = 4;
+      const int barre = rect_.w - 4 - chiffre - 2;
+      if (barre >= 4) {
+        Style g = st;
+        g.fg = th.accent;
+        v.text(rect_.x + 2, buttons_y(), gauge_bar(percent_, barre, b), g);
+        v.text(rect_.x + 2 + barre + 2 + (chiffre - static_cast<int>(pc.size())),
+               buttons_y(), pc, st);
+      }
+    }
+    return;  // aucun bouton : ca travaille
+  }
   if (style_ == ModalStyle::Info) {
     // Un seul bouton, centré : il n'y a rien à décider.
     const int w = static_cast<int>(sizeof(kAcknowledge) - 1);

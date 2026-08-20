@@ -111,12 +111,24 @@ class UpdateService {
   // script vient d'ecrire. Vide si rien ne court.
   std::string progress_line() const;
 
+  // OU EN EST LE TRAVAIL, EN POUR CENT, ou -1 quand on ne sait pas -- soit
+  // que rien ne travaille, soit que le script qui travaille soit trop
+  // ancien pour le dire. Meme garde que progress_line() : un travail
+  // annonce « en cours » dont le pid est mort n'est pas un travail en
+  // cours, et sa barre mentirait.
+  int progress_percent() const;
+
   std::string news() const;
   // « Version 1.12 -> 1.13 », ou « cce9d11 -> 3512ffe » a defaut de numeros,
   // ou vide. On n'invente jamais un numero.
   std::string version_line() const;
 
  private:
+  // « Un travail court-il ? » -- la seule definition, partagee par
+  // progress_line() et progress_percent(). Un enfant vivant compte ; un etat
+  // qui dit « en cours » avec un pid mort ne compte pas.
+  bool working() const;
+
   void reload();
   void launch(std::string_view mode, bool manual);
   void build_report();

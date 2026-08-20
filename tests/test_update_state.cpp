@@ -311,3 +311,43 @@ TEST(update_state_strips_control_bytes_from_a_note) {
   CHECK_EQ(s.notes[0], std::string("avant[2Japres"));
 }
 
+
+// --- la progression chiffree ---------------------------------------------
+//
+// Cinq libelles d'etape couvraient une a deux minutes d'attente : « Mise a
+// jour en cours : compilation... » restait affiche pendant toute la
+// compilation, sans jamais bouger. Le script sait compter -- cmake ecrit son
+// propre pourcentage, la suite de tests une ligne par cas -- donc il compte,
+// et le C++ se contente de LIRE. Il ne calcule rien, comme pour les numeros
+// de version.
+
+TEST(update_state_reads_a_progress_percentage) {
+  const UpdateState s = parse("schema=1\nstatus=applying\nprogress=47\n");
+  CHECK_EQ(s.progress, 47);
+}
+
+// Absente veut dire INCONNUE, et non zero : une installation mise a jour par
+// un script plus ancien n'en depose aucune, et une barre a zero pour cent
+// laisserait croire qu'il ne se passe rien.
+TEST(update_state_leaves_progress_unknown_when_the_file_says_nothing) {
+  const UpdateState s = parse("schema=1\nstatus=applying\n");
+  CHECK_EQ(s.progress, -1);
+}
+
+// La valeur vient d'un script et finit DESSINEE. Meme discipline que les
+// numeros de version : ce qui n'est pas un pourcentage est refuse, pas
+// rogne -- rogner inventerait un chiffre.
+TEST(update_state_refuses_a_progress_that_is_not_a_percentage) {
+  CHECK_EQ(parse("schema=1\nprogress=101\n").progress, -1);
+  CHECK_EQ(parse("schema=1\nprogress=-3\n").progress, -1);
+  CHECK_EQ(parse("schema=1\nprogress=beaucoup\n").progress, -1);
+  CHECK_EQ(parse("schema=1\nprogress=47%\n").progress, -1);
+  CHECK_EQ(parse("schema=1\nprogress=\n").progress, -1);
+}
+
+// Les deux bornes sont valides : zero pour cent est un debut legitime, cent
+// pour cent une fin legitime.
+TEST(update_state_accepts_both_ends_of_the_percentage) {
+  CHECK_EQ(parse("schema=1\nprogress=0\n").progress, 0);
+  CHECK_EQ(parse("schema=1\nprogress=100\n").progress, 100);
+}

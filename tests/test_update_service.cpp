@@ -746,3 +746,52 @@ TEST(update_service_says_nothing_more_without_notes) {
   std::remove(path.c_str());
 }
 
+
+// --- la progression chiffree ---------------------------------------------
+//
+// Le service ne CALCULE rien : cmake ecrit deja son propre pourcentage et la
+// suite de tests une ligne par cas, or ni l'un ni l'autre n'est a portee du
+// demon. Le script compte, le service lit -- exactement le partage des
+// numeros de version.
+
+TEST(update_service_reports_the_progress_the_script_wrote) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(
+      state_body("applying", "stage=compilation\nprogress=47\npid=1\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  CHECK_EQ(svc.progress_percent(), 47);
+  ::unlink(path.c_str());
+}
+
+// RIEN NE TRAVAILLE, RIEN A MESURER. Un chiffre qui survivrait a la fin du
+// travail ferait dessiner une barre sous un constat.
+TEST(update_service_reports_no_progress_when_nothing_is_running) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path =
+      write_state(state_body("up-to-date", "progress=47\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  CHECK_EQ(svc.progress_percent(), -1);
+  ::unlink(path.c_str());
+}
+
+// UN TRAVAIL INTERROMPU N'EST PAS UN TRAVAIL EN COURS. Le demon a redemarre
+// pendant l'application : l'etat dit encore « applying » avec un
+// pourcentage, mais le pid est mort. Meme regle que progress_line().
+TEST(update_service_reports_no_progress_for_an_interrupted_job) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  const std::string path = write_state(state_body(
+      "applying", "stage=compilation\nprogress=47\npid=" +
+                      std::to_string(static_cast<int>(a_dead_pid())) + "\n"));
+  UpdateService svc(plat, path, launcher.fn());
+  svc.tick();
+
+  CHECK_EQ(svc.progress_percent(), -1);
+  ::unlink(path.c_str());
+}

@@ -102,3 +102,100 @@ TEST(modal_hit_test_matches_the_buttons_it_paints) {
   CHECK(row.find("[ Confirmer ]") != std::string::npos);
   CHECK(s.text_row(r.y + 1).find("fermer la fenetre ?") != std::string::npos);
 }
+
+// --- la progression chiffree ---------------------------------------------
+//
+// Cinq libelles couvraient une a deux minutes d'attente : la boite disait
+// « compilation... » et ne bougeait plus. Une barre et un chiffre disent
+// AUSSI que ca avance, ce qu'un libelle fige ne dit pas.
+
+namespace {
+
+std::string tout_le_cadre(const Surface& s) {
+  std::string g;
+  for (int y = 0; y < 24; ++y) g += s.text_row(y) + "\n";
+  return g;
+}
+
+}  // namespace
+
+TEST(modal_draws_a_bar_and_a_figure_for_a_progress_it_can_measure) {
+  Modal m;
+  m.progress("Mise a jour en cours : compilation...");
+  m.set_progress(47);
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Unicode);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("47%") != std::string::npos);
+  CHECK(g.find("█") != std::string::npos);  // du plein
+  CHECK(g.find("░") != std::string::npos);  // du vide
+}
+
+// SANS CHIFFRE, PAS DE BARRE. Une installation mise a jour par un script
+// plus ancien n'en depose aucun, et une barre a zero laisserait croire
+// qu'il ne se passe rien. La boite reste alors exactement celle d'avant.
+TEST(modal_draws_no_bar_when_the_progress_is_unknown) {
+  Modal m;
+  m.progress("Mise a jour en cours : compilation...");
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Unicode);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("%") == std::string::npos);
+  CHECK(g.find("█") == std::string::npos);
+}
+
+// Le repli ASCII vaut ici comme pour les cadres : Modal ne sait pas si le
+// client accepte l'UTF-8, c'est la bordure qui le lui dit.
+TEST(modal_falls_back_to_ascii_for_its_bar) {
+  Modal m;
+  m.progress("Mise a jour en cours : suite de tests...");
+  m.set_progress(80);
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Ascii);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("80%") != std::string::npos);
+  CHECK(g.find("#") != std::string::npos);
+  CHECK(g.find("█") == std::string::npos);
+}
+
+// La barre n'appartient qu'a une progression : une question ou un constat
+// n'ont rien a mesurer, et un chiffre pose la ferait lire comme un travail
+// en cours.
+TEST(modal_keeps_its_bar_out_of_a_question) {
+  Modal m;
+  m.ask("Installer la mise a jour ?", 0);
+  m.set_progress(47);
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Unicode);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("47%") == std::string::npos);
+}
+
+// Une boite DEJA ouverte suit le travail sans clignoter : c'est la meme
+// boite, son chiffre change. Sans quoi il faudrait la fermer et la rouvrir.
+TEST(modal_lets_a_running_progress_move_its_figure) {
+  Modal m;
+  m.progress("Mise a jour en cours : compilation...");
+  m.set_progress(10);
+  m.set_progress(63);
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Unicode);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("63%") != std::string::npos);
+  CHECK(g.find("10%") == std::string::npos);
+}

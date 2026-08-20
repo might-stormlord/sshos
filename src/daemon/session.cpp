@@ -195,6 +195,11 @@ void Session::refresh_update_modal() {
   if (modal_kind_ != ModalKind::ApplyRunning || !modal_.is_open()) return;
   const std::string p = update_.progress_line();
   if (!p.empty()) modal_.set_body(p);
+  // ET LE CHIFFRE AVEC LE LIBELLE. Cinq etapes couvraient une a deux minutes
+  // d'attente : « compilation... » restait affiche sans bouger, et rien ne
+  // distinguait un travail qui avance d'un travail bloque. Pose a CHAQUE
+  // reveil, comme le corps -- une barre figee serait pire que pas de barre.
+  modal_.set_progress(update_.progress_percent());
 }
 
 void Session::tick_update() {

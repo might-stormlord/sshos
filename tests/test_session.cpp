@@ -4803,3 +4803,46 @@ TEST(session_does_not_send_the_wheel_to_a_stale_grab) {
   Session::set_seed_factory_for_tests(&make_plain_double);
 }
 
+
+// LA BARRE ARRIVE JUSQU'A L'ECRAN, par la VRAIE porte. Un test qui poserait
+// le chiffre sur le Modal lui-meme ne prouverait rien sur le fait que
+// quelqu'un le lui donne -- c'est exactement le defaut n 10 du dossier de
+// reprise, ou six cas appelaient Files::on_mouse en direct pendant que le
+// bureau ne lui envoyait jamais rien. Ici on part de l'etat que le script
+// ecrit, et on regarde la surface composee.
+TEST(session_draws_the_update_progress_bar_the_script_reports) {
+  UpdateFixture fix("available", "#!/bin/sh\nsleep 5\n");
+  FakePlatform plat;
+  Session sess(plat, g_fds, 80, 24);
+  Surface s(80, 24);
+  sess.render(s);
+
+  const sshos::Pos badge = find_badge(sess, 80, 24);
+  REQUIRE(badge.x >= 0);
+  click_at(sess, badge.x, badge.y);
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Tab, 0, 0}});
+  sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Enter, 0, 0}});
+
+  fix.write_state("applying", "stage=compilation\nprogress=47\npid=" +
+                                  std::to_string(::getpid()) + "\n");
+  sess.mark_refresh_due();
+  Surface avance(80, 24);
+  sess.render(avance);
+  CHECK(surface_contains(avance, "compilation"));
+  CHECK(surface_contains(avance, "47%"));
+
+  // ET LA BARRE SUIT LE CHIFFRE. Une barre figee pendant que le pourcentage
+  // monte serait pire que pas de barre du tout.
+  fix.write_state("applying", "stage=suite de tests\nprogress=88\npid=" +
+                                  std::to_string(::getpid()) + "\n");
+  sess.mark_refresh_due();
+  Surface plus_loin(80, 24);
+  sess.render(plus_loin);
+  CHECK(surface_contains(plus_loin, "88%"));
+  CHECK(!surface_contains(plus_loin, "47%"));
+
+  for (int i = 0; i < 200; ++i) {
+    if (sshos::reap_children(sess) > 0) break;
+    ::usleep(50 * 1000);
+  }
+}

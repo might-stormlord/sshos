@@ -64,6 +64,21 @@ COMMITS_AHEAD=$(get commits_ahead)
 # « en cours » pendant deux minutes sans rien preciser laisse croire a un
 # blocage.
 STAGE=""
+# OU EN EST LE TRAVAIL, EN POUR CENT, ou vide quand on ne sait pas. Cinq
+# libelles d'etape couvraient une a deux minutes d'attente : « compilation »
+# restait affiche sans bouger, et rien ne distinguait un travail qui avance
+# d'un travail bloque. On ne l'invente pas : cmake ecrit deja son propre
+# pourcentage, et la suite de tests une ligne par cas. Le C++ ne calcule
+# rien, il lit -- et refuse tout ce qui n'est pas un entier de 0 a 100.
+PROGRESS=""
+# Les paliers du travail entier. Ils sont un CHOIX, pas une mesure fine : la
+# compilation et la suite pesent ensemble la quasi-totalite du temps (une a
+# deux minutes contre quelques secondes pour tout le reste), et c'est la
+# seule chose que ce decoupage doit respecter. Le chiffre ne recule jamais.
+P_SOURCES=5
+P_BUILD=10
+P_TESTS=75
+P_INSTALL=95
 SOURCE=$(get source);            [ -n "$SOURCE" ] || SOURCE=git
 INSTALLED=$(get installed_commit); [ -n "$INSTALLED" ] || INSTALLED=unknown
 PREVIOUS=$(get previous_commit)
@@ -145,11 +160,16 @@ build_notes() { # build_notes <installe> <distant>
   fi
 }
 
+# WSUF distingue le fichier temporaire du surveillant de progression de
+# celui du script principal. Les deux ecrivent le meme etat pendant une
+# compilation ; s'ils partageaient « .tmp », l'un renommerait le fichier a
+# moitie ecrit par l'autre.
+WSUF="tmp"
 write_state() { # write_state <status> <message> [pid]
   _st="$1"; _msg=$(sanitize "${2:-}"); _pid="${3:-}"
   # Le fichier temporaire est dans le MEME repertoire, donc le meme systeme
   # de fichiers : c'est ce qui rend le rename atomique.
-  cat > "$STATE.tmp" <<FIN
+  cat > "$STATE.$WSUF" <<FIN
 schema=1
 prefix=$PREFIX
 source=$SOURCE
@@ -160,6 +180,7 @@ installed_version=$INSTALLED_VERSION
 remote_version=$REMOTE_VERSION
 commits_ahead=$COMMITS_AHEAD
 stage=$STAGE
+progress=$PROGRESS
 checked_at=$CHECKED
 status=$_st
 pid=$_pid
@@ -169,9 +190,9 @@ FIN
   # une mise a jour qui n'est plus a venir -- deja posee, ou echouee -- et un
   # fichier qui les garderait ferait mentir la prochaine lecture.
   if [ "$_st" = available ] && [ -n "$NOTES" ]; then
-    printf '%s' "$NOTES" >> "$STATE.tmp"
+    printf '%s' "$NOTES" >> "$STATE.$WSUF"
   fi
-  mv -f "$STATE.tmp" "$STATE"
+  mv -f "$STATE.$WSUF" "$STATE"
 }
 
 fail() { # fail <status> <message>
@@ -327,7 +348,7 @@ do_apply() {
     write_state updates-disabled "installation locale, pas de source distante"
     return 0
   fi
-  STAGE="preparation"
+  STAGE="preparation"; PROGRESS=0
   write_state applying "" "$$"
 
   _tmp=$(mktemp -d)
@@ -338,7 +359,8 @@ do_apply() {
   case "$SOURCE" in
     git)
       have git || { rm -rf "$_tmp"; fail apply-failed "git a disparu"; }
-      STAGE="recuperation des sources"; write_state applying "" "$$"
+      STAGE="recuperation des sources"; PROGRESS=$P_SOURCES
+      write_state applying "" "$$"
       ensure_git_tree || { rm -rf "$_tmp"; fail apply-failed "clone ou fetch impossible"; }
       git -C "$SRC" checkout --quiet -B main origin/main \
         || { rm -rf "$_tmp"; fail apply-failed "checkout impossible"; }
@@ -387,7 +409,7 @@ do_apply() {
 
   # Les references suivent le binaire : sans elles, un sshos_tests publie
   # chercherait le repertoire de la machine qui l'a compile.
-  STAGE="installation"; write_state applying "" "$$"
+  STAGE="installation"; PROGRESS=$P_INSTALL; write_state applying "" "$$"
   rm -rf "$GOLDEN" && cp -r "$_refs" "$GOLDEN"
 
   place "$_bin"
@@ -418,27 +440,110 @@ do_apply() {
   # RESTART-PENDING, PAS UP-TO-DATE. Le binaire pose n'est pas celui qui
   # tourne : annoncer « a jour » eteindrait la pastille alors que
   # l'utilisateur continue sur l'ancienne version.
+  STAGE=""; PROGRESS=""
   write_state restart-pending "redemarrez pour terminer"
+}
+
+# --- la progression, telle que les outils la disent deja -------------------
+#
+# On n'invente aucun chiffre. `cmake --build` ecrit « [ 57%] » sur chacune de
+# ses lignes, et le lanceur de tests une ligne « - <nom> » par cas -- le
+# total des cas se compte sur l'arbre qu'on vient de sortir. Le surveillant
+# ne fait que lire ces deux traces et les replier sur l'echelle du travail
+# entier.
+#
+# IL TOURNE EN FOND, et c'est la seule facon de le faire sans changer le
+# code de retour de ce qu'il surveille : mettre cmake dans un tube ferait
+# repondre le tube a sa place, et `pipefail` n'existe pas en sh POSIX.
+pourcentage_compilation() { # <journal>
+  sed -n 's/^\[ *\([0-9]\{1,3\}\)%\].*/\1/p' "$1" 2>/dev/null | tail -1
+}
+
+pourcentage_tests() { # <journal> <total>
+  [ "${2:-0}" -gt 0 ] || return 0
+  _faits=$(grep -c '^- ' "$1" 2>/dev/null) || _faits=0
+  echo $((_faits * 100 / $2))
+}
+
+# Combien de cas la suite de CET arbre declare. Le compte sert a DESSINER une
+# barre, jamais a juger la suite : le critere reste le code de retour, parce
+# qu'un total perime a chaque commit qui ajoute un cas.
+total_des_cas() { # <racine>
+  # `-h` PLUTOT QU'UN DECOUPAGE SUR « : ». `grep -c` ne prefixe le nom du
+  # fichier que lorsqu'il en recoit PLUSIEURS : sur un seul, il imprime le
+  # compte nu, et un `awk -F: '{s+=$2}'` additionne alors du vide. Le total
+  # tombe silencieusement a zero -- donc aucune barre -- et rien ne le dit.
+  # Avec `-h`, chaque fichier rend son compte nu, qu'il y en ait un ou
+  # soixante.
+  grep -ch '^TEST(' "$1"/tests/test_*.cpp 2>/dev/null \
+    | awk '{s+=$1} END {print s+0}'
+}
+
+# Relit le journal toutes les demi-secondes et repose l'etat. Le demon le
+# relit une fois par seconde : plus fin ne se verrait pas.
+surveiller() { # surveiller <mode> <journal> <plancher> <plafond> [total]
+  WSUF="tmpw"
+  _mode="$1"; _log="$2"; _bas="$3"; _haut="$4"; _tot="${5:-0}"
+  while :; do
+    sleep 0.5
+    if [ "$_mode" = compilation ]; then
+      _p=$(pourcentage_compilation "$_log")
+    else
+      _p=$(pourcentage_tests "$_log" "$_tot")
+    fi
+    [ -n "$_p" ] || continue
+    PROGRESS=$((_bas + (_haut - _bas) * _p / 100))
+    write_state applying "" "$SUPERVISE"
+  done
+}
+
+# Le pid du script, tel qu'il doit apparaitre dans l'etat : c'est LUI que le
+# demon interroge pour savoir si le travail court encore, jamais celui du
+# surveillant, qui est un detail d'implementation.
+SUPERVISE=$$
+
+demarrer_surveillance() { # <mode> <journal> <plancher> <plafond> [total]
+  surveiller "$@" &
+  SURVEILLANT=$!
+}
+
+# `set -eu` est actif : un `kill` sur un processus deja parti et un `wait`
+# sur un travail tue rendent tous deux un code non nul, et feraient avorter
+# la mise a jour au moment precis ou elle vient de reussir. Les deux sont
+# donc neutralises -- l'arret du surveillant ne peut pas etre un echec.
+arreter_surveillance() {
+  [ -n "${SURVEILLANT:-}" ] || return 0
+  kill "$SURVEILLANT" 2>/dev/null || :
+  wait "$SURVEILLANT" 2>/dev/null || :
+  SURVEILLANT=""
 }
 
 build_and_test_tree() { # build_and_test_tree <racine> <tmp>
   have cmake || { fail apply-failed "cmake absent"; return 1; }
   have c++ || { fail apply-failed "compilateur absent"; return 1; }
-  STAGE="compilation"; write_state applying "" "$$"
+  STAGE="compilation"; PROGRESS=$P_BUILD; write_state applying "" "$$"
   if ! timeout "$APPLY_TIMEOUT" cmake -S "$1" -B "$1/build-release" \
         -DCMAKE_BUILD_TYPE=Release >"$STATE_DIR/build.log" 2>&1; then
     fail apply-failed "configuration cmake echouee"; return 1
   fi
+  demarrer_surveillance compilation "$STATE_DIR/build.log" "$P_BUILD" "$P_TESTS"
   if ! timeout "$APPLY_TIMEOUT" cmake --build "$1/build-release" \
         -j"$(nproc)" >>"$STATE_DIR/build.log" 2>&1; then
+    arreter_surveillance
     fail apply-failed "compilation echouee"; return 1
   fi
+  arreter_surveillance
   # LE CRITERE EST LE CODE DE RETOUR, jamais un compte de cas : le total
   # perime a chaque commit qui ajoute un test.
-  STAGE="suite de tests"; write_state applying "" "$$"
+  STAGE="suite de tests"; PROGRESS=$P_TESTS; write_state applying "" "$$"
+  : > "$STATE_DIR/tests.log"
+  demarrer_surveillance tests "$STATE_DIR/tests.log" "$P_TESTS" "$P_INSTALL" \
+    "$(total_des_cas "$1")"
   if ! run_suite "$1/build-release/sshos_tests" "$1/tests/golden"; then
+    arreter_surveillance
     fail apply-failed "la suite de tests echoue, rien n'est installe"; return 1
   fi
+  arreter_surveillance
 }
 
 # --- --rollback -----------------------------------------------------------

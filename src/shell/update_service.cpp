@@ -263,16 +263,27 @@ std::string short_commit(const std::string& c) {
 
 }  // namespace
 
+bool UpdateService::working() const {
+  return child_ > 0 ||
+         (!stale_worker_ && (state_.status == UpdateStatus::Checking ||
+                             state_.status == UpdateStatus::Applying));
+}
+
 std::string UpdateService::progress_line() const {
-  const bool working =
-      child_ > 0 || (!stale_worker_ && (state_.status == UpdateStatus::Checking ||
-                                        state_.status == UpdateStatus::Applying));
-  if (!working) return {};
+  if (!working()) return {};
   std::string s = state_.status == UpdateStatus::Checking
                       ? "Verification en cours"
                       : "Mise a jour en cours";
   if (!state_.stage.empty()) s += " : " + state_.stage;
   return s + "...";
+}
+
+int UpdateService::progress_percent() const {
+  // LA MEME DEFINITION DE « ca travaille » QUE progress_line(), et elle est
+  // partagee pour cette raison : deux copies de cette condition finiraient
+  // par diverger, et l'on verrait une barre sous une boite qui ne dit plus
+  // rien -- ou l'inverse.
+  return working() ? state_.progress : -1;
 }
 
 std::string UpdateService::news() const {

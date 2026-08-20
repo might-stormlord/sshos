@@ -53,6 +53,17 @@ struct UpdateState {
   // rien ne court. Une fenetre qui dit « en cours » pendant deux minutes
   // sans rien preciser laisse croire a un blocage.
   std::string stage;
+  // OU EN EST LE TRAVAIL, EN POUR CENT. -1 quand on ne sait pas -- et c'est
+  // le cas normal, pas un cas de bord : une installation mise a jour par un
+  // script plus ancien n'en depose aucune, et une barre a zero laisserait
+  // croire qu'il ne se passe rien.
+  //
+  // Le C++ ne la CALCULE pas, comme il ne calcule pas les numeros de
+  // version : cmake ecrit deja son propre pourcentage et la suite de tests
+  // une ligne par cas, or ni l'un ni l'autre n'est a portee du demon. Le
+  // script compte, le demon lit, et refuse tout ce qui n'est pas un
+  // pourcentage.
+  int progress = -1;
   std::string message;
 
   // CE QUI A CHANGE, et non seulement combien. « 5 nouveautes » ne dit pas

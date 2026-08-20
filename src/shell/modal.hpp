@@ -40,6 +40,13 @@ class Modal {
   // etapes par set_body().
   void progress(std::string message);
 
+  // OU EN EST LE TRAVAIL, EN POUR CENT. -1 -- le defaut -- veut dire qu'on
+  // ne sait pas, et alors AUCUNE barre n'est dessinee : une barre a zero
+  // laisserait croire qu'il ne se passe rien, ce qui est pire que de ne
+  // rien montrer. Sans effet hors d'une progression : une question n'a rien
+  // a mesurer, et un chiffre pose la se lirait comme un travail en cours.
+  void set_progress(int percent) { percent_ = percent; }
+
   // Remplace le corps d'une boite DEJA ouverte. C'est ce qui permet a une
   // fenetre de progression de rester la pendant qu'elle raconte ce qui se
   // passe -- sans elle il faudrait la fermer et la rouvrir, ce qui la ferait
@@ -87,6 +94,7 @@ class Modal {
   std::string question_;
   WindowId target_ = 0;
   bool confirm_ = false;
+  int percent_ = -1;
   Rect rect_{};
 };
 

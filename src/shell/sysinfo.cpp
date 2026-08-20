@@ -1,5 +1,7 @@
 #include "shell/sysinfo.hpp"
 
+#include "render/gauge.hpp"
+
 #include <dirent.h>
 #include <unistd.h>
 
@@ -43,15 +45,6 @@ Color gauge_color(int percent) {
   return Color::indexed(2);                      // vert
 }
 
-std::string bar(int percent, int width, Border b) {
-  const std::string full = b == Border::Unicode ? "\u2588" : "#";
-  const std::string empty = b == Border::Unicode ? "\u2591" : "-";
-  std::string out;
-  const int filled = width * std::clamp(percent, 0, 100) / 100;
-  for (int i = 0; i < width; ++i) out += (i < filled) ? full : empty;
-  return out;
-}
-
 // Un cadre titre. Le titre s'incruste DANS le trait du haut : une ligne de
 // titre separee couterait une ligne sur quatre dans une boite de quatre.
 void frame(View v, const Rect& r, std::string_view title, const Style& st,
@@ -92,7 +85,7 @@ void counter_box(View v, const Rect& r, std::string_view title,
   v.text(r.x + 2, r.y + 1, value, body);
   Style g = body;
   g.fg = gauge_color(percent);
-  v.text(r.x + 2, r.y + 2, bar(percent, r.w - 4, b), g);
+  v.text(r.x + 2, r.y + 2, gauge_bar(percent, r.w - 4, b), g);
 }
 
 // Un débit lisible. Les octets bruts sont illisibles au-delà du millier, et

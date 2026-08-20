@@ -198,6 +198,14 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
       // Meme discipline que `message` : il est dessine, donc borne.
       parsed.stage = std::string(
           value.substr(0, std::min(value.size(), std::size_t{40})));
+    } else if (key == "progress") {
+      std::int64_t v = 0;
+      // Hors de [0, 100] : refuse, jamais ramene dans les bornes. Rogner
+      // 137 en 100 afficherait « termine » sur un travail qui ne l'est pas,
+      // et la valeur vient d'un script qu'on peut editer a la main.
+      if (read_int64(value, v) && v >= 0 && v <= 100) {
+        parsed.progress = static_cast<int>(v);
+      }
     } else if (key == "message") {
       parsed.message = std::string(value.substr(
           0, std::min(value.size(), kMaxStateMessageBytes)));
