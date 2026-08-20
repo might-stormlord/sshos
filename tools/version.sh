@@ -28,6 +28,18 @@ major=$(git -C "$REPO" show "$REF:VERSION" 2>/dev/null | tr -dc '0-9') || major=
 # Le dernier commit, EN REMONTANT DEPUIS REF, qui a touche VERSION. En
 # limitant a l'ancetre : sinon un commit plus recent sur une autre branche
 # fausserait le compte.
+# UN CLONE SUPERFICIEL NE PEUT PAS COMPTER, ET DOIT LE DIRE. La tete greffee
+# n'a pas de parent : git la prend pour une racine, `log -1 -- VERSION` la
+# rend elle-meme, et le mineur tomberait a zero sans que rien ne le signale --
+# « version 1.0 » pour toujours. Mieux vaut ne rien rendre : l'appelant verra
+# une version vide et se taira, plutot que d'annoncer un chiffre faux. Ce
+# script est copie sur la machine de chaque utilisateur ; il ne peut pas
+# dependre de la prudence de son appelant.
+if [ "$(git -C "$REPO" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  echo "version.sh: depot superficiel, le mineur n'est pas calculable" >&2
+  exit 1
+fi
+
 base=$(git -C "$REPO" log --format=%H -1 "$REF" -- VERSION 2>/dev/null || true)
 
 if [ -n "$base" ]; then

@@ -15,7 +15,16 @@ jobs:
   publier:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # `fetch-depth: 0` EST OBLIGATOIRE, ce n'est pas une precaution.
+      # `tools/version.sh` compte les commits depuis la derniere modification
+      # de VERSION ; dans un clone superficiel, le commit de tete est greffe
+      # sans parent, `git log -1 -- VERSION` rend la tete elle-meme, et le
+      # mineur tombe a zero. Mesure : la meme commande rend « 1.29 » sur
+      # l'arbre complet et « 1.0 » sur un `clone --depth 1`. Toutes les
+      # releases publiees jusqu'ici s'appelaient donc « version 1.0 ».
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # LE CONTENEUR EST EPINGLE A ubuntu:26.04, et la compilation seule y
       # tourne. Deux raisons de ne pas faire du job entier un job de
