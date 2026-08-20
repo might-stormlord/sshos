@@ -7,12 +7,19 @@
 > **Dernière mise à jour :** 20 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1300 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
-> **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août).
-> Arbre de travail propre.
-> **264 commits** sur `m1-noyau` (`git rev-list --count m1-noyau` — ce chiffre
-> périme à chaque commit, le recompter plutôt que le croire), 124 fichiers
-> dans `src/`.
+> **1303 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août,
+> elle portait alors sur 1146 cas). Arbre de travail propre.
+> **272 commits** sur `m1-noyau`, 124 fichiers dans `src/`, version **1.36**.
+> ⚠️ **Ces quatre nombres périment à chaque commit. Les recompter, jamais les
+> citer** — c'est la seule discipline qui tienne, et ce dossier a déjà menti trois
+> fois sur des totaux :
+> ```bash
+> git rev-list --count m1-noyau                              # commits
+> grep -ch '^TEST(' tests/*.cpp | awk '{s+=$1} END {print s}' # cas declares
+> git ls-files 'src/*' | wc -l                               # fichiers
+> sh tools/version.sh . HEAD                                 # version
+> ```
 > **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
@@ -25,14 +32,14 @@
 > réécriture d'historique qu'elle a entraînée : à lire avant toute manipulation de
 > git* · **§2 ter** ⚠️ *l'installation locale et la mise à jour depuis le bureau — à
 > lire avant de lancer un démon ou de toucher aux chemins* ·
-> **§2 quater** 🔴 *la mise à jour du 20 août : pousser `main` d'abord, et ni le
-> correctif du redémarrage ni la barre de progression ne servent à la mise à
-> jour qui les installe — à lire AVANT de cliquer « Mettre a jour »* ·
+> **§2 quater** *la mise à jour du 20 août, faite — et la règle permanente qu'elle
+> laisse : une mise à jour ne bénéficie JAMAIS du correctif qu'elle installe* ·
 > **§3** où l'on en est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
 > jalon, les 124 de `src/` · **§8 bis** le rythme de travail et la campagne
-> de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
-> **§9 bis** le défaut qui revient **seize** fois dans ce projet, et son balayage ·
+> de mutation · **§8 ter** les trois outils (`tools/sonde.py`, `tools/mutation.py`,
+> `tools/balayage.py`) ·
+> **§9 bis** le défaut qui revient **vingt-quatre** fois dans ce projet, et son balayage ·
 > **§9 ter** ce qu'un audit adversarial a trouvé — et ce qu'il a manqué ·
 > **§10** le carnet de ce qui reste à faire.
 > Le reste (§5 à §7, §8, §9) se lit à la demande.
@@ -48,6 +55,14 @@
 > un total de tests périmé au §2 et au §5, la rétention mémoire par client, et surtout
 > **le script de balayage du §9 bis, qui était incapable de trouver ce qu'on lui
 > attribuait** (la démonstration est dans le §9 bis).
+>
+> ✅ **Passe du 20 août 2026 au soir.** Les cinq fils laissés en l'air le matin sont
+> soldés, et les vérifier a sorti **trois défauts que le carnet ne connaissait pas** :
+> un cadre de modale qui ne se dimensionnait que pour ses boutons par défaut — donc un
+> bouton peint sur le bureau et incliquable —, une CI qui nommait « version 1.0 »
+> **toutes** les releases publiées, et un verrou de mise à jour qui pouvait rester pris
+> pour toujours. Deux des cinq fils étaient aussi plus larges que leur description :
+> **quatre** sondes tuaient le bureau vivant, pas deux. Le détail est au §10.
 
 ---
 
@@ -117,12 +132,12 @@ cmake --build build-debug -j"$(nproc)"
 ```
 
 ```bash
-./build-release/sshos_tests            # 36,4 s (mesure du 20 août)
-./build-debug/sshos_tests              # 62,5 s (ASan + UBSan ; 47,3 s le 15 août)
+./build-release/sshos_tests            # 36,4 s (mesure du 20 août au soir)
+./build-debug/sshos_tests              # 65,0 s (ASan + UBSan ; 47,3 s le 15 août)
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1300 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1303 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
@@ -132,17 +147,19 @@ Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 > fois** — « 189 cas » puis « 1120 cas », chaque fois assez longtemps pour qu'un
 > contexte neuf puisse croire avoir tout cassé. Le compter plutôt que le croire :
 > `grep -ch '^TEST(' tests/*.cpp | awk '{s+=$1} END {print s}'` doit rendre le
-> même nombre que la ligne de bilan de `sshos_tests`.
+> même nombre que la ligne de bilan de `sshos_tests`. Au 20 août au soir : **1303**.
 >
 > ⚠️ **`-h`, et pas un découpage sur `:`.** La version qu'a portée ce dossier
 > jusqu'au 20 août 2026 faisait `grep -c ... | awk -F: '{s+=$2}'`. Or `grep -c`
 > ne préfixe le nom du fichier **que lorsqu'il en reçoit plusieurs** : sur un
 > seul, il imprime le compte nu, `$2` est vide, et le total tombe
-> silencieusement à **zéro**. Ça ne se voyait pas ici — il y a 60 fichiers de
-> test — mais la même ligne, recopiée dans `tools/update.sh` pour dessiner une
-> barre de progression, a rendu 0 et effacé la barre sans rien dire. Deuxième
-> outil de vérification de ce dossier pris en défaut, après le balayage du
-> §9 bis.
+> silencieusement à **zéro**. Ça ne se voyait pas ici — `tests/` porte 57
+> fichiers `test_*.cpp` — mais la même ligne, recopiée dans `tools/update.sh` pour
+> dessiner une barre de progression, a rendu 0 et effacé la barre sans rien dire.
+> Deuxième outil de vérification de ce dossier pris en défaut, après le balayage
+> du §9 bis — qui l'a d'ailleurs été **une seconde fois** le 20 août, pour une
+> raison toute différente (§9 bis). **Trois outils de vérification faux sur
+> trois : c'est le motif, pas l'accident.**
 
 ### Le geste de vérification à la main
 
@@ -314,10 +331,28 @@ sh tools/install.sh --yes --source git # sans rien demander
 | `python3 tools/verif_progression.py` | la barre de progression **avance** pendant un vrai `--apply` : le fichier d'état est échantillonné pendant le travail, et la suite vérifie qu'elle bouge, ne recule pas, et ne déborde pas de [0, 100] |
 | `python3 tools/verif_repos.py` | le démon **détaché** ne doit consommer aucun CPU |
 | `python3 tools/verif_sortie.py` | « Fermer la session » tue toujours le démon — chemin qu'aucun test unitaire ne couvre |
+| `python3 tools/balayage.py --strict` | les fonctions déclarées sans appelant de production (§9 bis) |
 
 `SSHOS_PREFIX`, `SSHOS_STATE_DIR` et `SSHOS_REPO_URL` surchargent les chemins et l'URL :
 c'est ce qui permet à la sonde de ne pas écraser l'installation réelle. **`SSHOS_BOOT_ID`
 n'isole QUE le nom du socket**, jamais les chemins — l'erreur a été commise une fois.
+
+> 🔴 **AVANT DE LANCER UNE SONDE, savoir laquelle peut tuer votre bureau.** Le
+> bureau installé porte `--daemon` dans sa ligne de commande et votre uid : toute
+> sonde qui énumère les démons par ce motif le trouve, le tue, et emporte avec lui
+> **la session de travail qui tourne dedans**. Quatre d'entre elles le faisaient
+> jusqu'au 20 août au soir, dont `tools/sonde.py` elle-même (§10).
+>
+> Depuis, la marque est `SSHOS_BOOT_ID`, posée par `spawn()` et relue dans
+> `/proc/PID/environ`, et `verif_isolation.py` **refuse** de tourner si l'instance
+> qu'il vise est déjà vivante. Le geste de vérification, à faire pour toute sonde
+> neuve ou modifiée :
+>
+> ```bash
+> ~/.local/libexec/sshos --status          # relever le pid du bureau
+> python3 -u tools/<la sonde>.py
+> ~/.local/libexec/sshos --status          # MEME pid, sinon la sonde tue
+> ```
 
 ### La CI
 
@@ -342,87 +377,81 @@ telle dans la spec §5.0.
 
 ---
 
-## 2 quater. ⚠️ La mise à jour du 20 août 2026 — ce qu'il faut en attendre
+## 2 quater. La mise à jour du 20 août 2026 — faite, et la règle qu'elle laisse
 
-> **À lire AVANT de cliquer « Mettre a jour ».** Un lot de commits est prêt sur
-> `m1-noyau` — `git rev-list --count origin/main..m1-noyau` en donnait **8** le
-> 20 août, et ce chiffre bouge à chaque commit. Ils corrigent le redémarrage et
-> ajoutent la progression chiffrée. Mais **cette mise à jour-ci ne bénéficie d'aucune des deux**, et
-> ce n'est pas un défaut : c'est la conséquence mécanique de qui pilote quoi.
+> Cette section décrivait au futur une manœuvre qui est désormais **accomplie**.
+> Elle est conservée pour la règle permanente qu'elle a servi à établir, pour la
+> table de lecture du journal, et pour le chemin de réinstallation locale — trois
+> choses qui ne se trouvent nulle part ailleurs dans ce dossier.
 
-### Il faut pousser d'abord, sinon rien ne se passe
+**Ce qui s'est passé.** `main` a été poussée, la mise à jour appliquée, et le
+redémarrage redouté est passé sans incident : le journal porte
+`arret pour terminer une mise a jour` puis `demarrage pid=1603147` à la **même
+seconde** (2026-08-20 04:22:57). L'installation tourne depuis sur le commit
+qu'elle annonce — `installed_commit` = `remote_commit`, `status=up-to-date`.
 
-`--apply` tire de **GitHub**, pas du disque. Au 20 août, `main` et
-`origin/main` sont **en arrière** de `m1-noyau` : sans pousser, `--check`
-répond « vous êtes à jour » et le bouton ne propose rien. Le vérifier
-plutôt que le supposer :
+### La règle permanente : une mise à jour ne bénéficie jamais du correctif qu'elle installe
 
-```bash
-git rev-list --count origin/main..m1-noyau   # 0 = rien à pousser
-```
+Ce n'est pas une circonstance, c'est mécanique, et ça se reproduira à chaque fois
+qu'un correctif touchera le parcours de mise à jour lui-même :
 
-```bash
-cd /home/storm/dev/ssh_os_2.0
-git branch -f main m1-noyau && git push origin main
-```
-
-⚠️ `git push origin main`, **jamais `--all` ni `--mirror`** : 23 branches
-locales portent encore l'ancienne identité (§2 bis).
-
-### Les deux nouveautés ne servent qu'à partir de la mise à jour SUIVANTE
-
-| Ce qui est corrigé | Pourquoi cette fois-ci n'en profite pas |
+| Ce qui est corrigé | Pourquoi la mise à jour qui l'installe n'en profite pas |
 |---|---|
-| **Le redémarrage** (budget 1 s → 30 s) | Le redémarrage est piloté par le **client déjà lancé**, donc l'ancien binaire, avec son budget d'une seconde. Le binaire neuf est posé, mais il ne tourne pas encore — c'est tout le problème qu'on vient de corriger. |
-| **La barre de progression** | `--apply` remplace `sshos-update` à l'étape **« installation »** (`tools/update.sh`, `cp "$SRC/tools/update.sh" "$UPDATER"`), c'est-à-dire **après** avoir compilé et passé la suite. Le script qui travaille est donc l'**ancien**, et il n'écrit aucun `progress=`. Pas de barre — la fenêtre dira « compilation... » comme avant. |
+| Tout ce que fait **le client** (le budget de redémarrage, par exemple) | Le redémarrage est piloté par le client **déjà lancé**, donc l'ancien binaire. Le neuf est posé, mais il ne tourne pas encore. |
+| Tout ce que fait **le script** (la barre de progression, par exemple) | `--apply` remplace `sshos-update` à l'étape « installation », c'est-à-dire **après** avoir compilé et passé la suite. Le script qui travaille est donc l'ancien. |
 
-**Ce n'est pas rattrapable par le chemin de la mise à jour**, et ce n'est pas
-grave : la deuxième mise à jour a les deux.
+**Le corollaire à retenir :** pour éprouver un correctif du parcours de mise à
+jour, il faut la mise à jour **suivante**, ou le chemin d'installation locale
+ci-dessous. Un essai fait sur celle qui l'installe ne prouve rien.
 
-### Si vous voulez les deux TOUT DE SUITE : réinstaller depuis l'arbre local
+### Le raccourci : réinstaller depuis l'arbre local
 
-Le chemin d'installation, lui, pose le binaire **et** les scripts d'un coup —
-il n'a pas à s'auto-remplacer en cours de route.
+Le chemin d'installation pose le binaire **et** les scripts d'un coup — il n'a pas
+à s'auto-remplacer en cours de route.
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
-cmake --build build-release -j"$(nproc)" && ./build-release/sshos_tests   # 1300 cas
+cmake --build build-release -j"$(nproc)" && ./build-release/sshos_tests
 sh tools/install.sh --yes --source local --local-tree .
 ```
 
-Après quoi le client, le démon, `sshos-update` et `sshos-version` sont tous
-neufs, et la mise à jour suivante montrera sa barre.
-
 > 🔴 **L'installeur arrête le bureau en cours** — après l'avoir dit, et avec
-> « non » par défaut. **Toute session de travail qui tourne DANS le bureau
-> meurt avec lui**, y compris une session d'assistant. À faire depuis une
-> console qui ne vit pas dans `sshos`, ou en acceptant de tout rouvrir.
+> « non » par défaut. **Toute session de travail qui tourne DANS le bureau meurt
+> avec lui**, y compris une session d'assistant. À faire depuis une console qui ne
+> vit pas dans `sshos`, ou en acceptant de tout rouvrir.
 >
 > ⚠️ `--source local` **n'installe pas ce que GitHub contient**, mais ce que
-> l'arbre contient. Pousser reste nécessaire pour que la vérification
-> suivante ne redescende pas sur une version antérieure.
+> l'arbre contient. Pousser reste nécessaire pour que la vérification suivante ne
+> redescende pas sur une version antérieure.
 
-### Ce qui peut donc encore arriver cette fois, et quoi faire
+### Avant de cliquer « Mettre a jour » : pousser
 
-Si le redémarrage retombe dans le trou d'une seconde, vous verrez :
+`--apply` tire de **GitHub**, pas du disque. Le vérifier plutôt que le supposer :
+
+```bash
+git rev-list --count origin/main..m1-noyau   # 0 = rien à pousser
+git branch -f main m1-noyau && git push origin main
+```
+
+⚠️ `git push origin main`, **jamais `--all` ni `--mirror`** : 23 branches locales
+portent encore l'ancienne identité (§2 bis).
+
+### Si un redémarrage se perd quand même
 
 ```
 sshos: mise a jour installee, redemarrage...
 sshos: le demon n'a pas repondu          (ou « le redemarrage n'a pas abouti »)
 ```
 
-**Le bureau n'est pas perdu** : le démon finit par se lever, seul, quelques
-secondes plus tard. **Retaper `sshos`** s'y rattache. Vérifier au passage :
+**Le bureau n'est pas perdu** : le démon finit par se lever seul. **Retaper
+`sshos`** s'y rattache. Vérifier au passage :
 
 ```bash
 tail -5 ~/.local/share/sshos/journal.log
 grep -E 'installed_commit|installed_version|status' ~/.local/share/sshos/state
 ```
 
-### Ce que le journal sait dire, depuis le 20 août
-
-Il portait déjà `demarrage pid=…` et la raison de l'arrêt. Il porte
-désormais aussi les **démarrages refusés**, qui ne laissaient aucune trace :
+### Ce que le journal sait dire
 
 | Ligne | Ce qu'elle veut dire |
 |---|---|
@@ -433,8 +462,9 @@ désormais aussi les **démarrages refusés**, qui ne laissaient aucune trace :
 | *(une ligne `demarrage` suivie de RIEN)* | **SIGKILL** — le tueur de mémoire, typiquement. C'est la signature d'une mort brutale |
 
 **Un « arret pour terminer une mise a jour » suivi d'un trou de plusieurs
-secondes est exactement la signature du défaut du 19 août** : le démon a
-mis plus longtemps à revenir que le client n'a attendu.
+secondes est la signature du défaut du 19 août** : le démon a mis plus longtemps
+à revenir que le client n'a attendu. Le budget est passé de 1 s à 30 s ; la sonde
+qui le garde est `tools/verif_redemarrage_lent.py`.
 
 ---
 
@@ -486,7 +516,7 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | **Le parcours de mise à jour, trois culs-de-sac** | (1) **Rien n'effaçait `restart-pending`** : le script l'écrit et ne peut pas savoir quand le redémarrage a eu lieu ; après un redémarrage réussi la pastille restait allumée et cliquer redemandait de redémarrer, **indéfiniment**. Le démon ne connaît pas son propre commit — `CMakeLists` est intouchable — mais il compare l'**inode** de `/proc/self/exe` à celle du binaire posé, et cesse simplement de croire un état que la réalité a dépassé (il ne réécrit pas le fichier : le C++ ne l'écrit jamais). (2) **La fenêtre se refermait pendant le travail** — une compilation et une suite complète prennent une à deux minutes : `Modal` gagne trois styles (question, information, progression) et raconte son étape, avec un rafraîchissement branché sur les **deux** réveils, l'échéance du service disparaissant justement pendant qu'un enfant travaille. (3) **Un binaire posé défaillant piégeait le bureau** : l'entrée unique ne proposait plus que « Redémarrer pour terminer », qui relançait le même binaire — aucune sortie sans taper une commande à la main. La vérification reste joignable en seconde ligne, et seulement dans cet état. Enfin le pop-up de vérification devient une **question** (« Plus tard » / « Mettre à jour ») au lieu d'un `[ OK ]` qui laissait croire l'affaire close, « Plus tard » gardant le focus pour qu'un `Entrée` réflexe ne lance pas deux minutes de compilation | `0ce5869`, `060248f`, `8e1edc9` |
 | **La molette** | `Session::on_mouse` posait un invariant pour le glisser-déposer — « au-delà, tout est un appui » — et rejetait tout le reste **avant** la distribution aux fenêtres. Le terminal savait pourtant déjà faire défiler son historique, et Fichiers sa liste : deux fonctions complètes **sans en recevoir une seule**. La molette va désormais à la fenêtre **sous le pointeur**, sans lui donner le focus et sans prendre la souris. Même famille que le §9 bis, vue depuis le chemin d'ENTRÉE : les tests unitaires appelaient `Terminal::on_mouse` en direct, sans passer par le bureau | `2b4dfc0` |
 | **Le démon survit au tueur de mémoire, et se dit** | Une session de travail a disparu sans laisser de trace : ni `dmesg` dans le conteneur, ni image mémoire, ni journal. `run_daemon()` se pose donc à `oom_score_adj = -1000` (mesuré avant : 6,4 Mo pour un `oom_score` de 666, contre 704 pour un processus de 543 Mo). **Le réglage s'hérite et survit à `execve`** : les trois endroits qui donnent naissance à un processus étranger le rendent (`Pty`, le lanceur de mise à jour, `spawn_detached`), sans quoi un `make -j12` lancé dans une fenêtre deviendrait immortel. Et un journal — `<données>/journal.log` — dit `demarrage pid=…` puis la raison de l'arrêt. **Ce qu'il ne peut pas dire est ce qui le rend utile :** un SIGKILL n'écrit rien, donc une vie qui commence et ne se termine par aucune ligne EST la signature d'une mort brutale | `2f4232d` |
-| **Coller, et pouvoir copier** | Coller ne faisait **rien**, et n'avait jamais rien fait : `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` et oubliait le collage (§9 bis, n° 15). Le terminal l'écrit maintenant à l'invité, encadré si et seulement si l'invité a demandé le mode 2004, l'encadrement s'ouvrant au premier morceau et ne se fermant qu'au dernier. **Tout octet de contrôle est retiré** sauf tabulation et fins de ligne : un `\033]0;` collé renommerait la fenêtre, un `\033[201~` fabriqué refermerait l'encadrement et rendrait exécutable tout ce qui suit. Pendant une saisie du bureau, le collage va dans le **champ** — coller un chemin dans la roue plutôt que le retaper. **Le garde permanent est au §9 bis** | `6828642` |
+| **Coller, et pouvoir copier** | Coller ne faisait **rien**, et n'avait jamais rien fait : `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` et oubliait le collage (§9 bis, n° 16). Le terminal l'écrit maintenant à l'invité, encadré si et seulement si l'invité a demandé le mode 2004, l'encadrement s'ouvrant au premier morceau et ne se fermant qu'au dernier. **Tout octet de contrôle est retiré** sauf tabulation et fins de ligne : un `\033]0;` collé renommerait la fenêtre, un `\033[201~` fabriqué refermerait l'encadrement et rendrait exécutable tout ce qui suit. Pendant une saisie du bureau, le collage va dans le **champ** — coller un chemin dans la roue plutôt que le retaper. **Le garde permanent est au §9 bis** | `6828642` |
 | **Copier : la question reste ouverte** | Le bureau capte la souris (`?1002h`), ce qui neutralise la sélection native du terminal — on ne peut pas sélectionner pour copier ailleurs. La bascule `^A m` (« Souris : bureau ou terminal ») rend la souris au terminal, et elle avait été ajoutée au menu ; **l'utilisateur l'a refusée** : *« j'ai toujours une souris donc… »* — il ne veut pas troquer la souris contre la sélection, il veut les deux. L'entrée de menu a été retirée, **puis la bascule elle-même** : sous Konsole, `Maj`+glisser rend la sélection native **sans** couper le tracking, donc le troc qu'elle propose n'a aucune contrepartie ici — et il enferme (« je suis coincé dans le mode pas de souris »). Sont partis avec elle : `Action::ToggleMouse`, `^A m`, sa ligne d'aide, et **tout le mécanisme hors-bande** (`take_out_of_band`, `out_of_band_`, la concaténation devant la trame) dont elle était le SEUL producteur — le garder aurait fabriqué le code sans appelant du §9 bis. La spec §7.2, qui la prescrivait depuis le 10 août, porte désormais une annotation datée plutôt qu'une réécriture. Une conception complète a été explorée (sélection possédée par le bureau, presse-papiers interne, OSC 52, fenêtre « texte nu ») et **délibérément NON construite** : l'utilisateur est sous **Konsole**, dont le `Maj`+glisser rend la sélection native sans coûter la souris du bureau, et il a confirmé que « le copier collé fonctionne ». Onze fichiers pour une question qui ne se pose plus. ⚠️ **Si elle revient**, le point qui décide est que `Maj`+glisser sélectionne la trame COMPOSÉE — bordures, panneau, fenêtres voisines — parce que nos trames positionnent le curseur au lieu d'émettre des lignes ; le bureau doit alors posséder la sélection lui-même, et le créneau existe déjà, tout fait, là où `Terminal::on_mouse` jette les évènements quand l'invité ne suit pas la souris | `666de42` |
 | **Un demon lent ne coute plus le bureau** | Redemarrer apres une mise a jour rendait la main au shell : le client accordait au demon neuf **50 tentatives a 20 ms, soit une seconde pile**, alors que le journal montre un retour a **13 secondes**. Deux choses rendaient le defaut introuvable. Le geste vivait dans `src/main.cpp`, que `CMakeLists` retire de `sshos_core` — **aucun test ne pouvait l'atteindre** ; il vit desormais dans `src/client/launch.cpp`, avec une couture pour le lanceur, un budget de **30 s** et un mot a l'utilisateur passe une seconde (« le demon met du temps a demarrer, patience... »). Et le journal s'ouvrait **apres** le `bind`, si bien qu'un demon qui n'arrivait pas a demarrer sortait sans rien ecrire nulle part — `spawn_detached` redirige deja ses 0/1/2 vers `/dev/null`. Il s'ouvre avant, et une adresse deja prise laisse une ligne. ⚠️ **Le correctif ne sauve pas LA mise a jour qui l'installe** : c'est le client d'AVANT qui redemarre, avec son budget d'une seconde. Sonde : `tools/verif_redemarrage_lent.py` | `5b792e6`, `843919a` |
 | **La mise a jour dit ou elle en est** | Cinq libelles couvraient une a deux minutes : « compilation... » restait fige, et rien ne distinguait un travail qui avance d'un travail bloque. **Aucun chiffre n'est invente** : `cmake --build` ecrit deja « [ 57%] » et le lanceur de tests une ligne par cas, le total se comptant sur l'arbre sorti. Un surveillant de fond replie les deux sur l'echelle du travail entier et ecrit `progress=` dans l'etat ; le C++ **lit** et refuse tout ce qui n'est pas un entier de 0 a 100, comme pour les numeros de version. La barre prend **la place des boutons**, qu'une progression n'a pas : la boite ne change donc pas de hauteur, et le chiffre est calibre sur « 100% » pour qu'elle ne se decale pas de 9 a 10 pour cent. Sans chiffre, **aucune barre**. La jauge de `shell/sysinfo.cpp` devient `render/gauge.cpp`, partagee. Sonde : `tools/verif_progression.py` | `abd6ae4`, `40c8a1f` |
@@ -549,8 +579,9 @@ une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 ## 3 bis. La carte du code
 
-19 494 lignes dans `src/` sur 124 fichiers, 28 352 dans `tests/` sur 60 (mesuré le
-20 août 2026). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+19 583 lignes dans `src/` sur 124 fichiers, 28 963 dans `tests/` sur 78 — dont 57
+fichiers `test_*.cpp` (mesuré le 20 août 2026 au soir ; ces nombres périment, voir
+l'en-tête pour les recompter). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
 campagnes de mutation possibles.
 
 | Module | Ce qu'il fait | À savoir avant d'y toucher |
@@ -637,17 +668,18 @@ Mesures de référence **du jalon 1** : coût nominal négligeable (7,02 / 7,08 
 garde contre 7,11 / 7,18 / 7,04 s avec) ; un `SIGSEGV` injecté coûtait 38 s avant
 l'optimisation par tranches, **7 380 ms après**. Deux cas expirent volontairement.
 
-> La suite entière prend **36,4 s en Release** et **62,5 s sous ASan/UBSan**
-> (mesuré le 20 août 2026, 1300 cas). L'essentiel de ce temps est de l'attente
-> délibérée : `user+sys` ne fait que **5,0 s** des 36,4 s de mur (1,28 s
-> d'utilisateur, 3,68 s de système), donc **86 % du temps est passé à attendre des
+> La suite entière prend **36,4 s en Release** et **65,0 s sous ASan/UBSan**
+> (mesuré le 20 août 2026 au soir, 1303 cas). L'essentiel de ce temps est de
+> l'attente délibérée : `user+sys` ne fait que **4,5 s** des 36,4 s de mur (1,11 s
+> d'utilisateur, 3,36 s de système), donc **88 % du temps est passé à attendre des
 > sous-processus** — pseudo-terminaux, démons, copies — et non à calculer.
 >
 > ⚠️ **Ces chiffres bougent avec la charge de la machine**, pas seulement avec le
 > nombre de cas : la mesure du 20 août a été prise pendant qu'une session de
 > travail tournait dans le bureau installé. Pour référence, la même suite tenait
-> en **19,6 s / 47,3 s** le 15 août avec 1146 cas. Les six cas de
-> `tests/test_launch.cpp` ajoutent à eux seuls **2,1 s**, et c'est assumé : ils
+> en **19,6 s / 47,3 s** le 15 août avec 1146 cas. Les **dix** cas de
+> `tests/test_launch.cpp` — six écrits d'abord, quatre nés de campagnes de
+> mutation — ajoutent à eux seuls quelques secondes, et c'est assumé : ils
 > attendent de vrais démons, ce qui est précisément ce qu'aucun test purement
 > unitaire ne pouvait faire.
 
@@ -1023,25 +1055,39 @@ mutation invalide, à compter comme telle et non comme un succès.
 
 ---
 
-## 8 ter. Les deux outils, désormais versionnés
+## 8 ter. Les trois outils, désormais versionnés
 
-Ils vivaient dans un scratchpad de session et disparaissaient avec elle. Ils sont
-maintenant dans `tools/`, et leur docstring porte les règles.
+Ils vivaient dans un scratchpad de session — ou, pour le troisième, dans un bloc de
+markdown de ce dossier — et n'étaient donc ni lançables, ni éprouvables, ni
+versionnés. Ils sont maintenant dans `tools/`, et leur docstring porte les règles.
 
 ```bash
-python3 -u tools/sonde.py               # sonde de fumée : le bureau se lève
-cp tools/mutation.py /tmp/ma_campagne.py    # puis remplir FILES et M
-DRY=1 python3 /tmp/ma_campagne.py           # vérifie chaque motif AVANT
-python3 -u /tmp/ma_campagne.py > camp.log   # jamais derrière un tube
+python3 -u tools/sonde.py                    # sonde de fumée : le bureau se lève
+python3 tools/balayage.py --strict           # les fonctions sans appelant
+cp tools/mutation.py /var/tmp/ma_campagne.py # puis remplir FILES et M
+DRY=1 python3 /var/tmp/ma_campagne.py        # vérifie chaque motif AVANT
+python3 -u /var/tmp/ma_campagne.py > camp.log  # jamais derrière un tube
 ```
 
 - **`tools/sonde.py`** — la boîte à outils des sondes bout-en-bout : `spawn()`
   (démon neuf), `screen()` (rejoue une trame en grille), `suivre()`, `clic()`,
   `glisser()`, `trouve()`, `jiffies()`. **Quatre des dix défauts du §9 bis n'ont été
   vus que par une sonde.**
+  ⚠️ `spawn()` POSE `SSHOS_BOOT_ID`, et `demons()` ne reconnaît QUE ce qui le
+  porte : c'est la quatrième règle dure de sa docstring, et elle est là parce que
+  l'énumération « `--daemon` + même uid » qui la précédait **tuait le bureau
+  installé de la machine** — donc la session de travail qui tourne dedans.
 - **`tools/mutation.py`** — le harnais de campagne, avec ses cinq règles en
   docstring et un mode `DRY=1` qui vérifie que chaque motif existe **exactement une
   fois** avant de toucher au code.
+- **`tools/balayage.py`** — les fonctions déclarées dans `src/**.hpp` sans appelant
+  de production, avec ses **cinq** pièges en docstring, une liste d'exemption
+  nommée, un `--strict` qui sort non nul, et un `--racine` pour l'éprouver contre
+  un arbre dont on connaît la réponse. **C'est le seul des trois qui ait déjà menti
+  deux fois** (§9 bis).
+
+> ⚠️ **`/var/tmp`, pas `/tmp`.** `/tmp` est un tmpfs de 2,7 Go sur cette machine :
+> une compilation d'essai l'a rempli, et cmake a annoncé un compilateur cassé.
 
 ---
 
@@ -1063,19 +1109,37 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 9 bis. Le défaut signature du projet — et comment le trouver en deux minutes
 
-**Seize fois**, du code a existé sans aucun appelant en production — la
-seizième étant `restart_done_` (§10, fils laissés en l'air du 20 août), un
-*membre* écrit et jamais lu plutôt qu'une méthode. Aucune suite de
-tests ne l'a jamais signalé, parce que ce qui manque n'est pas la couverture : c'est
-**l'appel**. Un test unitaire ne peut pas le voir. Une campagne de mutation non plus —
-muter du code mort ne casse rien, et la mutation se déclare « équivalente ».
+**Vingt-quatre fois**, du code a existé sans aucun appelant en production. Aucune
+suite de tests ne l'a jamais signalé, parce que ce qui manque n'est pas la
+couverture : c'est **l'appel**. Un test unitaire ne peut pas le voir. Une campagne
+de mutation non plus — muter du code mort ne casse rien, et la mutation se déclare
+« équivalente ».
 
-Les dix premières sont ci-dessous, chacune ayant coûté quelque chose. Les **quatre
-suivantes** sont les accesseurs morts retirés au commit `e32f09c` le 15 août
-(`Screen::autowrap()`, `Files::other()`, `LeaderDispatch::phase()`, `Menu::query()`) :
-ils ne coûtaient rien à l'exécution, seulement à la lecture. *(Le message de `e32f09c`
-les numérote « onzieme a treizieme » — trois ordinaux pour quatre objets ; c'est le
-message du commit qui compte mal, pas la liste.)*
+**Le compte, pour qu'il soit vérifiable plutôt que cité** — c'est la seule liste de
+ce dossier qui ne se recalcule pas, d'où l'arithmétique posée à plat :
+
+| Rangs | Quoi | Quand |
+|---|---|---|
+| 1 – 10 | le tableau ci-dessous, chacune ayant coûté quelque chose | jalons 1 à 7 |
+| 11 – 14 | les accesseurs morts retirés au commit `e32f09c` — `Screen::autowrap()`, `Files::other()`, `LeaderDispatch::phase()`, `Menu::query()` | 15 août |
+| 15 | la molette (`2b4dfc0`) | 18 août |
+| 16 | le collage (`6828642`) | 19 août |
+| 17 | `restart_done_` — un *membre* écrit et jamais lu, plutôt qu'une méthode | 20 août |
+| 18 – 24 | `Modal::style()`, `Modal::is_info()`, `Panel::update_badge()`, `Terminal::modes_for_tests()`, `SysInfo::tx_rate_for_tests()`, le champ `Cell::cluster` et la queue de `Session::run_update_command` | 20 août au soir |
+
+> ⚠️ **Deux comptes faux traînent dans l'historique, et il faut le savoir avant de
+> refaire l'addition.** Le message de `e32f09c` numérote ses quatre objets
+> « onzieme a treizieme » — trois ordinaux pour quatre objets ; c'est le message
+> qui compte mal, pas la liste. Et ce dossier a longtemps affiché « seize », en
+> traînant ce décalage. Par ailleurs le commit du 20 août au soir qui annonce
+> « sept objets » n'en porte que **cinq** : `Modal::style()` et `Modal::is_info()`
+> ont voyagé avec le commit du cadre de modale, juste avant. Le contenu est le
+> même, seule l'attribution entre deux commits voisins diffère.
+
+Les **rangs 18 à 24** ne coûtaient rien à l'exécution — sauf `Cell::cluster`, quatre
+octets sur **chaque cellule de chaque `Surface`** pour un réservoir de grappes qui
+n'a jamais été construit — mais tous coûtaient à la lecture, et deux d'entre eux
+faisaient remonter du bruit à chaque passage du balayage.
 
 | # | Ce qui n'était pas branché | Ce que ça coûtait |
 |---|---|---|
@@ -1089,7 +1153,7 @@ message du commit qui compte mal, pas la liste.)*
 | 8 | `Screen::set_tab()` et sa famille | `ESC H` et `CSI g` non traités : `tabs -4` ne faisait rien |
 | 9 | `Files::display_label()` | Devenue une duplication silencieuse de la règle de nommage |
 | 10 | **Les mouvements de souris** | `Session::on_mouse` : *« au-delà de cette ligne, tout est un appui »*. Aucune application n'a jamais reçu un mouvement. Tout un glisser-déposer écrit au-dessus d'un canal inexistant |
-| 15 | **Le collage** | `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` : touches, souris, focus — et **pas** le collage. Le parseur fabriquait des `PasteEvent` que personne ne lisait, donc **coller dans le bureau ne faisait rien**, jamais. La molette (n° 14, `2b4dfc0`) est la même histoire, côté souris |
+| 16 | **Le collage** | `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` : touches, souris, focus — et **pas** le collage. Le parseur fabriquait des `PasteEvent` que personne ne lisait, donc **coller dans le bureau ne faisait rien**, jamais. La molette (n° 15, `2b4dfc0`) est la même histoire, côté souris |
 
 **Le n° 10 est le plus instructif.** Ses six cas unitaires appelaient
 `files.on_mouse(Motion…)` **directement**. Ils prouvaient que le gestionnaire réagit
@@ -1098,7 +1162,7 @@ bien à un mouvement ; ils ne prouvaient rien sur le fait que quelqu'un lui en e
 
 ### ⛔ Le garde permanent — le compilateur, pas un script
 
-**Depuis `6828642`, la quinzième ne peut plus se reproduire à cette porte-là.**
+**Depuis `6828642`, la seizième ne peut plus se reproduire à cette porte-là.**
 `Session::on_input` ne démonte plus `InputEvent` à la main : il fait un
 `std::visit` sur un ensemble de surcharges **exhaustif** (l'idiome `overloaded`,
 en tête de `session.cpp`).
@@ -1110,7 +1174,7 @@ tombe sur **toutes** les machines, à **chaque** compilation, et il nomme le typ
 
 > **Ne jamais** ajouter de `default`, de surcharge générique `auto&&` ni de fourre-tout
 > dans ce `visit` : chacun de ces trois gestes rend le silence à la porte d'entrée du
-> bureau, et le seizième arrivera par là.
+> bureau, et le vingt-cinquième arrivera par là.
 
 Ce que le garde ne couvre PAS, et qu'il faut donc continuer à surveiller : les
 **virtuelles** de `App` et de `Host`. Une méthode virtuelle est référencée par la
@@ -1121,139 +1185,102 @@ que d'appeler la méthode lui-même, plus le balayage ci-dessous.
 
 ### Le balayage, à repasser après tout gros ajout
 
-```python
-# Toutes les fonctions declarees dans src/**.hpp, sans appelant dans src/.
-import re, os, io
-KW = ("return", "case", "else", "throw", "if", "for", "while", "switch",
-      "do", "delete", "new", "goto")          # parade 1 : `return foo(x);`
-DECL = re.compile(r"^([A-Za-z_][\w:<>,&\*\s]*?)\s[\*&]*(?:\w+::)*([a-z_][a-z0-9_]*)\s*\(")
+**Il ne vit plus dans ce document : c'est `tools/balayage.py`.**
 
-def decl(t):                                   # rend le nom declare, ou None
-    t = t.split("//")[0].rstrip()              # parade 4 : `void set_tab();  // HTS`
-    m = DECL.match(t)
-    if not m or m.group(1).split()[0] in KW: return None
-    # parade 2 : `T nom() const { ... }` en ligne -- c'est la forme des QUATRE
-    # orphelines du 15 aout ; parade 3 : parenthese ouverte = signature etalee
-    if t.rstrip().endswith((";", "{", "}")) or t.count("(") > t.count(")"):
-        return m.group(2)
-    return None
-
-def lignes(rac):
-    out = []
-    for root, _, fs in os.walk(rac):
-        for f in sorted(fs):
-            if f.endswith((".cpp", ".hpp")):    # les .hpp AUSSI : beaucoup
-                p = os.path.join(root, f)       # d'appels sont en ligne
-                for i, l in enumerate(io.open(p, encoding="utf-8"), 1):
-                    out.append((p, i, l.rstrip("\n")))
-    return out
-
-src, tst = lignes("src"), lignes("tests")
-decls = {}
-for p, i, l in src:
-    if not p.endswith(".hpp"): continue
-    t = l.strip()
-    if t.startswith(("//", "*", "/*")): continue
-    n = decl(t)
-    if n: decls.setdefault(n, "%s:%d" % (p, i))
-
-def compte(ls, name):
-    pat = re.compile(r"(?<![\w])%s\s*\(" % re.escape(name)); n = 0
-    for p, i, l in ls:
-        t = l.strip()
-        if t.startswith(("//", "*")) or decl(t) == name: continue
-        n += len(pat.findall(t.split("//")[0]))
-    return n
-
-print("%d noms declares" % len(decls))
-for name in sorted(decls):
-    if name.endswith("_for_tests"): continue
-    if compte(src, name) == 0:                  # zero appelant de PRODUCTION
-        print("  %-26s src=0 tests=%-4d %s" % (name, compte(tst, name), decls[name]))
+```bash
+python3 tools/balayage.py            # la liste des candidats
+python3 tools/balayage.py --strict   # sort non nul si un candidat n'est pas exempté
 ```
 
-**Trois pièges du script, tous rencontrés :**
+Il vivait ici, dans un bloc de markdown, comme y vivaient `sonde.py` et
+`mutation.py` avant le §8 ter. **Un outil de vérification qu'on ne peut ni lancer
+ni éprouver dérive** — et celui-ci l'a fait deux fois, sans que personne ne puisse
+s'en apercevoir (les deux démonstrations sont plus bas). Le sortir d'ici est le
+même geste que pour les deux autres, pour la même raison.
 
-1. **Ne lire que les `.cpp`** rate les appels faits depuis les définitions en ligne
-   des `.hpp`.
-2. **Une borne `[^\w:]` devant le nom** exclut tout appel qualifié
-   `Classe::methode()` et fait passer la moitié du projet pour orpheline.
-3. **Un `head -N` sur le `grep` de vérification** fait passer une méthode appelée pour
-   une orpheline. Vérifier chaque candidat **sans troncature**.
+Sa docstring porte les **cinq pièges** et les cinq parades. Les quatre premiers
+sont d'anciens acquis ; le cinquième a été trouvé en le rejouant le 20 août :
+
+> **Un appel précédé d'un opérateur passait pour une déclaration**, et l'appel
+> était alors **jeté** — donc une fonction bel et bien appelée ressortait comme
+> orpheline, à chaque passage, et coûtait le même tri manuel. Deux formes réelles
+> dans ce dépôt :
+>
+> ```cpp
+> out << render_config(c);                  // config.cpp:89
+> name, sshos::daemon_exe_path(), [] {      // main.cpp:45
+> ```
+>
+> Parade : une fois les chevrons appariés retirés du préfixe, il ne doit plus
+> rester ni virgule, ni chevron, ni signe d'égalité — les chevrons d'un type
+> générique gardent le droit de porter des virgules.
+
+Et un **second passage** que la boucle d'origine ne pouvait pas faire : elle saute
+les `_for_tests` par construction, donc une API de test que **plus aucun test
+n'appelle** lui était invisible. Deux s'y cachaient (`modes_for_tests`,
+`tx_rate_for_tests`).
+
+> **La sortie n'est JAMAIS une conclusion.** Un candidat n'est un défaut qu'après
+> un `grep -rn "\bnom\b" src/ tests/` **sans troncature**, lu à la main. Un audit
+> adversarial a un jour déclaré quatre orphelines inexistantes — il les avait
+> cherchées *après* leur retrait. Le rapport était affirmatif, sourcé, et faux.
+
+**Un outil de vérification doit lui-même être vérifié contre un cas dont on connaît
+la réponse**, et `--racine` existe pour ça :
+
+```bash
+git archive <commit>^ src tests | tar x -C /var/tmp/essai
+python3 tools/balayage.py --racine /var/tmp/essai
+```
+
+Épreuve du 20 août, sur `0b7fdf7` — l'arbre d'avant la passe : **512 noms
+déclarés**, et les cinq objets retirés ce soir-là ressortent tous
+(`style`, `is_info`, `update_badge` à `src=0 tests=0`, plus les deux
+`_for_tests` au second passage). Sur l'arbre d'après : **509 noms**, aucun des
+cinq, et les deux faux positifs du cinquième piège ont disparu eux aussi.
+
+**Les constructeurs ne sont pas analysés du tout**, et c'est délibéré : le groupe
+de capture exige une initiale minuscule, or tous les types du projet sont
+capitalisés. Élargir le motif aux majuscules ferait remonter les constructions
+locales, `Type x{args};` étant syntaxiquement identique à une déclaration.
 
 Les accesseurs suffixés `_for_tests` sont des faux positifs légitimes — **d'où le
 suffixe, à mettre systématiquement** sur toute méthode qui n'existe que pour les
-tests. C'est ce qui rend le balayage exploitable.
+tests. C'est ce qui rend le balayage exploitable. **Seize API de test ne le portent
+toujours pas** (`text_row`, `line_text`, `wrap_pending`, `scroll_top`,
+`scroll_bottom`, `charset`, `state`, `dirty`, `choices`, `selection`, `question`,
+`release`, `bound_actions`, `message`…), ce qui fait remonter quatorze candidats à
+chaque passage et coûte le même tri manuel : **c'est le travail qui reste sur ce
+point**, environ 255 sites d'appel, purement mécanique. ⚠️ Ne pas le faire au `sed`
+global : `valid(`, `state(`, `release(`, `message(` et `question(` existent aussi
+sur d'autres classes.
 
-**Quatre pièges structurels, et les quatre parades sont DANS le script ci-dessus.**
-C'est ce qui le distingue de la version qu'a portée ce dossier jusqu'au 15 août 2026.
-**Le premier fabrique un faux positif** — une méthode appelée passe pour orpheline.
-**Les trois autres fabriquent un faux négatif** — une vraie orpheline n'est même pas
-examinée, et c'est celui-là qui a coûté :
+**Quatre candidats sont EXEMPTÉS**, nommés dans le script et documentés sur place
+dans le code — `--strict` ne les compte pas :
 
-- `return foo(x);` ressemble à une déclaration (`return` passe pour un type de
-  retour) et masque un vrai appel. Parade : la liste `KW` de mots-clés d'instruction
-  (`return`, `case`, `else`, `throw`…) qui disqualifie le préfixe.
-- **Une définition en ligne — `T nom() const { return n_; }` — n'était pas capturée
-  du tout**, parce que l'ancien script n'enregistrait que les lignes finissant par
-  `;`. C'est **la forme exacte des quatre orphelines du 15 août**, et donc le défaut
-  qui comptait. Parade : accepter aussi `{` et `}` en fin de ligne.
-- Une signature étalée sur plusieurs lignes échappe au même filtre. Parade :
-  parenthèse restée ouverte = signature valide.
-- **Un commentaire en fin de ligne masque le `;`** : `void set_tab();  // HTS` n'était
-  pas capturé — c'est-à-dire, précisément, le défaut n° 8 du tableau ci-dessus, que le
-  script était donc incapable de retrouver. Parade : couper la ligne au `//` avant de
-  tester sa fin. Elle fait passer le balayage de 423 à **452 noms analysés**.
+| Exempté | Pourquoi |
+|---|---|
+| `Pty::saw_eof()` | Sous Linux, un maître dont le dernier esclave s'est fermé rend `EIO` et non 0 : `note_eof()` n'est atteinte que dans des cas de bord |
+| `set_cloexec()` | Chaque descripteur naît déjà `CLOEXEC` en un seul appel système, ce qui est le motif **sûr** |
+| `ambiguous_wide()` | Un getter que la production court-circuite : `width.cpp` lit directement le global `g_ambiguous_wide` |
+| `Fd::valid()` | Le vocabulaire d'un type RAII d'usage général, contrepartie de `get()` et `reset()`. La production lève à la construction plutôt que de rendre un `Fd` invalide, d'où l'absence d'appelant ; le suffixer serait laid et se retournerait contre le premier site de production qui en aura besoin |
 
-**Les constructeurs ne sont pas analysés du tout**, et c'est délibéré : le groupe de
-capture exige une initiale minuscule (`[a-z_][a-z0-9_]*`), or tous les types du projet
-sont capitalisés. Élargir le motif aux majuscules ferait remonter les constructions
-locales, parce que `Type x{args};` est syntaxiquement identique à une déclaration.
-
-> **La sortie du script n'est JAMAIS une conclusion.** Un candidat n'est un défaut
-> qu'après un `grep -rn "\bnom\b" src/ tests/` **sans troncature**, lu à la main.
-> Un audit adversarial lancé le 15 août a déclaré ces quatre-là inexistantes — il
-> les avait cherchées *après* leur retrait, et en concluait que le balayage mentait.
-> **Ne jamais prendre un rapport d'agent pour argent comptant : vérifier soi-même.**
-
-> 🔴 **Le script publié ici jusqu'au 15 août 2026 ne pouvait pas trouver ce qu'on lui
-> attribuait, et c'est démontré.** Il n'enregistrait une déclaration que si la ligne
-> finissait par `;` — or les quatre orphelines retirées ce jour-là sont **toutes** des
-> définitions en ligne finissant par `}` :
-> `bool autowrap() const { return autowrap_; }`, `Pane& other() { return panes_[1 - active_]; }`,
-> `LeaderPhase phase() const { return phase_; }`, `const std::string& query() const { return query_; }`.
-> Rejoué sur l'arbre d'avant leur retrait (`git archive e32f09c^ src tests`),
-> **l'ancien script rend 13 candidats et n'en trouve aucune** — et 291 noms déclarés,
-> chiffre qu'il faut aller chercher en lui ajoutant un `print(len(decls))`, car tel
-> qu'il était publié il n'imprimait aucun total. Le script ci-dessus rend, sur ce même
-> arbre, **452 noms / 21 candidats, et les trouve toutes les quatre** à
-> `src=0 tests=0`. Les chiffres « 464 noms, 27 candidats » qu'annonçait ce dossier
-> n'étaient reproductibles par aucune des deux versions. La leçon vaut au-delà de ce
-> script : **un outil de vérification doit lui-même être vérifié contre un cas dont on
-> connaît la réponse.**
-
-**Passage du 15 août 2026, rejoué sur `e6d013d` avec le script ci-dessus :**
-**452 noms déclarés, 17 candidats bruts.** Ils se répartissent ainsi, chacun tranché à
-la main :
-
-- **`Pty::saw_eof()`** — aucun appelant, nulle part, ni dans `src/` ni dans `tests/`.
-  Déjà documenté sur place et au §7.4 : sous Linux un maître dont le dernier esclave
-  s'est fermé rend `EIO`, pas 0.
-- **Les 16 autres n'ont aucun appelant de production et sont appelées depuis
-  `tests/`** — `ambiguous_wide`, `bound_actions`, `charset`, `choices`, `dirty`,
-  `line_text`, `question`, `release`, `scroll_bottom`, `scroll_top`, `selection`,
-  `set_cloexec`, `state`, `text_row`, `valid`, `wrap_pending`. **Quatorze sont de
-  vraies API de test** et devraient toutes porter le suffixe `_for_tests` — aucune ne
-  le porte, et c'est le travail qui reste sur ce point : sans le suffixe, chaque
-  passage du balayage les fait remonter et coûte le même tri manuel. **Les deux
-  dernières ne sont pas des API de test** et ne doivent pas être renommées :
-  `set_cloexec()` est gardée exprès (§7.4), et `ambiguous_wide()` est un getter que la
-  production court-circuite en lisant directement le global `g_ambiguous_wide`
-  (`src/render/width.cpp:58`).
-
-Les **4 vraies orphelines** trouvées ce jour-là — `Screen::autowrap()`,
-`Files::other()` (privée, donc même pas atteignable par un test),
-`LeaderDispatch::phase()` et `Menu::query()` — ont été retirées au commit `e32f09c`.
+> 🔴 **Les deux fois où cet outil a menti, et c'est démontré.**
+>
+> **La version publiée jusqu'au 15 août 2026** n'enregistrait une déclaration que
+> si la ligne finissait par `;` — or les quatre orphelines retirées ce jour-là sont
+> **toutes** des définitions en ligne finissant par `}` :
+> `bool autowrap() const { return autowrap_; }`, `Pane& other() { … }`,
+> `LeaderPhase phase() const { … }`, `const std::string& query() const { … }`.
+> Rejouée sur l'arbre d'avant leur retrait, elle rend **13 candidats et n'en trouve
+> aucune**.
+>
+> **La version publiée jusqu'au 20 août** jetait les deux appels du cinquième piège
+> ci-dessus : elle accusait donc `render_config` et `daemon_exe_path`, deux
+> fonctions parfaitement appelées, et se taisait sur `modes_for_tests` et
+> `tx_rate_for_tests`, deux API de test réellement mortes. **La leçon vaut au-delà
+> de ce script** : un outil de vérification doit être éprouvé contre un cas dont on
+> connaît la réponse, sinon il devient l'endroit exact où l'erreur se cache.
 
 **Et le filet qui attrape ce que le balayage ne voit pas :** une sonde bout-en-bout
 qui pilote le **vrai démon** sous pty et lance de **vrais programmes**. Les défauts
@@ -1304,41 +1331,80 @@ tableau du §3.
 Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
 en réaction à l'usage réel.
 
-> 🔴 **Si vous êtes sur le point de faire la mise à jour, lisez le §2 quater
-> d'abord :** il faut pousser `main` avant, et ni le correctif du
-> redémarrage ni la barre ne serviront à la mise à jour qui les installe.
+> **Avant toute mise à jour, le §2 quater :** il faut pousser `main` d'abord, et
+> une mise à jour ne bénéficie **jamais** du correctif qu'elle installe — c'est
+> mécanique, et ça vaut pour toutes les suivantes.
 
-### Les fils laissés en l'air le 20 août 2026
+### La passe du 20 août 2026 au soir — les cinq fils, et trois défauts qu'ils cachaient
 
-Trouvés en corrigeant le redémarrage, **vérifiés à la main, et délibérément non
-corrigés** — ils sortaient du périmètre demandé. Ils sont listés ici pour que
-personne n'ait à les retrouver.
+Les cinq fils laissés en l'air le matin du 20 août sont **soldés**. En les
+vérifiant un par un — la règle du §9 ter, *un constat n'est acquis qu'après
+l'avoir vérifié soi-même* — trois d'entre eux se sont révélés plus larges que
+leur description, et **deux défauts que personne n'avait vus** sont sortis.
 
-1. **`--check` efface `restart-pending` sans condition, et c'est un cul-de-sac.**
-   `do_check` ne lit jamais le `status` en place avant de le remplacer
-   (`tools/update.sh`, `write_state up-to-date`). Tant que l'utilisateur n'a pas
-   redémarré, `running_is_installed()` est faux, donc le C++ ne requalifie rien :
-   le fichier passe simplement à `up-to-date`, la pastille s'éteint, l'entrée
-   redevient « Verifier les mises a jour », et **plus rien ne propose le
-   redémarrage** alors que le binaire posé n'est toujours pas celui qui tourne.
-   La vérification automatique tombe une fois par jour : le trou se referme tout
-   seul, en silence. Parade probable : que `--check` préserve `restart-pending`.
-2. **`restart_done_` est écrit et n'a aucun lecteur** (`src/shell/update_service.cpp:105`,
-   déclaré `update_service.hpp:146`). `grep -rn` sur tout le dépôt rend exactement
-   deux occurrences : la déclaration et cette unique écriture. **Seizième occurrence**
-   du défaut signature du §9 bis, appliqué à un membre plutôt qu'à une méthode.
-3. **La queue de `Session::run_update_command` est inatteignable.** Le `update_.run(id);`
-   final (`src/daemon/session.cpp`, après les trois branches) ne peut jamais
-   s'exécuter : la garde `if (id != e.id && id != "update:check") return;` plus les
-   trois branches couvrent les trois seuls identifiants que `entry()` produit.
-4. **Deux sondes ne sont PAS isolées du bureau vivant.** `tools/verif_sortie.py` et
-   `tools/verif_repos.py` énumèrent les démons par `--daemon` dans `cmdline` + uid,
-   **sans passer par `SSHOS_BOOT_ID`** : lancées sur cette machine, elles tuent le
-   bureau installé — donc la session de travail qui tourne dedans. Les rendre
-   isolées comme `verif_redemarrage.py` avant de les relancer.
-5. **Le correctif du redémarrage ne sauve pas la mise à jour qui l'installe.**
-   C'est le client d'AVANT qui pilote ce redémarrage-là, avec son budget d'une
-   seconde. Si ça retombe une fois : retaper `sshos`, le démon est déjà debout.
+| Le fil, tel qu'il était noté | Ce qu'il était vraiment | État |
+|---|---|---|
+| `--check` efface `restart-pending` | Juste, et plus large : `check-failed` — le réseau qui tombe, cas le plus probable — faisait le même cul-de-sac **sans même avoir comparé**. Et `--check` écrase le fait dès sa **première** écriture, pas seulement à la dernière | ✅ soldé |
+| `restart_done_` écrit sans lecteur | Juste, tel quel | ✅ retiré |
+| La queue de `run_update_command` inatteignable | Juste, tel quel | ✅ retiré |
+| **Deux** sondes non isolées | **Quatre**, plus une cinquième par un tout autre mécanisme (§ ci-dessous) | ✅ soldé |
+| Le correctif du redémarrage ne sauve pas sa propre mise à jour | Juste — et sans objet : cette mise à jour est passée. La leçon est promue au §2 quater, où elle vaut pour toutes les suivantes | ✅ clos |
+
+**Les trois découvertes de la passe**, aucune n'étant dans le carnet :
+
+1. **`Modal` ne dimensionnait son cadre que pour les boutons PAR DÉFAUT.** Le
+   plancher de largeur était figé sur « Annuler / Confirmer », alors que
+   `cancel_rect()` et `confirm_rect()` se posent à partir des libellés réels — et
+   la session en pose deux autres couples. Sur un corps court, le bouton de gauche
+   sortait du cadre : peint sur le bureau, et **incliquable**, `hit()` exigeant
+   d'abord d'être dans `rect_`. Mesuré sur « Plus tard / Reinstaller depuis
+   GitHub » : `[ Plus tard ]` **entièrement dehors, zéro cellule cliquable**, et
+   `hit()` rendant `Confirm` sur presque toute la largeur du cadre — un clic à côté
+   lançait la réinstallation. C'est le défaut de `3512ffe` revenu par la porte des
+   **libellés** au lieu du corps. Aucun test ne le voyait : `test_modal` n'appelait
+   jamais la surcharge à quatre arguments, et le seul cas de `test_session` qui la
+   traverse a un corps assez long pour que le cadre tienne **par accident**.
+2. **La CI nommait « version 1.0 » toutes les releases publiées.**
+   `actions/checkout` prend `fetch-depth: 1` par défaut ; la tête est alors greffée
+   sans parent, `git log -1 -- VERSION` la rend elle-même, et le mineur tombe à
+   zéro. Mesuré : `tools/version.sh` rend **1.29** sur l'arbre complet et **1.0**
+   sur un `clone --depth 1` du même dépôt. Le titre de la release est le seul
+   endroit public où le numéro s'affiche.
+3. **Le surveillant de progression pouvait garder le verrou pour toujours.** Il
+   hérite du descripteur du verrou, et un `flock` appartient à la description de
+   fichier **partagée par le fork** : un signal externe visant le seul pid du
+   script principal laissait le fils vivant, verrou pris, et toute invocation
+   ultérieure répondait « un autre travail est en cours » sans qu'aucun travail ne
+   coure. Aucun chemin interne n'y menait — tous les échecs appellent déjà
+   `arreter_surveillance`. Un `trap` sur HUP/INT/TERM ferme le cas.
+
+#### Les sondes : quatre tueuses, pas deux
+
+Le carnet en signalait deux. Le motif fautif — « `--daemon` dans `cmdline` + même
+uid » — vivait en **quatre copies manuelles**, dont `tools/sonde.py`, la boîte à
+outils que le §8 ter documente comme **directement lançable**, et dont `spawn()`
+appelle `kill_daemon()` en première instruction. Le bureau installé de la machine
+porte exactement ces deux marques.
+
+Et une cinquième, `verif_bureau_ouvert.py`, tuait par un mécanisme tout autre :
+son propre énumérateur était bien isolé par `HOME`, mais elle installait avec
+l'instance par défaut **`bureau01`** — celle du bureau réel — si bien que c'est
+`install.sh --kill` qui tuait, et qu'aucun filtre Python ne pouvait le rattraper.
+
+**L'étiquette est `SSHOS_BOOT_ID`, et elle a deux moitiés** : `spawn()` la POSE
+dans l'enfant, `demons()` la RELIT dans `/proc/PID/environ`. L'une sans l'autre ne
+vaut rien. Et c'est une marque **positive**, jamais « différent du mien » : un
+démon lancé à la main depuis l'arbre de dev n'a **aucun** `SSHOS_BOOT_ID` dans son
+environnement — `net.cpp` retombe alors sur l'uuid du noyau, calculé dans le
+processus — donc « différent du mien » serait vrai pour lui, et on le tuerait.
+
+`verif_isolation.py` ne balaie plus rien : il lit l'instance gravée dans le lanceur
+testé et **refuse bruyamment** de tourner si un démon la porte déjà. *On ne tue pas
+un bureau qu'on n'a pas levé.*
+
+> **Comment vérifier qu'une sonde est sûre, avant de la lancer :** relever le pid
+> du bureau installé (`~/.local/libexec/sshos --status`), lancer la sonde, et
+> vérifier que le pid vit toujours. C'est ce qui a été fait pour chacune des cinq.
 
 ### Les fils laissés en l'air le 19 août au soir
 
@@ -1482,9 +1548,9 @@ panneau actif ; `reload()` boucle sur les deux.
 Ce que les sept jalons ont appris, et qui vaut pour la suite :
 
 1. **Du code né sans appelant ne se signale qu'en faisant tourner le vrai
-   logiciel — ou en le cherchant exprès. Quatorze fois à ce jour.** La liste, le
-   script de balayage et ses trois pièges sont au **§9 bis**, qui est la section
-   la plus rentable de ce dossier.
+   logiciel — ou en le cherchant exprès. Vingt-quatre fois à ce jour.** La liste,
+   l'outil de balayage (`tools/balayage.py`) et ses cinq pièges sont au **§9 bis**,
+   qui est la section la plus rentable de ce dossier.
 2. **Le plan liste les fichiers neufs, pas ceux qu'il faut brancher.** Quatre
    tâches du jalon 3 ont débordé de leur périmètre annoncé, toujours pour cette
    raison. Le prévoir en écrivant le plan du jalon 4.
