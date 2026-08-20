@@ -31,7 +31,12 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = "/var/tmp/sshos-verif-bureau-ouvert"
-INSTANCE = "bureau01"  # le defaut de l installeur ; la detection passe par HOME
+# UNE INSTANCE A NOUS, ET SURTOUT PAS LE DEFAUT. « bureau01 » est le nom
+# que l installeur donne au bureau reel de la machine : install.sh --kill
+# viserait alors le socket sshos/<uid>/bureau01, c est-a-dire le bureau
+# vivant -- et la session de travail qui tourne dedans. Le filtre par HOME
+# de daemons() ne protege pas de ca : c est install.sh qui tue, pas nous.
+INSTANCE = "verif-bureau-ouvert"
 
 ok_all = True
 
@@ -49,8 +54,9 @@ def check(label, cond, extra=""):
 def install(*args, stdin=None):
     env = dict(os.environ)
     env["HOME"] = HOME
-    return subprocess.run(["sh", os.path.join(ROOT, "tools", "install.sh")] + list(args),
-                          capture_output=True, text=True, env=env,
+    cmd = ["sh", os.path.join(ROOT, "tools", "install.sh"),
+           "--instance", INSTANCE] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env,
                           input=stdin, timeout=1800)
 
 
@@ -67,7 +73,8 @@ def daemons():
             env = open("/proc/%s/environ" % e, "rb").read()
         except OSError:
             continue
-        if b"--daemon" in a and HOME.encode() in env:
+        if (b"--daemon" in a and HOME.encode() in env
+                and ("SSHOS_BOOT_ID=" + INSTANCE).encode() in env):
             out.append(int(e))
     return out
 

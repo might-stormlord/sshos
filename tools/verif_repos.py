@@ -20,37 +20,25 @@ import termios
 import time
 
 import os as _os
-BIN = _os.environ.get("SSHOS_DEV_BIN", "/home/storm/dev/ssh_os_2.0/build-release/sshos")
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import sonde  # noqa: E402
+
+# NOTRE ETIQUETTE, ET RIEN D'AUTRE NE SERA TUE. L'enumeration par
+# « --daemon dans cmdline + uid » qui vivait ici trouvait le bureau INSTALLE
+# de la machine -- il porte exactement ces deux marques -- et le tuait, avec
+# la session de travail qui tourne dedans. sonde.spawn(BOOT) pose
+# SSHOS_BOOT_ID dans l'enfant, sonde.demons(BOOT) le relit dans /proc.
+BOOT = "verif-repos"
+BIN = sonde.BIN
 
 
 def daemon_pids():
-    out = []
-    me = os.getpid()
-    for e in os.listdir("/proc"):
-        if not e.isdigit() or int(e) == me:
-            continue
-        try:
-            a = open("/proc/%s/cmdline" % e, "rb").read().split(b"\0")
-            u = [l for l in open("/proc/%s/status" % e)
-                 if l.startswith("Uid:")][0].split()[1]
-        except OSError:
-            continue
-        if b"--daemon" in a and int(u) == os.getuid():
-            out.append(int(e))
-    return out
+    return sonde.demons(BOOT)
 
 
 def kill_all():
-    for p in daemon_pids():
-        try:
-            os.kill(p, signal.SIGTERM)
-        except OSError:
-            pass
-    for _ in range(50):
-        if not daemon_pids():
-            return True
-        time.sleep(0.1)
-    return False
+    return sonde.kill_daemon(BOOT)
 
 
 def cpu_ticks(pid):
@@ -62,13 +50,7 @@ def cpu_ticks(pid):
 
 def main():
     kill_all()
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.environ["TERM"] = "xterm-256color"
-        os.environ["COLORTERM"] = "truecolor"
-        os.execv(BIN, [BIN])
-        os._exit(1)
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    pid, fd = sonde.spawn(BOOT)
 
     # Laisser le bureau s'ouvrir.
     t0 = time.time()

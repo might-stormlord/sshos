@@ -20,7 +20,11 @@ import termios
 import time
 
 import os as _os
-DEV = _os.environ.get("SSHOS_DEV_BIN", "/home/storm/dev/ssh_os_2.0/build-release/sshos")
+# La racine se deduit du fichier, jamais du chemin de la machine de
+# l'auteur : le depot est public et personne d'autre n'a /home/storm.
+_RACINE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+DEV = _os.environ.get("SSHOS_DEV_BIN",
+                      _os.path.join(_RACINE, "build-release", "sshos"))
 BOOT = "verif-redemarrage"
 
 

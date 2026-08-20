@@ -40,7 +40,9 @@ fond survit a une coupure et continue de muter src/ sous les doigts.
     pgrep -af mutation
 """
 import io, os, shutil, subprocess, sys
-ROOT = "/home/storm/dev/ssh_os_2.0"
+# La racine se deduit du fichier, jamais du chemin de la machine de
+# l'auteur : le depot est public et personne d'autre n'a /home/storm.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BAK = "/tmp/sshos-mutation-bak"
 # Les fichiers mutes. METTRE LES .hpp AUSSI s'ils sont touches.
 FILES = ["src/apps/files/files.cpp"]

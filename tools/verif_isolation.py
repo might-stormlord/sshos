@@ -16,6 +16,7 @@ usage: verif_isolation.py <HOME de l'installation> [<racine de l'arbre de dev>]
 import fcntl
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -24,12 +25,30 @@ import sys
 import termios
 import time
 
-DEV_ROOT = "/home/storm/dev/ssh_os_2.0"
+# La racine se deduit du fichier, jamais du chemin de la machine de
+# l'auteur : le depot est public et personne d'autre n'a /home/storm.
+DEV_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def daemon_pids():
-    """Les demons de CET utilisateur, trouves par /proc. Jamais par un motif
-    de nom : une sonde qui se cherche par motif se trouve elle-meme."""
+def boot_du_lanceur(launcher):
+    """L'instance que ce lanceur vise : install.sh y grave
+    SSHOS_BOOT_ID="${SSHOS_BOOT_ID:-<instance>}". C'est la SEULE chose qui
+    separe deux bureaux (docs/REPRISE.md §2 ter)."""
+    m = re.search(r'SSHOS_BOOT_ID="\$\{SSHOS_BOOT_ID:-([^}]*)\}"',
+                  open(launcher).read())
+    return m.group(1) if m else None
+
+
+def daemon_pids(boot):
+    """Les demons de L'INSTANCE TESTEE, reconnus par leur SSHOS_BOOT_ID.
+
+    JAMAIS par « --daemon dans cmdline + uid » : le bureau installe de la
+    machine porte exactement ces deux marques, et la session de travail
+    tourne dedans. Cette sonde le tuait a sa premiere instruction.
+    """
+    if not boot:
+        return []
+    marque = ("SSHOS_BOOT_ID=" + boot).encode()
     out = []
     me = os.getpid()
     for e in os.listdir("/proc"):
@@ -37,11 +56,10 @@ def daemon_pids():
             continue
         try:
             a = open("/proc/%s/cmdline" % e, "rb").read().split(b"\0")
-            u = [l for l in open("/proc/%s/status" % e)
-                 if l.startswith("Uid:")][0].split()[1]
+            env = open("/proc/%s/environ" % e, "rb").read().split(b"\0")
         except OSError:
             continue
-        if b"--daemon" in a and int(u) == os.getuid():
+        if b"--daemon" in a and marque in env:
             out.append(int(e))
     return out
 
@@ -127,10 +145,23 @@ def main():
             print("ECHEC : %s est absent" % p)
             return 1
 
-    print("== Terrain net : on tue tout demon prealable")
-    kill_pids(daemon_pids())
-    if daemon_pids():
-        print("ECHEC : un demon residuel refuse de mourir")
+    boot = boot_du_lanceur(launcher)
+    if not boot:
+        print("ECHEC : le lanceur %s ne grave aucun SSHOS_BOOT_ID" % launcher)
+        return 1
+    print("== Instance visee : %s" % boot)
+
+    # ON NE TUE PAS UN BUREAU QU'ON N'A PAS LEVE. Si l'instance est deja
+    # vivante, ce n'est pas la notre : c'est celle de l'utilisateur, et la
+    # session de travail tourne peut-etre dedans. Refuser bruyamment vaut
+    # infiniment mieux que balayer en silence -- installer avec l'instance
+    # par defaut « bureau01 » suffit a viser le vrai bureau.
+    deja = daemon_pids(boot)
+    if deja:
+        print("REFUS : un demon de l'instance « %s » tourne deja (pid %s)."
+              % (boot, ", ".join(str(p) for p in deja)))
+        print("        Reinstallez le HOME d'essai avec une autre instance :")
+        print("        sh tools/install.sh --instance verif-isolation ...")
         return 1
 
     ok = True
@@ -141,7 +172,6 @@ def main():
         client_pid, client_fd = attach(launcher, home)
         out = drain(client_fd, 3.0)
         print("   octets de bureau recus : %d" % len(out))
-        before = daemon_pids()
         st_inst = status(launcher, home=home)
         print("   --status (installe) : %s" % st_inst)
         if len(out) < 200 or not st_inst.startswith("demon actif"):
@@ -216,7 +246,7 @@ def main():
                 pass
         # Le demon SURVIT au client : c'est tout l'objet du projet. Il faut
         # donc le tuer explicitement, sinon l'essai suivant mesurerait celui-ci.
-        kill_pids(daemon_pids())
+        kill_pids(daemon_pids(boot))
 
     print("\n=== %s ===" % ("ISOLATION VERIFIEE" if ok else "L'ISOLATION NE TIENT PAS"))
     return 0 if ok else 1
