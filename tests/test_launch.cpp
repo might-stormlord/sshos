@@ -101,6 +101,56 @@ sshos::DaemonSpawner lanceur_qui_retient(pid_t& vu) {
 
 pid_t lanceur_qui_echoue(const std::vector<std::string>&) { return -1; }
 
+// --- ce qu'un signal fait a la recolte -----------------------------------
+
+volatile sig_atomic_t g_alarmes = 0;
+
+// `++` sur un volatile est deprecie en C++20, et -Werror le refuse.
+void note_alarme(int) { g_alarmes = g_alarmes + 1; }
+
+// Arme un SIGALRM SANS SA_RESTART -- c'est cela, et cela seul, qui fait
+// rendre EINTR a waitpid -- puis remet tout en place a la sortie, y compris
+// sur le chemin d'echec d'un REQUIRE, qui sort par un `return` nu. Meme
+// discipline que FifoReleaseGuard et TzGuard : tous les cas tournent dans le
+// MEME processus, une alarme oubliee tomberait dans le cas suivant.
+class AlarmeGuard {
+ public:
+  explicit AlarmeGuard(unsigned int microsecondes) {
+    struct sigaction sa {};
+    sa.sa_handler = note_alarme;
+    ::sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;  // surtout PAS SA_RESTART
+    ::sigaction(SIGALRM, &sa, &avant_);
+    g_alarmes = 0;
+    ::ualarm(microsecondes, 0);
+  }
+  ~AlarmeGuard() {
+    ::ualarm(0, 0);
+    ::sigaction(SIGALRM, &avant_, nullptr);
+  }
+  AlarmeGuard(const AlarmeGuard&) = delete;
+  AlarmeGuard& operator=(const AlarmeGuard&) = delete;
+
+ private:
+  struct sigaction avant_ {};
+};
+
+// Un intermediaire qui TRAINE. Celui de lanceur_qui_retient meurt aussitot,
+// si bien que waitpid rendrait avant meme que l'alarme ne parte : le cas ne
+// prouverait rien.
+sshos::DaemonSpawner lanceur_qui_traine(pid_t& vu,
+                                        std::chrono::milliseconds delai) {
+  return [&vu, delai](const std::vector<std::string>&) {
+    const pid_t pid = ::fork();
+    if (pid == 0) {
+      ::usleep(static_cast<useconds_t>(delai.count()) * 1000);
+      ::_exit(0);
+    }
+    vu = pid;
+    return pid;
+  };
+}
+
 }  // namespace
 
 // LE CAS QUI A COÛTÉ UN BUREAU. 1,3 s, c'est au-delà de l'ancien budget
@@ -290,4 +340,40 @@ TEST(daemon_notes_in_its_journal_a_start_that_failed_for_another_reason) {
   const std::string texte = lire_fichier(bac.fichier());
   CHECK(texte.find("demarrage impossible") != std::string::npos);
   CHECK(texte.find("trop long") != std::string::npos);
+}
+
+// UN SIGNAL NE DOIT PAS FAIRE PERDRE L'INTERMEDIAIRE. `waitpid` rend -1 sur
+// EINTR SANS avoir recolte : abandonner la laisse precisement le zombie
+// qu'on venait eviter, et un zombie oublie est ramasse par le
+// reap_children() de test_daemon.cpp, dont le try_reap() recoit alors
+// ECHILD pour toujours -- un echec une fois sur dix, sur un cas que personne
+// n'a touche.
+//
+// Ce n'est pas theorique : le client tourne sur un terminal, et SIGWINCH
+// arrive tout seul des qu'on redimensionne la fenetre pendant que le demon
+// se leve. (Campagne de mutation, M11.)
+TEST(launch_reaps_the_intermediate_even_when_a_signal_interrupts_the_wait) {
+  const std::string nom = nom_unique();
+  Enfant ecouteur(forker_un_ecouteur(nom, 0ms));
+  REQUIRE(ecouteur.valid());
+
+  pid_t intermediaire = -1;
+  {
+    // L'alarme part a 50 ms, l'intermediaire vit 250 ms : le signal tombe
+    // donc a coup sur PENDANT le waitpid, pas avant ni apres.
+    AlarmeGuard alarme(50 * 1000);
+    const sshos::DaemonLaunch r =
+        sshos::launch_daemon(nom, "/aucun-binaire", {}, sshos::LaunchBudget{},
+                             lanceur_qui_traine(intermediaire, 250ms));
+    CHECK(r == sshos::DaemonLaunch::Connected);
+  }
+  CHECK(g_alarmes >= 1);  // sans quoi le cas ne prouverait rien
+  REQUIRE(intermediaire > 0);
+
+  int st = 0;
+  errno = 0;
+  const pid_t reste = ::waitpid(intermediaire, &st, WNOHANG);
+  CHECK_EQ(static_cast<int>(reste), -1);
+  CHECK_EQ(errno, ECHILD);
+  if (reste == 0) ::waitpid(intermediaire, &st, 0);
 }

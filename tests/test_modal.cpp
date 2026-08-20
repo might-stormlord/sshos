@@ -244,12 +244,15 @@ TEST(modal_frames_the_buttons_it_was_given_not_the_default_ones) {
       {"Mise a jour disponible.", "Plus tard", "Reinstaller depuis GitHub"},
       {"Mise a jour installee.", "Plus tard", "Redemarrer"},
       {"fermer ?", "Annuler", "Confirmer"},
+      // Longueurs inversees : sans ce couple, la branche du partage qui
+      // preserve le bouton de DROITE n'est jamais empruntee.
+      {"Revenir en arriere ?", "Revenir a la version precedente", "Non"},
   };
   // 40 colonnes ne peuvent PAS porter « [ Plus tard ] [ Reinstaller depuis
   // GitHub ] » : la ou le plancher ne tient pas, les boutons se rognent, mais
   // ils restent dans le cadre. Un bouton peint dehors est perdu deux fois --
   // il salit le bureau, et hit() ne le rend jamais.
-  for (const int cols : {80, 60, 40}) {
+  for (const int cols : {80, 60, 40, 30}) {
     for (const auto& c : cas) {
       Modal m;
       m.ask(c.body, 1, c.cancel, c.confirm);
@@ -281,23 +284,103 @@ TEST(modal_frames_the_buttons_it_was_given_not_the_default_ones) {
       // bouton entierement dehors en rendrait zero.
       int cancel = 0;
       int confirm = 0;
+      int ca = -1, cb = -1, ka = -1, kb = -1;  // les deux plages, [a, b)
+      int ligne = -1;
       for (int y = r.y; y < r.y + r.h; ++y) {
         for (int x = r.x; x < r.x + r.w; ++x) {
           const ModalHit h = m.hit(x, y);
-          if (h == ModalHit::Cancel) ++cancel;
-          if (h == ModalHit::Confirm) ++confirm;
+          if (h == ModalHit::Cancel) {
+            ++cancel;
+            if (ca < 0) { ca = x; ligne = y; }
+            cb = x + 1;
+          }
+          if (h == ModalHit::Confirm) {
+            ++confirm;
+            if (ka < 0) ka = x;
+            kb = x + 1;
+          }
         }
       }
+      REQUIRE(ca >= 0);
+      REQUIRE(ka >= 0);
+      REQUIRE(ligne >= 0);
+
+      // 3. LES DEUX BOUTONS NE SE CHEVAUCHENT PAS, ET IL RESTE UN BLANC
+      // ENTRE EUX. C'est ce que draw() romprait s'il peignait le libelle
+      // ENTIER la ou la geometrie n'a reserve qu'une partie : le texte du
+      // bouton de gauche mordrait sur celui de droite, et l'on cliquerait
+      // « Confirmer » sur des lettres qui disent « Plus tard ».
+      CHECK(cb <= ka);
+      const std::string row = s.text_row(ligne);
+      CHECK(cb < static_cast<int>(row.size()) && row[cb] == ' ');
+
+      // 4. LA MEME MARGE DES DEUX COTES. Le bouton de droite s'arrete a deux
+      // colonnes de la bordure ; celui de gauche ne doit pas s'en approcher
+      // davantage, sans quoi il se colle au liseré.
+      CHECK(ca >= r.x + 2);
+      CHECK(kb <= r.x + r.w - 2);
       const int besoin =
           static_cast<int>(annuler.size() + confirmer.size()) + 5;
       if (cols >= besoin + 4) {
         CHECK_EQ(cancel, static_cast<int>(annuler.size()));
         CHECK_EQ(confirm, static_cast<int>(confirmer.size()));
       } else {
-        // Rogne, mais jamais efface : il reste de quoi cliquer.
+        // 5. LE PARTAGE, QUAND LE CADRE NE PEUT PAS TOUT PORTER. Aucun des
+        // deux n'est efface -- un bouton de largeur nulle n'est plus
+        // cliquable, et c'est la SORTIE de la question que l'utilisateur
+        // perdrait -- et celui qui tient dans sa moitie garde son libelle
+        // ENTIER : on ne rogne que ce qui deborde.
         CHECK(cancel > 0);
         CHECK(confirm > 0);
+        const int place = r.w - 5;  // les deux boutons, sans le chrome
+        if (static_cast<int>(annuler.size()) <= place / 2) {
+          CHECK_EQ(cancel, static_cast<int>(annuler.size()));
+        }
+        if (static_cast<int>(confirmer.size()) <= place - place / 2) {
+          CHECK_EQ(confirm, static_cast<int>(confirmer.size()));
+        }
+      }
+
+      // 6. DRAW() NE PEINT QUE CE QUE HIT() ATTRIBUE. Une cellule de
+      // l'interieur qui n'appartient a aucun bouton doit etre blanche : un
+      // libelle peint plus large que le rectangle que la geometrie lui a
+      // reserve mordrait sur l'espace de separation, sur son voisin, ou sur
+      // le liseré -- et l'on cliquerait « Confirmer » sur des lettres qui
+      // disent « Plus tard ».
+      for (int x = r.x + 1; x < r.x + r.w - 1; ++x) {
+        const ModalHit h = m.hit(x, ligne);
+        if (h == ModalHit::Cancel || h == ModalHit::Confirm) continue;
+        CHECK(x < static_cast<int>(row.size()) && row[x] == ' ');
       }
     }
   }
+}
+
+// UNE PROGRESSION NE PORTE PAS DE BOUTONS, DONC ELLE NE S'ELARGIT PAS POUR
+// EUX -- et ce qui le garantit est que dismiss() EFFACE les libelles.
+//
+// C'est la precondition sur laquelle repose l'equivalence declaree dans
+// min_width() : ni progress() ni inform() ne les remettent a zero, eux, et
+// ils ne le peuvent pas -- ils refusent de s'ouvrir sur une boite qui n'est
+// pas deja une progression. Le jour ou dismiss() cesserait de nettoyer, une
+// progression herittant de « Reinstaller depuis GitHub » grandirait de
+// dix-huit colonnes au moment precis ou elle perd ses boutons. Ce cas est
+// donc le garde de cette propriete-la, pas de la garde sur le style.
+TEST(modal_keeps_its_width_when_a_progress_follows_a_long_question) {
+  Modal court;
+  court.progress("compilation...");
+  const Rect nu = court.rect(80, 24);
+
+  Modal apres;
+  apres.ask("Installer la mise a jour ?", 0, "Plus tard",
+            "Reinstaller depuis GitHub");
+  const Rect question = apres.rect(80, 24);
+  apres.dismiss();
+  apres.progress("compilation...");
+  const Rect progression = apres.rect(80, 24);
+
+  // La question, elle, s'elargit bien pour ses boutons.
+  CHECK(question.w > nu.w);
+  // La progression qui lui succede retrouve la largeur d'une progression.
+  CHECK_EQ(progression.w, nu.w);
 }

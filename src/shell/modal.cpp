@@ -1,6 +1,7 @@
 #include "shell/modal.hpp"
 
 #include <algorithm>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -124,6 +125,18 @@ void Modal::dismiss() {
 // que le point soit dans rect_. C'est le defaut de 3512ffe revenu par la
 // porte des libelles au lieu du corps.
 int Modal::min_width() const {
+  // EQUIVALENCE DECLAREE (campagne de mutation, M5) : cette garde n'est
+  // aujourd'hui discriminee par aucun cas, et c'est voulu. Les libelles
+  // ne sont non vides que sur une QUESTION : ask() seul les pose,
+  // dismiss() les efface, et progress() comme inform() refusent de
+  // s'ouvrir sur une boite qui n'est pas deja une progression. Hors
+  // question, le calcul ci-dessous rendrait donc « [  ] [  ] » = 13,
+  // c'est-a-dire moins que kMinWidth, et le max() donnerait le meme
+  // resultat. La garde est gardee parce qu'elle dit l'invariant a
+  // l'endroit ou il compte -- une boite sans boutons ne s'elargit pas
+  // pour des boutons -- au lieu de le faire dependre d'une propriete
+  // de dismiss(). Ce que ce dernier garantit est pine par
+  // modal_keeps_its_width_when_a_progress_follows_a_long_question.
   if (style_ != ModalStyle::Question) return kMinWidth;
   const int want = static_cast<int>(button(cancel_label_).size() +
                                     button(confirm_label_).size()) +
@@ -154,23 +167,42 @@ int Modal::buttons_y() const {
 
 void Modal::layout(int cols, int rows) { rect_ = rect(cols, rows); }
 
-// LES DEUX BOUTONS SONT BORNES PAR LE CADRE, TOUJOURS. min_width() suffit
-// des que l'ecran peut le porter -- et alors ces bornes ne rognent rien --
-// mais un terminal plus etroit que la somme des deux libelles ferait
-// autrement ressortir le bouton de gauche. Un bouton peint hors du cadre est
-// perdu deux fois : il salit le bureau, et hit() ne le rend jamais.
+// LES DEUX LARGEURS SE DECIDENT ENSEMBLE, ET UNE SEULE FOIS.
+//
+// min_width() suffit des que l'ecran peut le porter, et alors ces deux
+// valeurs sont les longueurs entieres des libelles : rien n'est rogne. En
+// dessous, il faut partager -- et surtout ne laisser AUCUN des deux a zero.
+// Les borner separement le faisait : le bouton de droite, ancre a droite,
+// prenait tout ce que le cadre pouvait donner et il ne restait rien pour
+// celui de gauche. A trente colonnes, « [ Plus tard ] » disparaissait
+// entierement, c'est-a-dire la SORTIE de la question.
+//
+// Le plus court garde donc sa place tant qu'il tient dans la moitie ; le
+// plus long cede le reste ; et si aucun des deux ne tient, chacun a sa
+// moitie.
+std::pair<int, int> Modal::button_widths() const {
+  const int wa = static_cast<int>(button(cancel_label_).size());
+  const int wk = static_cast<int>(button(confirm_label_).size());
+  const int room = std::max(0, rect_.w - kButtonsChrome);
+  if (wa + wk <= room) return {wa, wk};
+  const int moitie = room / 2;
+  if (wa <= moitie) return {wa, room - wa};
+  if (wk <= room - moitie) return {room - wk, wk};
+  return {moitie, room - moitie};
+}
+
 Rect Modal::confirm_rect() const {
-  const int w = std::min(static_cast<int>(button(confirm_label_).size()),
-                         std::max(0, rect_.w - 4));
+  const int w = button_widths().second;
   return Rect{rect_.x + rect_.w - 2 - w, buttons_y(), w, 1};
 }
 
 Rect Modal::cancel_rect() const {
-  const Rect k = confirm_rect();
-  // Ce qui reste entre la marge gauche du cadre et le bouton de droite.
-  const int room = std::max(0, k.x - 1 - (rect_.x + 2));
-  const int w = std::min(static_cast<int>(button(cancel_label_).size()), room);
-  return Rect{k.x - 1 - w, buttons_y(), w, 1};
+  const std::pair<int, int> w = button_widths();
+  // Colle au bouton de droite, un espace entre les deux. Quand le partage a
+  // joue, w.first + w.second vaut exactement la place disponible et le
+  // bouton retombe pile sur la marge gauche de deux colonnes.
+  return Rect{rect_.x + rect_.w - 3 - w.second - w.first, buttons_y(),
+              w.first, 1};
 }
 
 void Modal::draw(View v, const Theme& th, Border b) const {

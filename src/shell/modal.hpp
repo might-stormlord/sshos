@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 
 #include "render/surface.hpp"
 #include "render/theme.hpp"
@@ -84,6 +85,9 @@ class Modal {
   // La largeur minimale du cadre, calculee sur les libelles REELS des deux
   // boutons -- pas sur « Annuler / Confirmer ».
   int min_width() const;
+  // Les largeurs des deux boutons, decidees ENSEMBLE : les borner
+  // separement laissait celui de gauche a zero sur un cadre etroit.
+  std::pair<int, int> button_widths() const;
   int buttons_y() const;
   Rect cancel_rect() const;
   Rect confirm_rect() const;
