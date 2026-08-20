@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <chrono>
 #include <fstream>
 #include <cstdint>
@@ -83,6 +84,19 @@ pid_t lanceur_trivial(const std::vector<std::string>&) {
   const pid_t pid = ::fork();
   if (pid == 0) ::_exit(0);
   return pid;
+}
+
+// Le meme, mais il retient le pid fabrique. Sert a verifier que
+// l'intermediaire a bien ete recolte : sans quoi il reste zombie, et un
+// zombie oublie est ramasse par le reap_children() de test_daemon.cpp, dont
+// le try_reap() recoit alors ECHILD pour toujours.
+sshos::DaemonSpawner lanceur_qui_retient(pid_t& vu) {
+  return [&vu](const std::vector<std::string>&) {
+    const pid_t pid = ::fork();
+    if (pid == 0) ::_exit(0);
+    vu = pid;
+    return pid;
+  };
 }
 
 pid_t lanceur_qui_echoue(const std::vector<std::string>&) { return -1; }
@@ -157,6 +171,52 @@ TEST(launch_tells_a_failed_spawn_apart_from_an_expired_wait) {
   CHECK(r == sshos::DaemonLaunch::SpawnFailed);
 }
 
+// L'ANNONCE A UN SEUIL, et le seuil est la moitie de son interet. Une
+// attente courte ne doit RIEN dire : un message qui tombe a chaque
+// demarrage n'apprend plus rien le jour ou il compte. 200 ms obligent a
+// repasser par la boucle -- donc a franchir le test de patience -- tout en
+// restant loin du seuil d'une seconde. (Campagne de mutation, M5.)
+TEST(launch_says_nothing_while_the_wait_stays_short) {
+  const std::string nom = nom_unique();
+  Enfant ecouteur(forker_un_ecouteur(nom, 200ms));
+  REQUIRE(ecouteur.valid());
+
+  int dits = 0;
+  const sshos::DaemonLaunch r = sshos::launch_daemon(
+      nom, "/aucun-binaire", [&dits] { ++dits; }, sshos::LaunchBudget{},
+      lanceur_trivial);
+
+  CHECK(r == sshos::DaemonLaunch::Connected);
+  CHECK_EQ(dits, 0);
+}
+
+// L'INTERMEDIAIRE DOIT ETRE RECOLTE. spawn_detached rend le pid d'un enfant
+// qui meurt aussitot, et daemonize.hpp pose que l'appelant DOIT le
+// recolter. Un zombie laisse ici ne se voit nulle part -- jusqu'a ce qu'il
+// casse un cas de test_daemon.cpp une fois sur dix. (Campagne de mutation,
+// M8.)
+TEST(launch_reaps_the_intermediate_process_it_spawned) {
+  const std::string nom = nom_unique();
+  Enfant ecouteur(forker_un_ecouteur(nom, 0ms));
+  REQUIRE(ecouteur.valid());
+
+  pid_t intermediaire = -1;
+  const sshos::DaemonLaunch r =
+      sshos::launch_daemon(nom, "/aucun-binaire", {}, sshos::LaunchBudget{},
+                           lanceur_qui_retient(intermediaire));
+  CHECK(r == sshos::DaemonLaunch::Connected);
+  REQUIRE(intermediaire > 0);
+
+  // Deja recolte : waitpid ne le connait plus.
+  int st = 0;
+  errno = 0;
+  const pid_t reste = ::waitpid(intermediaire, &st, WNOHANG);
+  CHECK_EQ(static_cast<int>(reste), -1);
+  CHECK_EQ(errno, ECHILD);
+  // Et si ce n'est pas le cas, ne pas le laisser derriere nous.
+  if (reste == 0) ::waitpid(intermediaire, &st, 0);
+}
+
 // --- ce que le demon dit quand il n'arrive PAS a demarrer ----------------
 //
 // Le trou de treize secondes du 19 aout n'etait pas une absence de defaut :
@@ -214,4 +274,20 @@ TEST(daemon_notes_in_its_journal_that_a_start_was_refused) {
   const std::string texte = lire_fichier(bac.fichier());
   CHECK(texte.find("demarrage refuse") != std::string::npos);
   CHECK(texte.find("adresse deja prise") != std::string::npos);
+}
+
+// UNE ADRESSE PRISE N'EST PAS LE SEUL ECHEC POSSIBLE, et les autres ne
+// doivent pas se taire non plus : ils rendent 1, eux, et c'est justement le
+// cas ou l'on veut savoir pourquoi. Un nom trop long pour sun_path leve une
+// runtime_error ordinaire (net.cpp, fill). (Campagne de mutation, M10.)
+TEST(daemon_notes_in_its_journal_a_start_that_failed_for_another_reason) {
+  BacJournal bac;
+  REQUIRE(bac.valid());
+  const std::string trop_long(200, 'x');
+
+  CHECK_EQ(sshos::run_daemon(trop_long, bac.fichier()), 1);
+
+  const std::string texte = lire_fichier(bac.fichier());
+  CHECK(texte.find("demarrage impossible") != std::string::npos);
+  CHECK(texte.find("trop long") != std::string::npos);
 }
