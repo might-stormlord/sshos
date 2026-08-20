@@ -10,7 +10,9 @@
 > **1300 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
 > **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août).
 > Arbre de travail propre.
-> **260 commits** sur `main`, 124 fichiers dans `src/`.
+> **264 commits** sur `m1-noyau` (`git rev-list --count m1-noyau` — ce chiffre
+> périme à chaque commit, le recompter plutôt que le croire), 124 fichiers
+> dans `src/`.
 > **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
@@ -342,16 +344,22 @@ telle dans la spec §5.0.
 
 ## 2 quater. ⚠️ La mise à jour du 20 août 2026 — ce qu'il faut en attendre
 
-> **À lire AVANT de cliquer « Mettre a jour ».** Six commits sont prêts sur
-> `m1-noyau` ; ils corrigent le redémarrage et ajoutent la progression
-> chiffrée. Mais **cette mise à jour-ci ne bénéficie d'aucune des deux**, et
+> **À lire AVANT de cliquer « Mettre a jour ».** Un lot de commits est prêt sur
+> `m1-noyau` — `git rev-list --count origin/main..m1-noyau` en donnait **8** le
+> 20 août, et ce chiffre bouge à chaque commit. Ils corrigent le redémarrage et
+> ajoutent la progression chiffrée. Mais **cette mise à jour-ci ne bénéficie d'aucune des deux**, et
 > ce n'est pas un défaut : c'est la conséquence mécanique de qui pilote quoi.
 
 ### Il faut pousser d'abord, sinon rien ne se passe
 
 `--apply` tire de **GitHub**, pas du disque. Au 20 août, `main` et
-`origin/main` sont **six commits en arrière** de `m1-noyau` : sans pousser,
-`--check` répond « vous êtes à jour » et le bouton ne propose rien.
+`origin/main` sont **en arrière** de `m1-noyau` : sans pousser, `--check`
+répond « vous êtes à jour » et le bouton ne propose rien. Le vérifier
+plutôt que le supposer :
+
+```bash
+git rev-list --count origin/main..m1-noyau   # 0 = rien à pousser
+```
 
 ```bash
 cd /home/storm/dev/ssh_os_2.0
