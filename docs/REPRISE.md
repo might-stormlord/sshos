@@ -4,13 +4,13 @@
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
 > quand un fait vient d'une mesure, la mesure est citée.
 >
-> **Dernière mise à jour :** 19 août 2026 (fin de journée), branche `m1-noyau`. **Le dépôt est publié :**
+> **Dernière mise à jour :** 20 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1277 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **1300 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
 > **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août).
 > Arbre de travail propre.
-> **254 commits** sur `main`, 120 fichiers dans `src/`.
+> **260 commits** sur `main`, 124 fichiers dans `src/`.
 > **L'installation locale et la mise à jour depuis le bureau sont livrées** — §2 ter.
 > ⚠️ Les autres mesures de ce dossier datent du 15 août, sur le commit alors nommé
 > `e6d013d` : elles restent justes, mais **toutes les empreintes de commit ont changé
@@ -126,8 +126,18 @@ Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 > ⚠️ **Ce total périme à chaque commit qui ajoute un cas, et il a déjà menti deux
 > fois** — « 189 cas » puis « 1120 cas », chaque fois assez longtemps pour qu'un
 > contexte neuf puisse croire avoir tout cassé. Le compter plutôt que le croire :
-> `grep -c '^TEST(' tests/*.cpp | awk -F: '{s+=$2} END {print s}'` doit rendre le
+> `grep -ch '^TEST(' tests/*.cpp | awk '{s+=$1} END {print s}'` doit rendre le
 > même nombre que la ligne de bilan de `sshos_tests`.
+>
+> ⚠️ **`-h`, et pas un découpage sur `:`.** La version qu'a portée ce dossier
+> jusqu'au 20 août 2026 faisait `grep -c ... | awk -F: '{s+=$2}'`. Or `grep -c`
+> ne préfixe le nom du fichier **que lorsqu'il en reçoit plusieurs** : sur un
+> seul, il imprime le compte nu, `$2` est vide, et le total tombe
+> silencieusement à **zéro**. Ça ne se voyait pas ici — il y a 60 fichiers de
+> test — mais la même ligne, recopiée dans `tools/update.sh` pour dessiner une
+> barre de progression, a rendu 0 et effacé la barre sans rien dire. Deuxième
+> outil de vérification de ce dossier pris en défaut, après le balayage du
+> §9 bis.
 
 ### Le geste de vérification à la main
 
@@ -295,6 +305,8 @@ sh tools/install.sh --yes --source git # sans rien demander
 | `python3 tools/verif_isolation.py <HOME>` | **le test qui juge tout** : le binaire de dev ne doit ni voir ni tuer le bureau installé |
 | `python3 tools/sonde_update.py` | la sonde bout-en-bout, sur un faux dépôt git — 26 vérifications |
 | `python3 tools/verif_redemarrage.py` | un vrai redémarrage : l'ancien démon sort, un neuf prend sa place, le client se rattache seul |
+| `python3 tools/verif_redemarrage_lent.py` | le même, mais le démon neuf met **3 s** à écouter. C'est le cas qui a coûté un bureau le 19 août : `RETARD=3`, et `SSHOS_ANCIEN=` pour rejouer contre une version antérieure |
+| `python3 tools/verif_progression.py` | la barre de progression **avance** pendant un vrai `--apply` : le fichier d'état est échantillonné pendant le travail, et la suite vérifie qu'elle bouge, ne recule pas, et ne déborde pas de [0, 100] |
 | `python3 tools/verif_repos.py` | le démon **détaché** ne doit consommer aucun CPU |
 | `python3 tools/verif_sortie.py` | « Fermer la session » tue toujours le démon — chemin qu'aucun test unitaire ne couvre |
 
@@ -375,6 +387,8 @@ l'usage réel. Ils sont tous dans l'historique de `m1-noyau`.
 | **Le démon survit au tueur de mémoire, et se dit** | Une session de travail a disparu sans laisser de trace : ni `dmesg` dans le conteneur, ni image mémoire, ni journal. `run_daemon()` se pose donc à `oom_score_adj = -1000` (mesuré avant : 6,4 Mo pour un `oom_score` de 666, contre 704 pour un processus de 543 Mo). **Le réglage s'hérite et survit à `execve`** : les trois endroits qui donnent naissance à un processus étranger le rendent (`Pty`, le lanceur de mise à jour, `spawn_detached`), sans quoi un `make -j12` lancé dans une fenêtre deviendrait immortel. Et un journal — `<données>/journal.log` — dit `demarrage pid=…` puis la raison de l'arrêt. **Ce qu'il ne peut pas dire est ce qui le rend utile :** un SIGKILL n'écrit rien, donc une vie qui commence et ne se termine par aucune ligne EST la signature d'une mort brutale | `2f4232d` |
 | **Coller, et pouvoir copier** | Coller ne faisait **rien**, et n'avait jamais rien fait : `Session::on_input` démontait `InputEvent` par une chaîne de `get_if` et oubliait le collage (§9 bis, n° 15). Le terminal l'écrit maintenant à l'invité, encadré si et seulement si l'invité a demandé le mode 2004, l'encadrement s'ouvrant au premier morceau et ne se fermant qu'au dernier. **Tout octet de contrôle est retiré** sauf tabulation et fins de ligne : un `\033]0;` collé renommerait la fenêtre, un `\033[201~` fabriqué refermerait l'encadrement et rendrait exécutable tout ce qui suit. Pendant une saisie du bureau, le collage va dans le **champ** — coller un chemin dans la roue plutôt que le retaper. **Le garde permanent est au §9 bis** | `6828642` |
 | **Copier : la question reste ouverte** | Le bureau capte la souris (`?1002h`), ce qui neutralise la sélection native du terminal — on ne peut pas sélectionner pour copier ailleurs. La bascule `^A m` (« Souris : bureau ou terminal ») rend la souris au terminal, et elle avait été ajoutée au menu ; **l'utilisateur l'a refusée** : *« j'ai toujours une souris donc… »* — il ne veut pas troquer la souris contre la sélection, il veut les deux. L'entrée de menu a été retirée, **puis la bascule elle-même** : sous Konsole, `Maj`+glisser rend la sélection native **sans** couper le tracking, donc le troc qu'elle propose n'a aucune contrepartie ici — et il enferme (« je suis coincé dans le mode pas de souris »). Sont partis avec elle : `Action::ToggleMouse`, `^A m`, sa ligne d'aide, et **tout le mécanisme hors-bande** (`take_out_of_band`, `out_of_band_`, la concaténation devant la trame) dont elle était le SEUL producteur — le garder aurait fabriqué le code sans appelant du §9 bis. La spec §7.2, qui la prescrivait depuis le 10 août, porte désormais une annotation datée plutôt qu'une réécriture. Une conception complète a été explorée (sélection possédée par le bureau, presse-papiers interne, OSC 52, fenêtre « texte nu ») et **délibérément NON construite** : l'utilisateur est sous **Konsole**, dont le `Maj`+glisser rend la sélection native sans coûter la souris du bureau, et il a confirmé que « le copier collé fonctionne ». Onze fichiers pour une question qui ne se pose plus. ⚠️ **Si elle revient**, le point qui décide est que `Maj`+glisser sélectionne la trame COMPOSÉE — bordures, panneau, fenêtres voisines — parce que nos trames positionnent le curseur au lieu d'émettre des lignes ; le bureau doit alors posséder la sélection lui-même, et le créneau existe déjà, tout fait, là où `Terminal::on_mouse` jette les évènements quand l'invité ne suit pas la souris | `666de42` |
+| **Un demon lent ne coute plus le bureau** | Redemarrer apres une mise a jour rendait la main au shell : le client accordait au demon neuf **50 tentatives a 20 ms, soit une seconde pile**, alors que le journal montre un retour a **13 secondes**. Deux choses rendaient le defaut introuvable. Le geste vivait dans `src/main.cpp`, que `CMakeLists` retire de `sshos_core` — **aucun test ne pouvait l'atteindre** ; il vit desormais dans `src/client/launch.cpp`, avec une couture pour le lanceur, un budget de **30 s** et un mot a l'utilisateur passe une seconde (« le demon met du temps a demarrer, patience... »). Et le journal s'ouvrait **apres** le `bind`, si bien qu'un demon qui n'arrivait pas a demarrer sortait sans rien ecrire nulle part — `spawn_detached` redirige deja ses 0/1/2 vers `/dev/null`. Il s'ouvre avant, et une adresse deja prise laisse une ligne. ⚠️ **Le correctif ne sauve pas LA mise a jour qui l'installe** : c'est le client d'AVANT qui redemarre, avec son budget d'une seconde. Sonde : `tools/verif_redemarrage_lent.py` | `5b792e6`, `843919a` |
+| **La mise a jour dit ou elle en est** | Cinq libelles couvraient une a deux minutes : « compilation... » restait fige, et rien ne distinguait un travail qui avance d'un travail bloque. **Aucun chiffre n'est invente** : `cmake --build` ecrit deja « [ 57%] » et le lanceur de tests une ligne par cas, le total se comptant sur l'arbre sorti. Un surveillant de fond replie les deux sur l'echelle du travail entier et ecrit `progress=` dans l'etat ; le C++ **lit** et refuse tout ce qui n'est pas un entier de 0 a 100, comme pour les numeros de version. La barre prend **la place des boutons**, qu'une progression n'a pas : la boite ne change donc pas de hauteur, et le chiffre est calibre sur « 100% » pour qu'elle ne se decale pas de 9 a 10 pour cent. Sans chiffre, **aucune barre**. La jauge de `shell/sysinfo.cpp` devient `render/gauge.cpp`, partagee. Sonde : `tools/verif_progression.py` | `abd6ae4`, `40c8a1f` |
 | **Le terminal s'ouvre chez vous** | Il s'ouvrait dans `/` : `become_daemon()` fait `chdir("/")` et le répertoire courant s'hérite. `PtySpawn` gagne un `cwd` (échec ignoré — un dossier effacé ne doit pas coûter la fenêtre), le défaut est `home_dir()` lu dans `getpwuid()`, et une case **`[*]`** dans la barre d'onglets, juste avant le `+`, ouvre une saisie en place qui prend toute la barre. ASCII assumé : `U+2699` est un emoji, rendu sur une ou deux colonnes selon le terminal, et la barre se décalerait. Persisté dans `<données>/config` (`cle = valeur`, écrit par temporaire + `rename()`) | `d40a1ba` |
 
 **Ce que l'ancrage coûte, et c'est assumé :** `Ctrl+gauche` et `Ctrl+droite`
@@ -909,7 +923,9 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 ## 9 bis. Le défaut signature du projet — et comment le trouver en deux minutes
 
-**Quinze fois**, du code a existé sans aucun appelant en production. Aucune suite de
+**Seize fois**, du code a existé sans aucun appelant en production — la
+seizième étant `restart_done_` (§10, fils laissés en l'air du 20 août), un
+*membre* écrit et jamais lu plutôt qu'une méthode. Aucune suite de
 tests ne l'a jamais signalé, parce que ce qui manque n'est pas la couverture : c'est
 **l'appel**. Un test unitaire ne peut pas le voir. Une campagne de mutation non plus —
 muter du code mort ne casse rien, et la mutation se déclare « équivalente ».
@@ -1147,6 +1163,38 @@ tableau du §3.
 
 Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
 en réaction à l'usage réel.
+
+### Les fils laissés en l'air le 20 août 2026
+
+Trouvés en corrigeant le redémarrage, **vérifiés à la main, et délibérément non
+corrigés** — ils sortaient du périmètre demandé. Ils sont listés ici pour que
+personne n'ait à les retrouver.
+
+1. **`--check` efface `restart-pending` sans condition, et c'est un cul-de-sac.**
+   `do_check` ne lit jamais le `status` en place avant de le remplacer
+   (`tools/update.sh`, `write_state up-to-date`). Tant que l'utilisateur n'a pas
+   redémarré, `running_is_installed()` est faux, donc le C++ ne requalifie rien :
+   le fichier passe simplement à `up-to-date`, la pastille s'éteint, l'entrée
+   redevient « Verifier les mises a jour », et **plus rien ne propose le
+   redémarrage** alors que le binaire posé n'est toujours pas celui qui tourne.
+   La vérification automatique tombe une fois par jour : le trou se referme tout
+   seul, en silence. Parade probable : que `--check` préserve `restart-pending`.
+2. **`restart_done_` est écrit et n'a aucun lecteur** (`src/shell/update_service.cpp:105`,
+   déclaré `update_service.hpp:146`). `grep -rn` sur tout le dépôt rend exactement
+   deux occurrences : la déclaration et cette unique écriture. **Seizième occurrence**
+   du défaut signature du §9 bis, appliqué à un membre plutôt qu'à une méthode.
+3. **La queue de `Session::run_update_command` est inatteignable.** Le `update_.run(id);`
+   final (`src/daemon/session.cpp`, après les trois branches) ne peut jamais
+   s'exécuter : la garde `if (id != e.id && id != "update:check") return;` plus les
+   trois branches couvrent les trois seuls identifiants que `entry()` produit.
+4. **Deux sondes ne sont PAS isolées du bureau vivant.** `tools/verif_sortie.py` et
+   `tools/verif_repos.py` énumèrent les démons par `--daemon` dans `cmdline` + uid,
+   **sans passer par `SSHOS_BOOT_ID`** : lancées sur cette machine, elles tuent le
+   bureau installé — donc la session de travail qui tourne dedans. Les rendre
+   isolées comme `verif_redemarrage.py` avant de les relancer.
+5. **Le correctif du redémarrage ne sauve pas la mise à jour qui l'installe.**
+   C'est le client d'AVANT qui pilote ce redémarrage-là, avec son budget d'une
+   seconde. Si ça retombe une fois : retaper `sshos`, le démon est déjà debout.
 
 ### Les fils laissés en l'air le 19 août au soir
 
