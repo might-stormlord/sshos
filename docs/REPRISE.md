@@ -23,11 +23,14 @@
 > réécriture d'historique qu'elle a entraînée : à lire avant toute manipulation de
 > git* · **§2 ter** ⚠️ *l'installation locale et la mise à jour depuis le bureau — à
 > lire avant de lancer un démon ou de toucher aux chemins* ·
+> **§2 quater** 🔴 *la mise à jour du 20 août : pousser `main` d'abord, et ni le
+> correctif du redémarrage ni la barre de progression ne servent à la mise à
+> jour qui les installe — à lire AVANT de cliquer « Mettre a jour »* ·
 > **§3** où l'on en est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
-> jalon, les 108 de `src/` · **§8 bis** le rythme de travail et la campagne
+> jalon, les 124 de `src/` · **§8 bis** le rythme de travail et la campagne
 > de mutation · **§8 ter** les deux outils (`tools/sonde.py`, `tools/mutation.py`) ·
-> **§9 bis** le défaut qui revient quatorze fois dans ce projet, et son balayage ·
+> **§9 bis** le défaut qui revient **seize** fois dans ce projet, et son balayage ·
 > **§9 ter** ce qu'un audit adversarial a trouvé — et ce qu'il a manqué ·
 > **§10** le carnet de ce qui reste à faire.
 > Le reste (§5 à §7, §8, §9) se lit à la demande.
@@ -112,12 +115,12 @@ cmake --build build-debug -j"$(nproc)"
 ```
 
 ```bash
-./build-release/sshos_tests            # 19,6 s (mesure du 15 août)
-./build-debug/sshos_tests              # 52,3 s (ASan + UBSan ; 47,3 s le 15 août)
+./build-release/sshos_tests            # 36,4 s (mesure du 20 août)
+./build-debug/sshos_tests              # 62,5 s (ASan + UBSan ; 47,3 s le 15 août)
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1277 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1300 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
@@ -256,8 +259,8 @@ git branch -f main m1-noyau && git push origin main
 
 ### Ce qui reste ouvert
 
-- **Pas d'en-têtes de licence par fichier.** L'AGPL les recommande ; il y a 108 fichiers
-  dans `src/`. Le `LICENSE` et le README suffisent juridiquement.
+- **Pas d'en-têtes de licence par fichier.** L'AGPL les recommande ; il y a 124 fichiers
+  dans `src/` (108 au jour de la publication). Le `LICENSE` et le README suffisent juridiquement.
 
 ---
 
@@ -334,6 +337,73 @@ le binaire : il prouve l'intégrité **du transport**, pas l'authenticité. Et �
 qu'après le vert » **exécute déjà la charge utile**. La propriété réelle est donc : *on
 n'installe pas du code cassé*. Pas de signature détachée — c'est une décision, notée comme
 telle dans la spec §5.0.
+
+---
+
+## 2 quater. ⚠️ La mise à jour du 20 août 2026 — ce qu'il faut en attendre
+
+> **À lire AVANT de cliquer « Mettre a jour ».** Six commits sont prêts sur
+> `m1-noyau` ; ils corrigent le redémarrage et ajoutent la progression
+> chiffrée. Mais **cette mise à jour-ci ne bénéficie d'aucune des deux**, et
+> ce n'est pas un défaut : c'est la conséquence mécanique de qui pilote quoi.
+
+### Il faut pousser d'abord, sinon rien ne se passe
+
+`--apply` tire de **GitHub**, pas du disque. Au 20 août, `main` et
+`origin/main` sont **six commits en arrière** de `m1-noyau` : sans pousser,
+`--check` répond « vous êtes à jour » et le bouton ne propose rien.
+
+```bash
+cd /home/storm/dev/ssh_os_2.0
+git branch -f main m1-noyau && git push origin main
+```
+
+⚠️ `git push origin main`, **jamais `--all` ni `--mirror`** : 23 branches
+locales portent encore l'ancienne identité (§2 bis).
+
+### Les deux nouveautés ne servent qu'à partir de la mise à jour SUIVANTE
+
+| Ce qui est corrigé | Pourquoi cette fois-ci n'en profite pas |
+|---|---|
+| **Le redémarrage** (budget 1 s → 30 s) | Le redémarrage est piloté par le **client déjà lancé**, donc l'ancien binaire, avec son budget d'une seconde. Le binaire neuf est posé, mais il ne tourne pas encore — c'est tout le problème qu'on vient de corriger. |
+| **La barre de progression** | `--apply` remplace `sshos-update` à l'étape **« installation »** (`tools/update.sh`, `cp "$SRC/tools/update.sh" "$UPDATER"`), c'est-à-dire **après** avoir compilé et passé la suite. Le script qui travaille est donc l'**ancien**, et il n'écrit aucun `progress=`. Pas de barre — la fenêtre dira « compilation... » comme avant. |
+
+**Ce n'est pas rattrapable sans tricher**, et ça ne vaut pas la peine : la
+deuxième mise à jour a les deux.
+
+### Ce qui peut donc encore arriver cette fois, et quoi faire
+
+Si le redémarrage retombe dans le trou d'une seconde, vous verrez :
+
+```
+sshos: mise a jour installee, redemarrage...
+sshos: le demon n'a pas repondu          (ou « le redemarrage n'a pas abouti »)
+```
+
+**Le bureau n'est pas perdu** : le démon finit par se lever, seul, quelques
+secondes plus tard. **Retaper `sshos`** s'y rattache. Vérifier au passage :
+
+```bash
+tail -5 ~/.local/share/sshos/journal.log
+grep -E 'installed_commit|installed_version|status' ~/.local/share/sshos/state
+```
+
+### Ce que le journal sait dire, depuis le 20 août
+
+Il portait déjà `demarrage pid=…` et la raison de l'arrêt. Il porte
+désormais aussi les **démarrages refusés**, qui ne laissaient aucune trace :
+
+| Ligne | Ce qu'elle veut dire |
+|---|---|
+| `demarrage pid=N socket=sshos/<uid>/<boot>` | un démon a pris l'adresse et vit |
+| `arret pour terminer une mise a jour` | il s'est retiré pour laisser la place au binaire neuf |
+| `demarrage refuse : adresse deja prise, socket=…` | un démon a été lancé alors qu'un autre tenait déjà l'adresse. **Normal** après une double relance ; anormal juste après un « arret » |
+| `demarrage impossible : <raison>` | le `bind` a échoué pour autre chose. Rend 1 |
+| *(une ligne `demarrage` suivie de RIEN)* | **SIGKILL** — le tueur de mémoire, typiquement. C'est la signature d'une mort brutale |
+
+**Un « arret pour terminer une mise a jour » suivi d'un trou de plusieurs
+secondes est exactement la signature du défaut du 19 août** : le démon a
+mis plus longtemps à revenir que le client n'a attendu.
 
 ---
 
@@ -448,14 +518,15 @@ une coquille : c'est ce qui rend les campagnes de mutation possibles.
 
 ## 3 bis. La carte du code
 
-19 247 lignes dans `src/` sur 120 fichiers, 27 810 dans `tests/` sur 59 (mesuré le
-19 août 2026, en fin de journée). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
+19 494 lignes dans `src/` sur 124 fichiers, 28 352 dans `tests/` sur 60 (mesuré le
+20 août 2026). **Le rapport n'est pas une coquille** : le projet écrit plus de tests que de code, et c'est ce qui rend les
 campagnes de mutation possibles.
 
 | Module | Ce qu'il fait | À savoir avant d'y toucher |
 |---|---|---|
 | `src/common/` | Descripteurs, sockets UNIX abstraits, file de sortie, protocole, UTF-8, horloge de trame, **protection contre le tueur de mémoire** (`oom.hpp`), **chemin des données de l'utilisateur** (`paths.hpp`) | `OutQueue` a un plafond ; son dépassement se classe *Clean* ou *Dirty* et la réaction diffère (A7). `oom.hpp` : le réglage s'HÉRITE et survit à `execve` — tout endroit qui donne naissance à un processus étranger doit appeler `drop_oom_protection()` |
-| `src/render/` | `Surface` (grille de cellules), `View` (sous-rectangle clippé), `Differ` (trames ANSI), thème, largeurs Unicode | Une application ne reçoit **jamais** autre chose qu'une `View` — elle ne peut pas peindre hors de sa fenêtre |
+| `src/render/` | `Surface` (grille de cellules), `View` (sous-rectangle clippé), `Differ` (trames ANSI), thème, largeurs Unicode, **jauge** (`gauge.hpp`) | Une application ne reçoit **jamais** autre chose qu'une `View` — elle ne peut pas peindre hors de sa fenêtre. `gauge_bar()` est la SEULE barre du projet : le fond d'écran et la fenêtre de mise à jour s'en servent toutes deux, et le glyphe suit la `Border` — c'est elle qui porte la réponse à « ce client accepte-t-il l'UTF-8 ? » |
+| `src/client/` | Mode brut et filet de crash (`tty_guard`), boucle client (`client`), **lancement du démon et attente qu'il écoute** (`launch`) | `launch.cpp` existe parce que ce geste vivait dans `main.cpp`, **que `CMakeLists` retire de `sshos_core`** : aucun test ne pouvait l'atteindre, et c'est là qu'un budget d'une seconde a coûté un bureau. Tout ce qui doit être testable doit vivre hors de `main.cpp` |
 | `src/input/` | Machine à états du clavier et de la souris, table des accords `<leader>` | `\033` seul est ambigu : le démon arme un délai de 50 ms. Sans lui, `vim` est inutilisable |
 | `src/vt/` | Émulation VT : parseur DEC, écran, historique, SGR, modes, réponses, jeux de caractères | `Screen` est pure : ni descripteur, ni horloge. C'est ce qui la rend fuzzable |
 | `src/pty/` | Pseudo-terminal, environnement de l'enfant | `Pty::shutdown()` porte **toute** la politique de fermeture (SIGHUP, maître, SIGKILL) : le destructeur et la fermeture d'onglet l'appellent tous deux |
@@ -535,12 +606,19 @@ Mesures de référence **du jalon 1** : coût nominal négligeable (7,02 / 7,08 
 garde contre 7,11 / 7,18 / 7,04 s avec) ; un `SIGSEGV` injecté coûtait 38 s avant
 l'optimisation par tranches, **7 380 ms après**. Deux cas expirent volontairement.
 
-> La suite entière prend **19,6 s en Release** et **47,3 s sous ASan/UBSan**
-> (re-mesuré le 15 août 2026 sur `e6d013d`, 1146 cas, facteur 2,41). L'essentiel de
-> ce temps est de l'attente délibérée : `user+sys` ne fait que **4,2 s** des 19,6 s
-> de mur (1,17 s d'utilisateur, 3,03 s de système), donc **79 % du temps est passé à
-> attendre des sous-processus** — pseudo-terminaux, démons, copies — et non à
-> calculer.
+> La suite entière prend **36,4 s en Release** et **62,5 s sous ASan/UBSan**
+> (mesuré le 20 août 2026, 1300 cas). L'essentiel de ce temps est de l'attente
+> délibérée : `user+sys` ne fait que **5,0 s** des 36,4 s de mur (1,28 s
+> d'utilisateur, 3,68 s de système), donc **86 % du temps est passé à attendre des
+> sous-processus** — pseudo-terminaux, démons, copies — et non à calculer.
+>
+> ⚠️ **Ces chiffres bougent avec la charge de la machine**, pas seulement avec le
+> nombre de cas : la mesure du 20 août a été prise pendant qu'une session de
+> travail tournait dans le bureau installé. Pour référence, la même suite tenait
+> en **19,6 s / 47,3 s** le 15 août avec 1146 cas. Les six cas de
+> `tests/test_launch.cpp` ajoutent à eux seuls **2,1 s**, et c'est assumé : ils
+> attendent de vrais démons, ce qui est précisément ce qu'aucun test purement
+> unitaire ne pouvait faire.
 
 **Ajouter un fichier de tests ne demande rien** : `CMakeLists.txt` fait un
 `GLOB tests/test_*.cpp`. Le nom du fichier n'a pas d'importance, mais le **préfixe
@@ -619,7 +697,9 @@ Ces points ont coûté cher à établir. Ne pas les défaire sans relire la mesu
 
 Le §6 ci-dessus ne couvre que le jalon 1 — ses 36 fichiers. Voici les 72 autres,
 **fichier par fichier** : les deux sections réunies couvrent les **108 fichiers de
-`src/`**, sans trou. La carte se recalcule intégralement :
+`src/`** tels qu'ils étaient au 15 août, sans trou. Les 16 venus depuis sont
+au §3 (le tableau « après la v1 ») et dans la liste des entrées hors plan
+juste sous le tableau ci-dessous. La carte se recalcule intégralement :
 
 ```bash
 for f in $(git ls-files 'src/*'); do
@@ -646,7 +726,7 @@ de ces bilans ne s'accordent pas avec les cases du plan qui les porte.
 | **6** — Éditeur | `2026-08-13-…-m6-editeur.md` | 3 | 909 | 52 | `apps/editor/buffer.*` · `apps/editor/editor.*` |
 | **7** — Dolphin | `2026-08-14-…-m7-dolphin.md` | 9 | 1104 | 120 | `apps/files/copy.*` — le 15 août (`0d5bb09`), `copy.hpp` est **renommé `apps/files/job.hpp`** (git le détecte à 63 % de similarité) tandis que `copy.cpp` est **supprimé** et remplacé par un `apps/files/job.cpp` neuf |
 
-**Cinq entrées de `src/` ne viennent d'aucun plan** — aucun des sept ne les nomme :
+**Sept entrées de `src/` ne viennent d'aucun plan** — aucun des sept ne les nomme :
 
 - `shell/help.*` (l'aide de découvrabilité, `e8878b8`). Attention au piège : elle naît
   le 12 août, **avant** le plan du jalon 3 (`a8e0bfd`, deux commits plus loin), dans la
@@ -656,6 +736,8 @@ de ces bilans ne s'accordent pas avec les cases du plan qui les porte.
 - `shell/snapassist.*` (l'assistance à l'ancrage, `b888ec5`).
 - `apps/files/job.cpp` (`0d5bb09`) — le fichier est neuf. Son en-tête `job.hpp`, lui,
   descend du `copy.hpp` du jalon 7 par renommage, et n'est donc pas hors plan.
+- `client/launch.*` (le lancement du démon sorti de `main.cpp`, `5b792e6`).
+- `render/gauge.*` (la barre, extraite de `shell/sysinfo.cpp`, `abd6ae4`).
 
 **Trois fichiers ont été retirés du produit**, et il faut le savoir avant de les
 chercher : `apps/bloc.*` et `apps/battement.*`, les deux applications factices du
@@ -875,6 +957,32 @@ Cinq règles, toutes payées comptant :
 > Et : **tuer les campagnes orphelines après tout redémarrage.** Un travail de fond
 > survit à une coupure et continue de muter `src/` sous les doigts. Vérifier avec
 > `pgrep -af mutate` **avant** de croire un échec de test.
+
+### Les deux campagnes du 20 août 2026
+
+| Campagne | Fichiers mutés | Filtres | Bilan |
+|---|---|---|---|
+| **Le redémarrage** | `client/launch.{cpp,hpp}`, `daemon/daemon.cpp` | `launch_`, `daemon_`, `session_` | 11 mutations : **6 mordues d'emblée**, 3 survivantes devenues des cas, 2 invalides |
+| **La progression** | `shell/update_state.cpp`, `shell/update_service.cpp`, `shell/modal.{cpp,hpp}`, `render/gauge.cpp`, `daemon/session.cpp` | `update_state`, `update_service`, `modal`, `session_`, `sysinfo`, `golden` | 13 mutations : **10 mordues d'emblée**, 1 survivante devenue un cas, 2 invalides |
+
+Les quatre survivantes, et le trou qu'elles ont montré :
+
+- **la patience tombée à zéro** — aucun cas ne pinait le seuil d'annonce ;
+  une attente courte doit rester **muette**, sinon le message ne veut plus
+  rien dire le jour où il compte ;
+- **la récolte de l'intermédiaire retirée** — un zombie ne se voit nulle
+  part, jusqu'à ce qu'il casse un cas de `test_daemon.cpp` une fois sur dix
+  (son `reap_children()` fait `waitpid(-1)`) ;
+- **un échec de `bind` autre qu'une adresse prise** ne laissait pas de
+  ligne — c'est pourtant le seul qui rende 1, donc celui dont on veut la
+  raison ;
+- **une boîte de progression rouverte** gardait le pourcentage du travail
+  précédent : un travail neuf pouvait démarrer à 93 %.
+
+**Et une mutation invalide qui vaut d'être notée :** remettre l'ouverture du
+journal **après** le `bind` **ne compile plus**, les blocs `catch` s'en
+servant. Comme pour le `std::visit` exhaustif du §9 bis, le garde est le
+compilateur, pas une relecture.
 
 ### Deux mutations sur trois ne compilent pas pour rien
 
@@ -1164,6 +1272,10 @@ tableau du §3.
 
 Il n'y a **pas de plan en cours** : le travail se fait à la demande, un geste à la fois,
 en réaction à l'usage réel.
+
+> 🔴 **Si vous êtes sur le point de faire la mise à jour, lisez le §2 quater
+> d'abord :** il faut pousser `main` avant, et ni le correctif du
+> redémarrage ni la barre ne serviront à la mise à jour qui les installe.
 
 ### Les fils laissés en l'air le 20 août 2026
 
