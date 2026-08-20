@@ -308,6 +308,54 @@ def etape7_etxtbsy(fix):
         p.wait()
 
 
+def etape8_restart_pending_survit(fix):
+    say("\n== 8. --check n'efface JAMAIS un redemarrage en attente")
+    # RESTART-PENDING N'EST PAS UNE CONCLUSION, C'EST UN FAIT : un binaire est
+    # pose et ce n'est pas celui qui tourne. Une verification ne regarde que
+    # le depot distant -- elle n'observe pas ce fait, donc elle ne peut pas le
+    # dementir. Seuls un --apply (qui repose un binaire) et le demon (qui
+    # compare les inodes) le peuvent.
+    #
+    # Sans cette regle : la verification automatique tombe une fois par jour,
+    # ecrit « up-to-date » par-dessus, la pastille s'eteint, l'entree redevient
+    # « Verifier les mises a jour » -- et plus RIEN ne propose le redemarrage
+    # alors que le binaire pose n'est toujours pas celui qui tourne. Le trou
+    # se refermait tout seul, en silence.
+    installed = fix.head()
+
+    # a. rien de neuf en face : le fait survit
+    fix.write_state("restart-pending", installed=installed)
+    r = fix.update("--check")
+    check("code de retour nul", r.returncode == 0)
+    check("status TOUJOURS restart-pending (et non up-to-date)",
+          fix.get("status") == "restart-pending")
+    check("remote_commit quand meme mis a jour",
+          fix.get("remote_commit") == installed)
+
+    # b. le reseau tombe : le fait survit aussi. C'est le cas le plus
+    #    probable des deux, et il ne compare meme pas.
+    fix.write_state("restart-pending", installed=installed)
+    env = fix.env()
+    env["SSHOS_REPO_URL"] = os.path.join(fix.base, "depot-qui-n-existe-pas")
+    r = run(["sh", UPDATE_SH, "--check"], env=env, timeout=120)
+    check("code de retour non nul", r.returncode != 0)
+    check("status TOUJOURS restart-pending (et non check-failed)",
+          fix.get("status") == "restart-pending")
+
+    # c. une version VRAIMENT plus recente, elle, a le droit de gagner : elle
+    #    PROPOSE quelque chose, donc l'entree reste actionnable et
+    #    l'application qui suit reposera un binaire de toute facon.
+    fix.write_project(version="v9", tests_ok=True)
+    plus_neuf = fix.commit("encore une")
+    fix.write_state("restart-pending", installed=installed)
+    r = fix.update("--check")
+    check("code de retour nul", r.returncode == 0)
+    check("status=available (une nouveaute prime)",
+          fix.get("status") == "available")
+    check("remote_commit = le commit neuf",
+          fix.get("remote_commit") == plus_neuf)
+
+
 def main():
     say("SONDE DE LA CHAINE DE MISE A JOUR")
     base = tempfile.mkdtemp(prefix="sshos-sonde-", dir="/var/tmp")
@@ -321,6 +369,7 @@ def main():
         etape5_rollback(fix)
         etape6_historique_reecrit(fix)
         etape7_etxtbsy(fix)
+        etape8_restart_pending_survit(fix)
     finally:
         shutil.rmtree(base, ignore_errors=True)
 

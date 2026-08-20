@@ -84,6 +84,11 @@ INSTALLED=$(get installed_commit); [ -n "$INSTALLED" ] || INSTALLED=unknown
 PREVIOUS=$(get previous_commit)
 CHECKED=$(get checked_at);       [ -n "$CHECKED" ] || CHECKED=0
 REMOTE=$(get remote_commit)
+# CE QUE DISAIT L'ETAT AVANT NOUS. Une seule des valeurs de `status` est un
+# FAIT et non une conclusion : `restart-pending` dit qu'un binaire est posé et
+# que ce n'est pas celui qui tourne. Une vérification ne regarde que le dépôt
+# distant -- elle n'observe pas ce fait, donc elle ne peut pas le démentir.
+STATUT_AVANT=$(get status)
 
 # --- ecriture de l'etat ---------------------------------------------------
 # UN SEUL RETOUR A LA LIGNE DANS UN MESSAGE FORGERAIT UNE PAIRE CLE=VALEUR.
@@ -201,6 +206,42 @@ fail() { # fail <status> <message>
   exit 1
 }
 
+# UNE VERIFICATION NE DEMENT PAS UN REDEMARRAGE EN ATTENTE.
+#
+# `restart-pending` n'est pas une conclusion, c'est un fait sur le disque : un
+# binaire est posé et ce n'est pas celui qui tourne. Deux acteurs seulement
+# peuvent l'effacer -- un `--apply`, qui repose un binaire et le réarme, et le
+# démon, qui compare les inodes (`running_is_installed()`). Une vérification,
+# elle, ne regarde que le dépôt distant.
+#
+# Sans cette règle, la vérification automatique -- une fois par jour, sans que
+# personne ait rien demandé -- écrivait « up-to-date » par-dessus : la pastille
+# s'éteignait, l'entrée redevenait « Verifier les mises a jour », et plus rien
+# ne proposait le redémarrage alors que le binaire posé n'était toujours pas
+# celui qui tournait. Le trou se refermait tout seul, en silence.
+#
+# Les conclusions qui PROPOSENT quelque chose, elles, gagnent : `available` et
+# `history-rewritten` laissent une entrée actionnable, et l'application qui
+# suivra reposera un binaire de toute façon.
+conclure() { # conclure <status> <message> [pid]
+  if [ "$STATUT_AVANT" = restart-pending ]; then
+    case "$1" in
+      checking|up-to-date|check-failed)
+        write_state restart-pending "redemarrez pour terminer" "${3:-}"
+        return 0 ;;
+    esac
+  fi
+  write_state "$1" "$2" "${3:-}"
+}
+
+# Comme fail(), mais sans effacer le fait ci-dessus. Le réseau qui tombe est
+# le cas le plus probable des deux, et c'est celui qui ne compare même pas.
+fail_check() { # fail_check <message>
+  conclure check-failed "$1"
+  printf 'sshos-update: %s\n' "$1" >&2
+  exit 1
+}
+
 # --- le verrou ------------------------------------------------------------
 # Il couvre TOUTE la sequence : rotation du binaire, pose, ecriture d'etat.
 # Sans lui, deux applications concurrentes font que sshos.previous finit par
@@ -269,11 +310,11 @@ do_check() {
     write_state updates-disabled "installation locale, pas de source distante"
     return 0
   fi
-  write_state checking "" "$$"
+  conclure checking "" "$$"
 
   _remote=$(remote_head || true)
   if [ -z "$_remote" ]; then
-    fail check-failed "verification impossible : reseau ou depot injoignable"
+    fail_check "verification impossible : reseau ou depot injoignable"
   fi
   REMOTE="$_remote"
   CHECKED=$(date +%s)
@@ -304,7 +345,7 @@ do_check() {
   fi
 
   if [ "$REMOTE" = "$INSTALLED" ]; then
-    write_state up-to-date ""
+    conclure up-to-date ""
     return 0
   fi
 
@@ -517,6 +558,19 @@ arreter_surveillance() {
   wait "$SURVEILLANT" 2>/dev/null || :
   SURVEILLANT=""
 }
+
+# UN SIGNAL VENU DE L'EXTERIEUR NE DOIT PAS LAISSER LE VERROU PRIS.
+#
+# Le surveillant hérite du descripteur 9, et un verrou `flock` appartient à la
+# DESCRIPTION de fichier ouverte, partagée par le fork : si le script principal
+# meurt sans passer par arreter_surveillance -- un SIGTERM ne vise que son
+# pid --, le fils survit, garde le verrou POUR TOUJOURS et réécrit l'état
+# toutes les demi-secondes avec un instantané figé. Toute invocation ultérieure
+# répondrait « un autre travail est en cours », sans qu'aucun travail ne coure.
+#
+# Aucun chemin interne n'y mène : tous les échecs appellent déjà
+# arreter_surveillance. C'est le signal externe que ce piège attrape.
+trap 'arreter_surveillance' HUP INT TERM
 
 build_and_test_tree() { # build_and_test_tree <racine> <tmp>
   have cmake || { fail apply-failed "cmake absent"; return 1; }
