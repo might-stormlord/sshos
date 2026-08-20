@@ -53,14 +53,12 @@ class Modal {
   // clignoter.
   void set_body(std::string message);
 
-  ModalStyle style() const { return style_; }
 
   // UNE RÉPONSE, PAS UNE QUESTION. L'utilisateur a demandé quelque chose --
   // vérifier les mises à jour, par exemple -- et il attend qu'on lui dise ce
   // qu'il en est. Un seul bouton, parce qu'il n'y a rien à décider : lui
   // montrer « Annuler / Confirmer » lui ferait chercher ce qu'il annule.
   void inform(std::string message);
-  bool is_info() const { return style_ == ModalStyle::Info; }
 
   void dismiss();
 
@@ -83,6 +81,9 @@ class Modal {
   ModalHit hit(int x, int y) const;
 
  private:
+  // La largeur minimale du cadre, calculee sur les libelles REELS des deux
+  // boutons -- pas sur « Annuler / Confirmer ».
+  int min_width() const;
   int buttons_y() const;
   Rect cancel_rect() const;
   Rect confirm_rect() const;

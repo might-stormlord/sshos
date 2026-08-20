@@ -219,3 +219,85 @@ TEST(modal_starts_a_new_progress_without_a_figure) {
   CHECK(g.find("93%") == std::string::npos);
   CHECK(g.find("█") == std::string::npos);
 }
+
+// LE CADRE DOIT TENIR LES BOUTONS QU'ON LUI A DONNES, PAS CEUX PAR DEFAUT.
+//
+// Le plancher de largeur etait calcule une fois pour toutes sur « Annuler »
+// et « Confirmer », alors que cancel_rect() et confirm_rect() se posent a
+// partir des libelles REELS. Avec « Plus tard » / « Mettre a jour » sur un
+// corps court, le bouton de gauche sortait du cadre par la gauche : peint
+// sur le bureau, et INCLIQUABLE puisque hit() exige d'abord que le point
+// soit dans rect_. Avec « Reinstaller depuis GitHub », il sortait
+// entierement -- et hit() rendait Confirm sur presque toute la largeur du
+// cadre, si bien qu'un clic a cote lancait la reinstallation.
+//
+// C'est le defaut de 3512ffe revenu par la porte des LIBELLES au lieu du
+// corps. Les trois couples ci-dessous sont ceux que la session pose vraiment
+// (src/daemon/session.cpp), sur les corps les plus courts qu'elle produise.
+TEST(modal_frames_the_buttons_it_was_given_not_the_default_ones) {
+  const struct {
+    const char* body;
+    const char* cancel;
+    const char* confirm;
+  } cas[] = {
+      {"Echec, voir update.log", "Plus tard", "Mettre a jour"},
+      {"Mise a jour disponible.", "Plus tard", "Reinstaller depuis GitHub"},
+      {"Mise a jour installee.", "Plus tard", "Redemarrer"},
+      {"fermer ?", "Annuler", "Confirmer"},
+  };
+  // 40 colonnes ne peuvent PAS porter « [ Plus tard ] [ Reinstaller depuis
+  // GitHub ] » : la ou le plancher ne tient pas, les boutons se rognent, mais
+  // ils restent dans le cadre. Un bouton peint dehors est perdu deux fois --
+  // il salit le bureau, et hit() ne le rend jamais.
+  for (const int cols : {80, 60, 40}) {
+    for (const auto& c : cas) {
+      Modal m;
+      m.ask(c.body, 1, c.cancel, c.confirm);
+      m.layout(cols, 24);
+      const Rect r = m.rect(cols, 24);
+
+      Surface s(cols, 24);
+      View v = s.root();
+      m.draw(v, Theme::mono16(), Border::Ascii);
+
+      const std::string annuler = std::string("[ ") + c.cancel + " ]";
+      const std::string confirmer = std::string("[ ") + c.confirm + " ]";
+
+      // 1. RIEN N'EST PEINT HORS DU CADRE. La vue recue est pleine largeur :
+      // c'est a la modale de se tenir, personne ne la borne pour elle.
+      for (int y = 0; y < 24; ++y) {
+        const std::string row = s.text_row(y);
+        for (int x = 0; x < static_cast<int>(row.size()); ++x) {
+          if (row[x] == ' ') continue;
+          const bool dedans =
+              x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+          CHECK(dedans);
+        }
+      }
+
+      // 2. CHAQUE CELLULE PEINTE D'UN BOUTON REPOND AU CLIC, et le compte est
+      // la largeur ENTIERE du libelle encadre des que le cadre peut la
+      // porter : un bouton a cheval sur la bordure en rendrait moins, un
+      // bouton entierement dehors en rendrait zero.
+      int cancel = 0;
+      int confirm = 0;
+      for (int y = r.y; y < r.y + r.h; ++y) {
+        for (int x = r.x; x < r.x + r.w; ++x) {
+          const ModalHit h = m.hit(x, y);
+          if (h == ModalHit::Cancel) ++cancel;
+          if (h == ModalHit::Confirm) ++confirm;
+        }
+      }
+      const int besoin =
+          static_cast<int>(annuler.size() + confirmer.size()) + 5;
+      if (cols >= besoin + 4) {
+        CHECK_EQ(cancel, static_cast<int>(annuler.size()));
+        CHECK_EQ(confirm, static_cast<int>(confirmer.size()));
+      } else {
+        // Rogne, mais jamais efface : il reste de quoi cliquer.
+        CHECK(cancel > 0);
+        CHECK(confirm > 0);
+      }
+    }
+  }
+}

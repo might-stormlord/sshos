@@ -26,7 +26,11 @@ std::string button(const std::string& label) { return "[ " + label + " ]"; }
 // corps peut tenir sur plusieurs lignes : « il existe 7 mises a jour » et
 // « cce9d11 -> 3512ffe » ne se lisent pas serrees sur une seule.
 constexpr int kChromeHeight = 5;
-constexpr int kMinWidth = kCancelW + kConfirmW + 5;
+// DEUX MARGES DE DEUX COLONNES, ET UN ESPACE ENTRE LES BOUTONS : c'est ce
+// que la pose de cancel_rect()/confirm_rect() consomme, et le plancher n'est
+// que cette somme, calculee sur les libelles qu'on a REELLEMENT recus.
+constexpr int kButtonsChrome = 5;
+constexpr int kMinWidth = kCancelW + kConfirmW + kButtonsChrome;
 
 // Decoupe le corps sur les retours a la ligne. Rendre un vecteur plutot que
 // d'indexer a la volee : rect(), draw() et les boutons ont tous besoin du
@@ -110,14 +114,32 @@ void Modal::dismiss() {
   percent_ = -1;
 }
 
+// LE PLANCHER SUIT LES LIBELLES QU'ON A RECUS, PAS CEUX PAR DEFAUT.
+//
+// Il etait fige sur « Annuler / Confirmer » alors que cancel_rect() et
+// confirm_rect() se posent, elles, a partir des libelles REELS. La session
+// pose « Plus tard / Mettre a jour » et « Plus tard / Reinstaller depuis
+// GitHub » : sur un corps court, le bouton de gauche sortait du cadre par la
+// gauche -- peint sur le bureau, et INCLIQUABLE puisque hit() exige d'abord
+// que le point soit dans rect_. C'est le defaut de 3512ffe revenu par la
+// porte des libelles au lieu du corps.
+int Modal::min_width() const {
+  if (style_ != ModalStyle::Question) return kMinWidth;
+  const int want = static_cast<int>(button(cancel_label_).size() +
+                                    button(confirm_label_).size()) +
+                   kButtonsChrome;
+  return std::max(kMinWidth, want);
+}
+
 Rect Modal::rect(int cols, int rows) const {
   const std::vector<std::string> lines = body_lines(question_);
   std::size_t longest = 0;
   for (const std::string& l : lines) longest = std::max(longest, l.size());
 
+  const int floor = min_width();
   const int want = static_cast<int>(longest) + 4;
-  int w = std::max(kMinWidth, want);
-  w = std::min(w, std::max(kMinWidth, cols - 4));
+  int w = std::max(floor, want);
+  w = std::min(w, std::max(floor, cols - 4));
   w = std::min(w, cols);
   const int h = std::min(kChromeHeight + static_cast<int>(lines.size()), rows);
   return Rect{(cols - w) / 2, (rows - h) / 2, w, h};
@@ -132,14 +154,23 @@ int Modal::buttons_y() const {
 
 void Modal::layout(int cols, int rows) { rect_ = rect(cols, rows); }
 
+// LES DEUX BOUTONS SONT BORNES PAR LE CADRE, TOUJOURS. min_width() suffit
+// des que l'ecran peut le porter -- et alors ces bornes ne rognent rien --
+// mais un terminal plus etroit que la somme des deux libelles ferait
+// autrement ressortir le bouton de gauche. Un bouton peint hors du cadre est
+// perdu deux fois : il salit le bureau, et hit() ne le rend jamais.
 Rect Modal::confirm_rect() const {
-  const int w = static_cast<int>(button(confirm_label_).size());
+  const int w = std::min(static_cast<int>(button(confirm_label_).size()),
+                         std::max(0, rect_.w - 4));
   return Rect{rect_.x + rect_.w - 2 - w, buttons_y(), w, 1};
 }
 
 Rect Modal::cancel_rect() const {
-  const int w = static_cast<int>(button(cancel_label_).size());
-  return Rect{confirm_rect().x - 1 - w, buttons_y(), w, 1};
+  const Rect k = confirm_rect();
+  // Ce qui reste entre la marge gauche du cadre et le bouton de droite.
+  const int room = std::max(0, k.x - 1 - (rect_.x + 2));
+  const int w = std::min(static_cast<int>(button(cancel_label_).size()), room);
+  return Rect{k.x - 1 - w, buttons_y(), w, 1};
 }
 
 void Modal::draw(View v, const Theme& th, Border b) const {
@@ -195,8 +226,14 @@ void Modal::draw(View v, const Theme& th, Border b) const {
   }
   const Rect c = cancel_rect();
   const Rect k = confirm_rect();
-  v.text(c.x, c.y, button(cancel_label_), confirm_ ? st : hot);
-  v.text(k.x, k.y, button(confirm_label_), confirm_ ? hot : st);
+  // ELIDES A LA LARGEUR QUE LA GEOMETRIE LEUR DONNE : draw() et hit() lisent
+  // le meme rectangle, faute de quoi on cliquerait a cote de ce qui est
+  // peint. Sur un ecran capable de porter min_width() -- le cas normal -- la
+  // coupe ne retire rien.
+  v.text(c.x, c.y, elide_to_cells(button(cancel_label_), c.w, "~"),
+         confirm_ ? st : hot);
+  v.text(k.x, k.y, elide_to_cells(button(confirm_label_), k.w, "~"),
+         confirm_ ? hot : st);
 }
 
 ModalHit Modal::hit(int x, int y) const {
