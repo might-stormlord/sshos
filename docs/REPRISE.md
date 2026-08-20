@@ -917,6 +917,7 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 | **`$PPID` est figé à l'initialisation du shell.** Mesuré `$PPID=2757136` (parent déjà mort) contre un ppid réel de `1`. A produit un test instable à 2/30. | `$(cut -d' ' -f4 /proc/$$/stat)`. |
 | **`dash` réinitialise le masque de signaux hérité**, mais **pas** les dispositions `SIG_IGN`. | Tester avec `/bin/cp`, pas `sh -c grep`. |
 | **`redirect_std_to_devnull()`** écrase les fd 0/1/2 avant `execv`. | En tenir compte dans toute sonde qui espère lire une sortie. |
+| **`stat` en shell ne déréférence PAS un lien ; `::stat()` en C, si.** `stat -c '%d %i' /proc/PID/exe` rend le périphérique et l'inode **du lien magique** (dev 25 = procfs), pas de sa cible. A produit, le 20 août 2026, la conclusion entièrement fausse que `running_is_installed()` (`src/shell/update_service.cpp`) ne pouvait jamais être vrai sur cette machine. | `stat -L`, ou `os.stat` en python. Et pour trancher **sans dépendre d'aucun lien** : `/proc/PID/maps` montre directement le périphérique et l'inode des pages de code mappées. |
 | **Injecter des octets dans un pty :** écrire sur `/dev/tty` depuis son propre shell n'atteint **pas** le pty du programme testé. | Alimenter l'entrée via un tube nommé : `script -qc "$S" /dev/null < fifo`, en gardant le tube ouvert (`exec 3>fifo`). |
 
 ---
