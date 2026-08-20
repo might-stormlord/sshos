@@ -199,3 +199,23 @@ TEST(modal_lets_a_running_progress_move_its_figure) {
   CHECK(g.find("63%") != std::string::npos);
   CHECK(g.find("10%") == std::string::npos);
 }
+
+// UN TRAVAIL NEUF REPART SANS CHIFFRE. La boite peut etre reutilisee sans
+// passer par dismiss() -- une progression cede la place a une autre -- et le
+// pourcentage du travail precedent ferait alors demarrer le suivant a 93%.
+// (Campagne de mutation, M9.)
+TEST(modal_starts_a_new_progress_without_a_figure) {
+  Modal m;
+  m.progress("un premier travail");
+  m.set_progress(93);
+  m.progress("un second travail");
+  m.layout(80, 24);
+  Surface s(80, 24);
+  View v = s.root();
+  m.draw(v, Theme::mono16(), Border::Unicode);
+
+  const std::string g = tout_le_cadre(s);
+  CHECK(g.find("second travail") != std::string::npos);
+  CHECK(g.find("93%") == std::string::npos);
+  CHECK(g.find("█") == std::string::npos);
+}
