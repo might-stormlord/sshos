@@ -8,14 +8,12 @@
 #include <string>
 
 #include "client/client.hpp"
+#include "client/launch.hpp"
 #include "common/net.hpp"
 #include "daemon/daemon.hpp"
 #include "daemon/daemonize.hpp"
 
 namespace {
-
-constexpr int kConnectAttempts = 50;
-constexpr int kConnectDelayUs = 20 * 1000;
 
 std::string current_socket_name() {
   return sshos::socket_name(::getuid(), sshos::read_boot_id());
@@ -39,23 +37,24 @@ bool logind_kills_user_processes() {
 int start_daemon_and_connect(const std::string& name) {
   // Par CHEMIN, pas par inode : après une mise à jour, l'inode de ce
   // processus est l'ancienne version (voir daemon_exe_path).
-  const pid_t mid = sshos::spawn_detached({sshos::daemon_exe_path(), "--daemon"});
-  if (mid < 0) {
-    std::fprintf(stderr, "sshos: impossible de lancer le demon\n");
-    return 1;
-  }
-  int status = 0;
-  ::waitpid(mid, &status, 0);  // l'intermédiaire meurt aussitôt
-
-  for (int i = 0; i < kConnectAttempts; ++i) {
-    try {
-      sshos::Fd probe = sshos::connect_abstract(name);
+  //
+  // L'attente elle-même vit dans src/client/launch.cpp, à portée de la
+  // suite de tests : le budget trop court qui a fait perdre un redémarrage
+  // était ici, dans le seul fichier qu'aucun test ne peut atteindre.
+  const sshos::DaemonLaunch r = sshos::launch_daemon(
+      name, sshos::daemon_exe_path(), [] {
+        std::fprintf(stderr, "sshos: le demon met du temps a demarrer, patience...\n");
+      });
+  switch (r) {
+    case sshos::DaemonLaunch::Connected:
       return 0;
-    } catch (const std::exception&) {
-      ::usleep(kConnectDelayUs);
-    }
+    case sshos::DaemonLaunch::SpawnFailed:
+      std::fprintf(stderr, "sshos: impossible de lancer le demon\n");
+      return 1;
+    case sshos::DaemonLaunch::TimedOut:
+      std::fprintf(stderr, "sshos: le demon n'a pas repondu\n");
+      return 1;
   }
-  std::fprintf(stderr, "sshos: le demon n'a pas repondu\n");
   return 1;
 }
 

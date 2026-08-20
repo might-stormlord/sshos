@@ -103,13 +103,31 @@ Fd make_signalfd() {
 
 }  // namespace
 
-int run_daemon(std::string_view socket_name) {
+int run_daemon(std::string_view socket_name, const std::string& journal_path) {
+  RealPlatform plat;
+
+  // LE JOURNAL AVANT LE BIND, et c'est un correctif, pas un rangement.
+  // Il s'ouvrait juste apres, si bien qu'un demon qui n'arrivait PAS a
+  // demarrer sortait sans rien ecrire nulle part : `spawn_detached`
+  // redirige deja ses 0/1/2 vers /dev/null avant l'execv, donc le message
+  // sur stderr n'existe pour personne. Le 19 aout 2026, un redemarrage de
+  // bureau perdu n'a laisse qu'un TROU de treize secondes entre deux lignes
+  // -- rien ne disait ce qui s'etait passe entre les deux. Une vie qui ne
+  // commence pas doit se lire, elle aussi.
+  Journal journal(plat, journal_path);
+
   Fd listener;
   try {
     listener = bind_abstract(socket_name);
   } catch (const AddressInUse&) {
-    return 0;  // un démon tourne déjà : rien à faire, ce n'est pas une erreur
-  } catch (const std::exception&) {
+    // Pas une erreur -- un demon tourne deja, c'est meme le cas nominal
+    // d'une double relance -- mais ca doit se lire : cote client, un
+    // demarrage refuse et un demarrage lent sont indiscernables.
+    journal.note("demarrage refuse : adresse deja prise, socket=" +
+                 std::string(socket_name));
+    return 0;
+  } catch (const std::exception& e) {
+    journal.note(std::string("demarrage impossible : ") + e.what());
     return 1;
   }
   set_nonblock(listener.get());
@@ -121,14 +139,10 @@ int run_daemon(std::string_view socket_name) {
   // demarrer -- un demon non protege reste un demon.
   protect_from_oom();
 
-  RealPlatform plat;
-
-  // LE JOURNAL, et la premiere ligne tout de suite. Un bureau qui disparait
-  // ne laissait AUCUNE trace : ni la raison d'un arret demande, ni meme la
-  // preuve qu'il avait demarre. Une vie qui commence ici et ne se termine
-  // par aucune ligne est la signature d'un SIGKILL -- celui du tueur de
-  // memoire, typiquement, qui ne laisse a personne le temps d'ecrire.
-  Journal journal(plat, daemon_journal_path());
+  // La premiere ligne d'une vie qui commence. Une vie qui commence ici et
+  // ne se termine par aucune ligne est la signature d'un SIGKILL -- celui
+  // du tueur de memoire, typiquement, qui ne laisse a personne le temps
+  // d'ecrire.
   arm_crash_note(journal.path());
   journal.note("demarrage pid=" + std::to_string(static_cast<int>(::getpid())) +
                " socket=" + std::string(socket_name));
