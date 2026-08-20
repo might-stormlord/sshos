@@ -73,11 +73,16 @@ struct Style {
 enum class Border { Unicode, Ascii };
 
 // width : 1 normal, 2 pleine chasse, 0 cellule de continuation.
-// cluster : 0 quand le graphème tient dans `ch`, sinon index dans le
-// réservoir de la Surface. Le réservoir ne coûte que sur ce qui l'exige.
+//
+// UN GRAPHÈME QUI NE TIENT PAS DANS UN SEUL POINT DE CODE -- emoji
+// composé, lettre suivie d'un diacritique combinant -- n'est PAS
+// représentable ici. Un champ `cluster` indexant un réservoir de grappes
+// a été déclaré pendant des mois, mais le réservoir n'a jamais été
+// construit : personne ne lisait ce champ, et il coûtait quatre octets
+// sur CHAQUE cellule de CHAQUE Surface. C'est ici qu'il faudra le
+// reposer le jour où l'on voudra rendre ces grappes.
 struct Cell {
   char32_t ch = U' ';
-  uint32_t cluster = 0;
   Color fg = Color::def();
   Color bg = Color::def();
   uint16_t attrs = 0;
@@ -85,6 +90,6 @@ struct Cell {
   bool operator==(const Cell&) const = default;
 };
 
-inline constexpr Cell kContinuation{U'\0', 0, Color::def(), Color::def(), 0, 0};
+inline constexpr Cell kContinuation{U'\0', Color::def(), Color::def(), 0, 0};
 
 }  // namespace sshos

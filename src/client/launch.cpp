@@ -3,6 +3,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
+
 #include "common/net.hpp"
 #include "daemon/daemonize.hpp"
 
@@ -18,8 +20,15 @@ DaemonLaunch launch_daemon(const std::string& socket_name,
 
   // L'intermédiaire meurt aussitôt ; sans cette récolte il resterait
   // zombie (daemonize.hpp).
+  //
+  // EINTR EST UN ÉCHEC QUI N'EN EST PAS UN : `waitpid` rend -1 sans avoir
+  // récolté, et abandonner là laisse précisément le zombie qu'on venait
+  // éviter. Un signal quelconque suffit à le déclencher, et le client tourne
+  // sur un terminal -- `SIGWINCH` arrive tout seul quand on redimensionne la
+  // fenêtre pendant que le démon se lève.
   int status = 0;
-  ::waitpid(mid, &status, 0);
+  while (::waitpid(mid, &status, 0) < 0 && errno == EINTR) {
+  }
 
   const auto debut = std::chrono::steady_clock::now();
   bool prevenu = false;

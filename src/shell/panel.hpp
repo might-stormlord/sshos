@@ -61,7 +61,6 @@ class Panel {
   // panneau veut que layout() calcule une fois ce que draw() et hit()
   // relisent, sinon ce qu'on clique n'est pas ce qu'on voit.
   void set_update_badge(bool on) { update_badge_ = on; }
-  bool update_badge() const { return update_badge_; }
 
   // Une ligne sur un bord horizontal, seize colonnes sur un bord vertical :
   // une entrée de tâche ne tient pas dans moins.

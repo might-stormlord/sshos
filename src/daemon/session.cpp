@@ -391,8 +391,16 @@ void Session::run_update_command(std::string_view id) {
     dirty_ = true;
     return;
   }
-  update_.run(id);
-  dirty_ = true;
+  // PAS DE QUEUE ICI, ET C'EST DEMONTRABLE. La garde ci-dessus n'admet que
+  // `update:check` ou l'identifiant de l'entree courante, et `entry()` n'en
+  // produit que trois -- « update:check », « update:apply »,
+  // « update:restart » --, tous traites au-dessus. Un `update_.run(id)`
+  // final ne pouvait donc jamais s'executer : il a vecu la sans appelant.
+  //
+  // Le jour ou `entry()` produira un quatrieme identifiant, il faudra lui
+  // ajouter sa branche ICI -- rien ne le rattrapera, une chaine de
+  // comparaisons de chaines ne se ferme pas au compilateur comme le
+  // `std::visit` de `on_input`.
 }
 
 // LA SESSION NE CONNAIT PAS LES TYPES D'APPLICATIONS -- c'est un principe

@@ -111,7 +111,6 @@ class Terminal : public App, public ParserSink {
   int settings_column_for_tests() const;
   const Screen& screen_for_tests() const { return active().screen; }
   const Scrollback& scrollback_for_tests() const { return active().history; }
-  const Modes& modes_for_tests() const { return active().modes; }
   std::string take_written_for_tests();
   pid_t pid_for_tests() const { return active().pty.pid(); }
   size_t tab_count_for_tests() const { return tabs_.size(); }

@@ -89,7 +89,6 @@ void View::put(int x, int y, char32_t ch, Style st) {
 
   Cell& c = s_->at(ox, oy);
   c.ch = ch;
-  c.cluster = 0;
   c.fg = st.fg;
   c.bg = st.bg;
   c.attrs = st.attrs;

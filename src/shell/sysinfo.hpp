@@ -53,7 +53,6 @@ class SysInfo {
                         const std::vector<ProcInfo>& procs);
   const std::vector<int>& cores_for_tests() const { return cores_; }
   uint64_t rx_rate_for_tests() const { return rx_per_s_; }
-  uint64_t tx_rate_for_tests() const { return tx_per_s_; }
   const std::vector<ProcRow>& rows_for_tests() const { return rows_; }
 
  private:

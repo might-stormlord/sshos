@@ -102,7 +102,6 @@ void UpdateService::reload() {
   // verification remettra le fichier droit.
   if (state_.status == UpdateStatus::RestartPending && running_is_installed()) {
     state_.status = UpdateStatus::UpToDate;
-    restart_done_ = true;
   }
 }
 

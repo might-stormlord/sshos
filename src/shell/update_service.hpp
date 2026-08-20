@@ -154,8 +154,6 @@ class UpdateService {
   bool have_deadline_ = false;
   std::chrono::steady_clock::time_point deadline_{};
   bool wants_restart_ = false;
-  // Vrai une fois qu'on a constate que le redemarrage avait eu lieu.
-  bool restart_done_ = false;
 };
 
 }  // namespace sshos
