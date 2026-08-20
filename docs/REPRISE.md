@@ -368,8 +368,31 @@ locales portent encore l'ancienne identité (§2 bis).
 | **Le redémarrage** (budget 1 s → 30 s) | Le redémarrage est piloté par le **client déjà lancé**, donc l'ancien binaire, avec son budget d'une seconde. Le binaire neuf est posé, mais il ne tourne pas encore — c'est tout le problème qu'on vient de corriger. |
 | **La barre de progression** | `--apply` remplace `sshos-update` à l'étape **« installation »** (`tools/update.sh`, `cp "$SRC/tools/update.sh" "$UPDATER"`), c'est-à-dire **après** avoir compilé et passé la suite. Le script qui travaille est donc l'**ancien**, et il n'écrit aucun `progress=`. Pas de barre — la fenêtre dira « compilation... » comme avant. |
 
-**Ce n'est pas rattrapable sans tricher**, et ça ne vaut pas la peine : la
-deuxième mise à jour a les deux.
+**Ce n'est pas rattrapable par le chemin de la mise à jour**, et ce n'est pas
+grave : la deuxième mise à jour a les deux.
+
+### Si vous voulez les deux TOUT DE SUITE : réinstaller depuis l'arbre local
+
+Le chemin d'installation, lui, pose le binaire **et** les scripts d'un coup —
+il n'a pas à s'auto-remplacer en cours de route.
+
+```bash
+cd /home/storm/dev/ssh_os_2.0
+cmake --build build-release -j"$(nproc)" && ./build-release/sshos_tests   # 1300 cas
+sh tools/install.sh --yes --source local --local-tree .
+```
+
+Après quoi le client, le démon, `sshos-update` et `sshos-version` sont tous
+neufs, et la mise à jour suivante montrera sa barre.
+
+> 🔴 **L'installeur arrête le bureau en cours** — après l'avoir dit, et avec
+> « non » par défaut. **Toute session de travail qui tourne DANS le bureau
+> meurt avec lui**, y compris une session d'assistant. À faire depuis une
+> console qui ne vit pas dans `sshos`, ou en acceptant de tout rouvrir.
+>
+> ⚠️ `--source local` **n'installe pas ce que GitHub contient**, mais ce que
+> l'arbre contient. Pousser reste nécessaire pour que la vérification
+> suivante ne redescende pas sur une version antérieure.
 
 ### Ce qui peut donc encore arriver cette fois, et quoi faire
 
