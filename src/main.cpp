@@ -9,6 +9,7 @@
 
 #include "client/client.hpp"
 #include "client/launch.hpp"
+#include "client/restart.hpp"
 #include "common/net.hpp"
 #include "daemon/daemon.hpp"
 #include "daemon/daemonize.hpp"
@@ -114,19 +115,31 @@ int main(int argc, char** argv) {
 
   // Mode normal : attacher, en démarrant le démon s'il n'existe pas.
   //
-  // DEUX TOURS AU PLUS. Un démon qui s'arrête pour se mettre à jour nous
-  // rend la main avec kClientRestartRequested : on repart alors sur le
-  // binaire NEUF, que `daemon_exe_path()` désigne par chemin et non par
-  // inode. Un seul tour de plus, jamais une boucle : si le redémarrage
-  // échoue, mieux vaut rendre la main au shell avec un message que tourner.
-  for (int attempt = 0; attempt < 2; ++attempt) {
+  // AUTANT DE REDÉMARRAGES QUE L'UTILISATEUR EN DEMANDE. Un démon qui
+  // s'arrête pour se mettre à jour nous rend la main avec
+  // kClientRestartRequested : on repart alors sur le binaire NEUF, que
+  // `daemon_exe_path()` désigne par chemin et non par inode.
+  //
+  // CE QUI EST BORNÉ ICI, C'EST LE STÉRILE, ET RIEN D'AUTRE. Cette boucle a
+  // longtemps compté ses tours -- `for (attempt = 0; attempt < 2; ++attempt)`
+  // -- en croyant borner un emballement. Elle bornait en réalité les
+  // redémarrages de toute la vie du client : le deuxième était refusé sans
+  // même essayer de relancer un démon, et l'utilisateur perdait son bureau
+  // sur « le redemarrage n'a pas abouti » alors que rien n'était cassé. Un
+  // `sshos` retapé repartait avec un compteur neuf, d'où le « une fois sur
+  // deux » exact. Le compte vit désormais dans RestartBudget
+  // (src/client/restart.hpp), à portée de la suite de tests, et ne compte que
+  // les allers-retours qui n'ont servi à rien.
+  sshos::RestartBudget budget;
+  bool premier_lancement = true;
+  for (;;) {
     try {
       sshos::Fd probe = sshos::connect_abstract(name);
       probe.reset();
     } catch (const std::exception&) {
       // L'avertissement logind n'a de sens qu'au premier lancement : le
       // répéter après une mise à jour serait du bruit.
-      if (attempt == 0 && logind_kills_user_processes()) {
+      if (premier_lancement && logind_kills_user_processes()) {
         std::fprintf(stderr,
                      "sshos: attention, logind est configure avec "
                      "KillUserProcesses=yes ;\n        vos fenetres ne "
@@ -136,13 +149,20 @@ int main(int argc, char** argv) {
       }
       if (start_daemon_and_connect(name) != 0) return 1;
     }
+    premier_lancement = false;
 
-    const int rc = sshos::run_client(name);
+    sshos::SessionTrace trace;
+    const int rc = sshos::run_client(name, &trace);
     if (rc != sshos::kClientRestartRequested) return rc;
+
+    // Une session qui a affiché un bureau ET reçu un geste est une session
+    // qui a servi : le redémarrage qu'elle demande est celui de
+    // l'utilisateur, pas celui d'une boucle.
+    if (!budget.allow(trace.desktop_shown && trace.user_acted)) {
+      std::fprintf(stderr, "sshos: le redemarrage n'a pas abouti\n");
+      return 1;
+    }
 
     std::fprintf(stderr, "sshos: mise a jour installee, redemarrage...\n");
   }
-
-  std::fprintf(stderr, "sshos: le redemarrage n'a pas abouti\n");
-  return 1;
 }

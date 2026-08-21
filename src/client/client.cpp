@@ -155,7 +155,12 @@ Fd connect_with_timeout(std::string_view socket_name, int timeout_ms) {
   }
 }
 
-int run_client(std::string_view socket_name) {
+int run_client(std::string_view socket_name, SessionTrace* trace) {
+  // Une trace jetable quand l'appelant n'en veut pas : la boucle ci-dessous
+  // écrit ses deux témoins sans avoir à tester un pointeur à chaque tour.
+  SessionTrace sans_appelant;
+  SessionTrace& temoins = trace != nullptr ? *trace : sans_appelant;
+
   Fd sock;
   try {
     sock = connect_with_timeout(socket_name, kConnectTimeoutMs);
@@ -245,6 +250,10 @@ int run_client(std::string_view socket_name) {
         rc = 1;
         break;
       }
+      // L'UTILISATEUR A AGI. Un redémarrage pour mise à jour ne s'arme que
+      // sur une confirmation -- clic ou touche --, donc elle est forcément
+      // passée par ici. Voir SessionTrace (client.hpp).
+      temoins.user_acted = true;
     }
 
     if ((fds[1].revents & (POLLIN | POLLHUP)) != 0) {
@@ -278,6 +287,10 @@ int run_client(std::string_view socket_name) {
             stop = true;
             break;
           }
+          // LE BUREAU S'EST AFFICHÉ. Un démon qui se détache sans avoir
+          // jamais rien peint n'a pas servi de session -- c'est le seul cas
+          // que RestartBudget a vocation à borner.
+          temoins.desktop_shown = true;
         } else if (const auto* d = std::get_if<Detached>(&*m)) {
           // La seule raison qui porte un comportement. Comparaison par
           // ÉGALITÉ sur une constante partagée : le démon vient de poser un

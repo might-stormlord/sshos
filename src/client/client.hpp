@@ -27,6 +27,29 @@ Fd connect_with_timeout(std::string_view socket_name, int timeout_ms);
 // reste du contrat.
 inline constexpr int kClientRestartRequested = 64;
 
-int run_client(std::string_view socket_name);
+// CE QU'UNE SESSION A PRODUIT, pour que l'appelant sache si le redémarrage
+// qu'on lui demande fait avancer quelque chose.
+//
+// La distinction n'est pas cosmétique : `RestartBudget`
+// (src/client/restart.hpp) borne les allers-retours STÉRILES et ne compte pas
+// les autres. Sans ces deux témoins, il n'y a aucun moyen de distinguer « le
+// bureau est revenu, l'utilisateur a travaillé, puis il a recliqué » de « le
+// démon se détache aussitôt attaché », et c'est en les confondant qu'un
+// redémarrage sur deux se perdait.
+struct SessionTrace {
+  // Au moins une trame reçue du démon et écrite sur la sortie : le bureau
+  // s'est affiché.
+  bool desktop_shown = false;
+  // Au moins une entrée transmise au démon : l'utilisateur a agi. C'est ce
+  // qui sépare un redémarrage demandé d'un redémarrage subi -- rien dans le
+  // démon n'arme `wants_restart` sans une confirmation explicite.
+  bool user_acted = false;
+};
+
+// `trace`, quand elle n'est pas nulle, est remplie au fil de la session. Un
+// paramètre optionnel plutôt qu'un changement de signature : le contrat
+// existant -- « rend le code de retour du processus » -- ne bouge pas, et les
+// appelants qui n'en ont que faire (tests/test_session.cpp) ne changent pas.
+int run_client(std::string_view socket_name, SessionTrace* trace = nullptr);
 
 }  // namespace sshos

@@ -440,13 +440,30 @@ portent encore l'ancienne identité (§2 bis).
 
 ### Si un redémarrage se perd quand même
 
+**Les deux messages ne disent PAS la même chose. Les lire séparément.**
+
 ```
 sshos: mise a jour installee, redemarrage...
-sshos: le demon n'a pas repondu          (ou « le redemarrage n'a pas abouti »)
+sshos: le demon n'a pas repondu
 ```
 
-**Le bureau n'est pas perdu** : le démon finit par se lever seul. **Retaper
-`sshos`** s'y rattache. Vérifier au passage :
+Le client a bel et bien relancé un démon, mais celui-ci n'a pas pris l'adresse
+dans les 30 s du budget (`LaunchBudget`, `src/client/launch.hpp`). **Le bureau
+n'est pas perdu** : le démon finit par se lever seul, **retaper `sshos`** s'y
+rattache.
+
+```
+sshos: mise a jour installee, redemarrage...
+sshos: le redemarrage n'a pas abouti
+```
+
+Celui-là est **tout autre** : le client a rendu la main **sans même essayer** de
+relancer quoi que ce soit. Voir §2 sexies — c'était, jusqu'au 21 août 2026, le
+défaut du compteur, et c'est la seule raison pour laquelle ce message pouvait
+apparaître dans un parcours normal. Retaper `sshos` remonte un bureau neuf, mais
+la session d'avant est perdue.
+
+Vérifier au passage :
 
 ```bash
 tail -5 ~/.local/share/sshos/journal.log
@@ -478,9 +495,31 @@ que `status`. Voir §2 quinquies.
 | *(une ligne `demarrage` suivie de RIEN)* | **SIGKILL** — le tueur de mémoire, typiquement. C'est la signature d'une mort brutale |
 
 **Un « arret pour terminer une mise a jour » suivi d'un trou de plusieurs
-secondes est la signature du défaut du 19 août** : le démon a mis plus longtemps
-à revenir que le client n'a attendu. Le budget est passé de 1 s à 30 s ; la sonde
-qui le garde est `tools/verif_redemarrage_lent.py`.
+secondes a DEUX lectures, et longtemps une seule était écrite ici.**
+
+| Lecture | Ce qui s'est passé pendant le trou | Ce que l'utilisateur a vu |
+|---|---|---|
+| Le démon traîne | le client attend, puis abandonne | `le demon n'a pas repondu` |
+| **Le client est mort sur place** | **personne n'attend : le trou, c'est l'utilisateur qui retape `sshos`** | `le redemarrage n'a pas abouti` |
+
+La première seule était documentée — c'est le défaut du 19 août, budget passé de
+1 s à 30 s, gardé par `tools/verif_redemarrage_lent.py`. La seconde est le défaut
+du compteur (§2 sexies), et **le trou du 21 août 2026 à 11:24 était celui-là** :
+
+```
+2026-08-21 11:24:37 arret pour terminer une mise a jour
+                    (rien — ni « demarrage », ni « demarrage refuse »,
+                     ni « demarrage impossible »)
+2026-08-21 11:24:47 demarrage pid=456995 socket=sshos/0/bureau01
+```
+
+Relevé dans `/proc` au même moment : le client `456993` avait démarré à **11:24:47**
+lui aussi, avec pour parent un **shell** — ce n'est pas celui qui avait cliqué à
+11:24:37, c'est un `sshos` retapé à la main. Le premier est mort sans rien lancer.
+
+**Le discriminant sûr est le MESSAGE**, pas la durée du trou : un trou de
+plusieurs secondes ne dit pas à lui seul laquelle des deux lectures s'applique.
+Le journal ne porte aucune ligne dans les deux cas.
 
 ---
 
@@ -556,6 +595,75 @@ Elle vaut `state_.restart_pending && !running_is_installed()`.
 secondes contre deux minutes de compilation, l'utilisateur l'a déjà payé, et il
 maintient l'invariant « au plus un binaire posé jamais exécuté ». La nouveauté sera
 encore là au tour suivant.
+
+---
+
+## 2 sexies. Le redémarrage qui échouait une fois sur deux — soldé le 21 août 2026
+
+**Le symptôme, tel qu'il était rapporté.** « Quand on clique sur Redémarrer après
+une mise à jour, une fois sur deux on a `sshos: le redemarrage n'a pas abouti` » —
+et le bureau était perdu, retour au shell.
+
+**Ce que le message exigeait, mécaniquement.** `src/main.cpp` n'imprime cette
+ligne qu'en sortie de sa boucle d'attache ; `run_client()` ne rend
+`kClientRestartRequested` (`src/client/client.cpp`) que sur un `Detached` dont la
+raison est `kDetachReasonUpdate` ; et le démon ne l'envoie
+(`src/daemon/daemon.cpp`) que sur `session.wants_update_restart()`. Il fallait
+donc **deux détachements pour mise à jour de suite** — ce qui a d'abord fait
+chercher un deuxième démon anormal, une course, un binaire mal reconnu. Le
+journal, lui, ne montrait que des redémarrages propres : aucune de ces pistes ne
+tenait.
+
+**La cause.** La boucle s'écrivait :
+
+```cpp
+for (int attempt = 0; attempt < 2; ++attempt) {   // src/main.cpp, avant le correctif
+```
+
+Elle croyait borner un emballement. Elle bornait en réalité **les redémarrages de
+toute la vie du processus client**. Le premier passait ; le second était refusé
+**sans même tenter de relancer un démon**. Comme un `sshos` retapé repartait avec
+un compteur neuf, l'utilisateur voyait exactement « une fois sur deux ». Et les
+trois lignes `mise a jour installee, redemarrage...` de son rapport étaient la
+somme d'un redémarrage réussi resté dans le défilement et des deux de la séance
+qui a échoué.
+
+**Pourquoi le compte était faux dans son principe.** Un redémarrage pour mise à
+jour ne s'arme QUE sur une confirmation explicite (`answer_modal(true)` avec
+`ModalKind::RestartForUpdate` → `UpdateService::run("update:restart")`). Aucun
+chemin ne l'arme tout seul : **chaque tour coûte un geste de l'utilisateur**, et
+rationner ces gestes n'a aucun sens. Ce qu'il fallait borner, c'est
+l'aller-retour **stérile** — un démon qui se détache sans avoir jamais servi de
+bureau.
+
+**Le correctif.** `src/client/restart.hpp` — `RestartBudget` — ne compte que les
+allers-retours stériles consécutifs, et repart de zéro dès qu'une session a servi.
+« Avoir servi » se lit sur deux témoins que `run_client()` remplit désormais
+(`SessionTrace`, `src/client/client.hpp`) : **une trame reçue** (le bureau s'est
+affiché) et **une entrée envoyée** (l'utilisateur a agi).
+
+> ⚠️ **Encore la même leçon que le budget d'attente du 19 août** : le compte
+> vivait dans `src/main.cpp`, que `CMakeLists.txt` retire de `sshos_core`. Aucun
+> test ne pouvait l'atteindre. **C'est le deuxième défaut de redémarrage de suite
+> à s'être caché exactement là.** Tout ce qui décide quelque chose doit sortir de
+> `main.cpp` — voir `src/client/launch.hpp` pour le précédent.
+
+**Pris sur le fait, sur l'installation vivante.** Le 21 août 2026 à 11:24, le
+journal porte `arret pour terminer une mise a jour` à 11:24:37 puis `demarrage
+pid=456995` à 11:24:47, **sans aucune ligne entre les deux**. Or `/proc` montre
+que le client `456993` a lui aussi démarré à 11:24:47, avec un **shell** pour
+parent, et que c'est LUI qui a engendré `456995`. Le client qui avait cliqué à
+11:24:37 n'a donc jamais atteint son tour 1 : il est sorti sur `main.cpp:146`
+sans tenter quoi que ce soit, et les dix secondes sont le temps qu'il a fallu à
+l'utilisateur pour retaper `sshos`. C'est exactement ce que ce défaut prédit, et
+rien d'autre ne le produit.
+
+**Ce qui le garde.** `tests/test_restart.cpp` couvre `RestartBudget` **et** le
+remplissage de `SessionTrace` par un vrai `run_client()` face à un faux démon —
+sans ce second cas, un témoin né mort réintroduirait le défaut en silence (§9
+bis). Et `tools/verif_redemarrage.py` enchaîne désormais **deux** redémarrages :
+un seul ne voyait rien. Éprouvé contre un binaire reconstruit sur l'ancien
+`main.cpp` — il sort bien non nul.
 
 ---
 
@@ -1189,6 +1297,10 @@ python3 -u /var/tmp/ma_campagne.py > camp.log  # jamais derrière un tube
 - **`tools/mutation.py`** — le harnais de campagne, avec ses cinq règles en
   docstring et un mode `DRY=1` qui vérifie que chaque motif existe **exactement une
   fois** avant de toucher au code.
+- **`tools/verif_redemarrage.py`** — « Redemarrer pour terminer » doit redémarrer
+  **deux fois de suite**. Le deuxième tour est là depuis le 21 août 2026 : un seul
+  redémarrage vérifié ne voyait rien du défaut du compteur (§2 sexies), qui ne se
+  manifeste qu'au second d'une même session cliente.
 - **`tools/balayage.py`** — les fonctions déclarées dans `src/**.hpp` sans appelant
   de production, avec ses **cinq** pièges en docstring, une liste d'exemption
   nommée, un `--strict` qui sort non nul, et un `--racine` pour l'éprouver contre

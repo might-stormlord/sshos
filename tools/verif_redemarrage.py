@@ -1,13 +1,29 @@
 #!/usr/bin/env python3
-"""« Redemarrer pour terminer » doit vraiment redemarrer.
+"""« Redemarrer pour terminer » doit vraiment redemarrer -- DEUX FOIS.
 
-Trois choses sont verifiees d'un coup, et aucune n'est atteignable par un
+Quatre choses sont verifiees d'un coup, et aucune n'est atteignable par un
 test unitaire :
   - le demon ferme son ecouteur AVANT d'annoncer, sinon le client se
     reconnecte au cadavre et sort sur un message trompeur ;
   - le client reconnait la raison et rejoue son chemin de demarrage au lieu
     de rendre la main au shell ;
-  - un demon NEUF prend la place, avec un pid different.
+  - un demon NEUF prend la place, avec un pid different ;
+  - ET LE DEUXIEME REDEMARRAGE PASSE AUSSI.
+
+Ce quatrieme point est la raison d'etre de ce fichier depuis le 21 aout
+2026. `src/main.cpp` bornait la boucle a deux tours -- `for (int attempt =
+0; attempt < 2; ++attempt)` -- en croyant empecher un emballement. Elle
+comptait en realite les redemarrages de TOUTE LA VIE DU CLIENT : le
+deuxieme etait refuse sans meme essayer de relancer un demon, sur
+« sshos: le redemarrage n'a pas abouti », et l'utilisateur perdait son
+bureau alors que rien n'etait casse. Un `sshos` retape repartait avec un
+compteur neuf : d'ou le « une fois sur deux » exact que l'utilisateur
+rapportait. Un seul redemarrage verifie ne voit RIEN de ce defaut -- c'est
+precisement ce qui l'a laisse passer.
+
+Le compte vit desormais dans `src/client/restart.hpp` (RestartBudget), a
+portee de la suite ; ce script garde l'autre moitie, son cablage dans
+main.cpp, que CMakeLists retire de sshos_core.
 """
 import fcntl
 import os
@@ -110,46 +126,75 @@ def main():
     old_pid = first[0]
     print("demon initial : %d" % old_pid)
 
-    # Ctrl+A, Espace, puis filtrer sur « redem » et valider.
-    os.write(fd, b"\x01")
-    time.sleep(0.2)
-    os.write(fd, b" ")
-    drain(fd, 0.6)
-    os.write(fd, b"redem")
-    out = drain(fd, 0.8)
-    if b"Redemarrer" not in out:
-        print("ATTENTION : l'entree n'apparait pas dans le flux (differentiel)")
-    os.write(fd, b"\r")
-    drain(fd, 0.6)
+    # DEUX TOURS, et le second est celui qui compte. Le fichier d'etat garde
+    # `restart-pending` et le prefixe ne porte aucun binaire pose : l'entree
+    # reste donc proposee apres le premier redemarrage, ce qui permet de la
+    # recliquer exactement comme le ferait un utilisateur qui enchaine deux
+    # mises a jour dans la meme session.
+    sortie = b""
+    courant = old_pid
+    ok = True
+    for tour in (1, 2):
+        # Ctrl+A, Espace, puis filtrer sur « redem » et valider.
+        os.write(fd, b"\x01")
+        time.sleep(0.2)
+        os.write(fd, b" ")
+        sortie += drain(fd, 0.6)
+        os.write(fd, b"redem")
+        out = drain(fd, 0.8)
+        sortie += out
+        if b"Redemarrer" not in out:
+            print("tour %d : ATTENTION, l'entree n'apparait pas dans le flux"
+                  % tour)
+        os.write(fd, b"\r")
+        sortie += drain(fd, 0.6)
 
-    # ALLER CHERCHER la confirmation : le focus est sur Annuler.
-    os.write(fd, b"\t")
-    time.sleep(0.2)
-    os.write(fd, b"\r")
+        # ALLER CHERCHER la confirmation : le focus est sur Annuler.
+        os.write(fd, b"\t")
+        time.sleep(0.2)
+        os.write(fd, b"\r")
 
-    # L'ancien demon doit mourir...
-    gone = False
-    for _ in range(80):
-        if not os.path.exists("/proc/%d" % old_pid):
-            gone = True
+        # L'ancien demon doit mourir...
+        gone = False
+        for _ in range(80):
+            if not os.path.exists("/proc/%d" % courant):
+                gone = True
+                break
+            sortie += drain(fd, 0.1)
+        print("tour %d : ancien demon sorti : %s"
+              % (tour, "oui" if gone else "NON"))
+
+        # ...et un NEUF doit prendre sa place, sans que l'utilisateur tape
+        # quoi que ce soit. C'est le client qui rejoue son chemin de
+        # demarrage.
+        new_pid = None
+        for _ in range(150):
+            sortie += drain(fd, 0.1)
+            ps = [p for p in daemon_pids() if p != courant]
+            if ps:
+                new_pid = ps[0]
+                break
+        print("tour %d : nouveau demon : %s"
+              % (tour, new_pid if new_pid else "AUCUN"))
+
+        tail = drain(fd, 1.5)
+        sortie += tail
+        reattached = new_pid is not None and len(tail) > 100
+        print("tour %d : octets de bureau recus apres redemarrage : %d"
+              % (tour, len(tail)))
+
+        if not (gone and new_pid is not None and new_pid != courant
+                and reattached):
+            ok = False
             break
-        time.sleep(0.1)
-    print("ancien demon sorti : %s" % ("oui" if gone else "NON"))
+        courant = new_pid
+        time.sleep(0.5)
 
-    # ...et un NEUF doit prendre sa place, sans que l'utilisateur tape quoi
-    # que ce soit. C'est le client qui rejoue son chemin de demarrage.
-    new_pid = None
-    for _ in range(100):
-        drain(fd, 0.1)
-        ps = [p for p in daemon_pids() if p != old_pid]
-        if ps:
-            new_pid = ps[0]
-            break
-    print("nouveau demon : %s" % (new_pid if new_pid else "AUCUN"))
-
-    tail = drain(fd, 1.5)
-    reattached = new_pid is not None and len(tail) > 100
-    print("octets de bureau recus apres redemarrage : %d" % len(tail))
+    # LE MESSAGE QUI SIGNE LE DEFAUT. Il ne doit apparaitre nulle part : le
+    # voir, c'est un client qui a rendu la main au shell sans meme essayer.
+    if b"n'a pas abouti" in sortie:
+        print("ECHEC : « le redemarrage n'a pas abouti » est apparu")
+        ok = False
 
     try:
         os.kill(pid, signal.SIGKILL)
@@ -160,8 +205,7 @@ def main():
     kill_ours()
     os.system("rm -rf %s" % root)
 
-    ok = gone and new_pid is not None and new_pid != old_pid and reattached
-    print("=== %s ===" % ("REDEMARRAGE COMPLET" if ok else "ECHEC"))
+    print("=== %s ===" % ("DEUX REDEMARRAGES COMPLETS" if ok else "ECHEC"))
     return 0 if ok else 1
 
 
