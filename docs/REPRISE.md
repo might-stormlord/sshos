@@ -1,5 +1,28 @@
 # termos — dossier de reprise
 
+> ## 🔵 LE CHANTIER EN COURS : UN NAVIGATEUR WEB
+>
+> Décidé et **entièrement spécifié** le 21 août 2026, **pas commencé** : aucune ligne de
+> `src/web/` n'existe. Tout est dans
+> **`docs/superpowers/specs/2026-08-21-navigateur-design.md`** — 18 sections, écrites pour
+> un contexte neuf. **Le lire en entier avant de toucher au code.**
+>
+> Les quatre décisions verrouillées, en une ligne chacune : images en **demi-blocs
+> `U+2580 ▀`** couleur vraie · **zéro ligne empruntée**, TLS et moteur JS compris ·
+> le moteur dans **son propre processus** (`termos --web-renderer`) · **JavaScript dès la
+> première ligne du DOM**.
+>
+> La première tâche n'est pas du web : c'est **T0, extraire `framing`/`wirebuf` de
+> `src/common/proto.cpp`** (§6.2 de la spec), avec `tests/test_proto.cpp` comme filet.
+> Puis **T1**, un `WebApp` qui peint une grille fixe — pour que *tous* les appelants
+> existent et tournent avant qu'une seule ligne de crypto ne soit écrite. C'est la parade
+> au §9 bis, à l'échelle de ce chantier.
+>
+> ⚠️ **Deux décisions restent OUVERTES** et doivent être tranchées dans la spec, pas par
+> accident dans le premier fichier qui en a besoin : ce que `font-size` pilote sur un média
+> à une seule taille de glyphe, et si le bureau doit posséder la sélection de texte. Voir
+> §17 de la spec.
+
 > ## ⚠️ LE PROJET S'APPELLE `termos` DEPUIS LE 21 AOÛT 2026
 >
 > Il s'appelait `ssh_os 2.0` / `sshos`. Trois commits ont fait la bascule :
@@ -1821,3 +1844,43 @@ Ce que les sept jalons ont appris, et qui vaut pour la suite :
 4. **Le code écrit avant ses tests se paie, et c'est chiffré.** La seule tâche du
    jalon 4 écrite code d'abord a laissé **14 survivantes sur 33** au premier tour,
    contre 8/23, 7/23 et 4/26 pour les trois autres, écrites en TDD.
+
+---
+
+## 11. Le chantier navigateur — où en est-on
+
+**Spécifié le 21 août 2026, pas commencé.** Zéro ligne de `src/web/`, zéro ligne de
+`src/apps/browser/`.
+
+**Le document de référence est `docs/superpowers/specs/2026-08-21-navigateur-design.md`.**
+Il ferme les décisions transverses et **déclare explicitement ce qu'il ne spécifie pas** :
+le DOM, CSS, JS et TLS auront chacun leur spec de jalon, sur le gabarit de
+`2026-08-11-jalon-2-wm-design.md`.
+
+### Ce qui a été mesuré sur ce dépôt pendant la conception, et qui ne se re-mesure pas
+
+| Mesure | Valeur | Où la relire |
+|---|---|---|
+| Littéral chaîne > 64 Kio sous `-Wpedantic -Werror` | **accepté** | §4 de la spec |
+| `unsigned __int128` nu | **refusé** ; **accepté via `__extension__`** | §4 |
+| Coût d'une cellule d'image, TrueColor, vignette 40×12 | **38,8 o** (photo), 34,2 (logo), 26,1 (capture) | §11 |
+| Coût d'une page de texte pleine, 100×36 | **1,63 o/cellule** — une vignette coûte **3,2 fois une page entière** | §11 |
+| `CUP` moyen | **7,5 à 8,3 o**, pas 14 | §11 |
+| Gain cumulé des trois leviers retenus | **38,8 → 19,1 o/cellule, −50,7 %**, sans perte visible | §11 |
+| `quantize_color()` contre un quantifieur image | erreur moyenne **31,40 contre 3,44** — facteur **9,14** | §10 |
+| Tramage Floyd–Steinberg | **+96 % d'octets** | §10 |
+| Golden couvrant `diff.cpp` | **zéro** — les 18 fichiers sérialisent la `Surface`, pas le `Differ` | §11 |
+
+### Les trois pièges de ce chantier, à connaître avant d'ouvrir un fichier
+
+1. **Le glob de `tests/` n'est PAS récursif.** Un `tests/web/test_x.cpp` serait ignoré en
+   silence, la suite resterait verte, et le test n'existerait pas. Tous à plat :
+   `tests/test_web_*.cpp`.
+2. **Tout `src/**/*.cpp` est lié dans le démon.** Aucun constructeur global non trivial dans
+   `src/web/` — il s'exécuterait au démarrage du bureau.
+3. **`U+2580` n'est pas East Asian Narrow.** Unicode le classe *Ambiguous* ; il est étroit
+   ici seulement parce que `kAmbiguous` (`src/render/width.cpp:31-36`) omet les Block
+   Elements. Toute levée de la règle 3 de `diff.cpp` est une **exception écrite et testée**,
+   jamais un constat — et elle vient **après** `tests/test_diff_roundtrip.cpp`, l'oracle qui
+   rejoue le diff dans notre propre émulateur VT.
+
