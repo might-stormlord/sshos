@@ -795,3 +795,159 @@ TEST(update_service_reports_no_progress_for_an_interrupted_job) {
   CHECK_EQ(svc.progress_percent(), -1);
   ::unlink(path.c_str());
 }
+
+// --- LE FAIT, SEPARE DE LA CONCLUSION -----------------------------------
+//
+// `restart_pending` dit qu'un binaire est POSE et que ce n'est pas celui qui
+// tourne. `status` dit ce qu'a conclu la derniere verification. Les avoir
+// confondus dans une seule cle rendait le fait effacable par n'importe quelle
+// conclusion : la verification automatique -- une fois par jour, sans que
+// personne ait rien demande -- ecrivait « up-to-date » par-dessus, la
+// pastille s'eteignait, et plus rien ne proposait le redemarrage alors que le
+// binaire pose n'etait toujours pas celui qui tournait.
+
+namespace {
+
+// Un prefixe avec un « binaire » pose, et de quoi faire croire au service
+// que c'est lui -- ou un autre -- qui tourne.
+struct FauxPrefixe {
+  std::string dir;
+  std::string pose;
+  std::string autre;
+
+  FauxPrefixe() {
+    dir = temp_path("prefixe");
+    ::mkdir(dir.c_str(), 0700);
+    ::mkdir((dir + "/libexec").c_str(), 0700);
+    pose = dir + "/libexec/sshos";
+    autre = dir + "/libexec/sshos.previous";
+    { std::ofstream out(pose); out << "binaire pose"; }
+    { std::ofstream out(autre); out << "ancien binaire"; }
+  }
+  ~FauxPrefixe() {
+    ::remove(pose.c_str());
+    ::remove(autre.c_str());
+    ::rmdir((dir + "/libexec").c_str());
+    ::rmdir(dir.c_str());
+  }
+  std::string corps(const std::string& status, const std::string& extra) const {
+    return "schema=1\nprefix=" + dir + "\nsource=git\nstatus=" + status + "\n" +
+           extra;
+  }
+};
+
+}  // namespace
+
+// LE CAS QUI A MOTIVE LA CLE. Le statut dit « a jour » -- c'est ce qu'ecrit
+// une verification qui ne trouve rien de neuf -- et pourtant un binaire pose
+// attend son redemarrage. L'ancien code ne lisait que `status` : il n'aurait
+// rien propose du tout.
+TEST(update_service_offers_the_restart_on_the_fact_not_on_the_status) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path =
+      write_state(fp.corps("up-to-date", "restart_pending=1\n"));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.autre);  // on tourne l'ANCIEN
+  svc.tick();
+  CHECK(svc.needs_restart());
+  CHECK(svc.badge());
+  CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
+  CHECK_EQ(svc.entry().id, std::string("update:restart"));
+  std::remove(path.c_str());
+}
+
+// LE FAIT TOMBE QUAND LA REALITE L'A DEPASSE, sans que le C++ ecrive quoi que
+// ce soit : il compare son inode a celle du binaire pose.
+TEST(update_service_stops_believing_the_fact_once_it_runs_the_placed_binary) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path =
+      write_state(fp.corps("restart-pending", "restart_pending=1\n"));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.pose);  // on EST le pose
+  svc.tick();
+  CHECK(!svc.needs_restart());
+  CHECK(!svc.badge());
+  CHECK_EQ(svc.entry().label, std::string("Verifier les mises a jour"));
+
+  // Et le rapport ne redemande plus un redemarrage deja fait : le script
+  // ecrit `restart-pending` dans les DEUX champs pour les demons anterieurs
+  // a la cle, donc sans requalification il l'annoncerait encore.
+  svc.run("update:check");
+  svc.on_child_exit(launcher.next_pid, 0);
+  REQUIRE(svc.has_report());
+  const std::string r = svc.take_report();
+  CHECK(r.find("Redemarrez") == std::string::npos);
+  std::remove(path.c_str());
+}
+
+// UNE NOUVEAUTE NE FAIT PAS OUBLIER LE REDEMARRAGE. Le fait passe avant la
+// conclusion : redemarrer coute trois secondes, l'utilisateur l'a deja paye,
+// et la nouveaute sera encore la au tour suivant.
+TEST(update_service_puts_the_restart_before_a_newer_version) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path =
+      write_state(fp.corps("available", "restart_pending=1\n"));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  svc.tick();
+  CHECK(svc.needs_restart());
+  CHECK(svc.badge());
+  CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
+  std::remove(path.c_str());
+}
+
+// LA MIGRATION, ET C'EST ELLE QUI COMPTE LE JOUR DE LA BASCULE. Un fichier
+// ecrit par un script ANTERIEUR a la cle n'a que `status=restart-pending`.
+// Le perdre couterait un bureau qui tourne sur l'ancien binaire sans le
+// dire, au moment precis de la mise a jour qui introduit la cle.
+TEST(update_service_reads_an_old_state_that_predates_the_restart_key) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path = write_state(fp.corps("restart-pending", ""));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  svc.tick();
+  CHECK(svc.needs_restart());
+  CHECK(svc.badge());
+  CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
+  std::remove(path.c_str());
+}
+
+// ET LE FAIT SE TAIT QUAND IL N'EST PAS LA. Sans la cle et sans le statut,
+// rien ne doit proposer de redemarrage -- sinon la migration ci-dessus
+// deviendrait un « toujours vrai ».
+TEST(update_service_asks_for_no_restart_when_the_fact_is_absent) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path = write_state(fp.corps("up-to-date", ""));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  svc.tick();
+  CHECK(!svc.needs_restart());
+  CHECK(!svc.badge());
+  CHECK_EQ(svc.entry().label, std::string("Verifier les mises a jour"));
+  std::remove(path.c_str());
+}
+
+// LA COMMANDE ELLE-MEME SUIT LE FAIT, pas l'interface : la garde ne doit pas
+// reposer sur le libelle qu'un menu a calcule un instant plus tot.
+TEST(update_service_refuses_a_restart_when_no_binary_waits) {
+  FakePlatform plat;
+  FakeLauncher launcher;
+  FauxPrefixe fp;
+  const std::string path = write_state(fp.corps("up-to-date", ""));
+
+  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  svc.tick();
+  svc.run("update:restart");
+  CHECK(!svc.wants_restart());
+  std::remove(path.c_str());
+}

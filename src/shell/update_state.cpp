@@ -142,6 +142,9 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
   };
 
   bool schema_ok = false;
+  // Distinguer « clé absente » de « clé à zéro » : seule l'absence
+  // déclenche la migration depuis l'ancien schéma, plus bas.
+  bool vu_restart_pending = false;
   UpdateState parsed;
   std::vector<std::pair<std::size_t, std::string>> notes;
 
@@ -191,6 +194,11 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
     } else if (key == "status") {
       UpdateStatus st = UpdateStatus::Idle;
       if (read_status(value, st)) parsed.status = st;
+    } else if (key == "restart_pending") {
+      // « 1 » et rien d'autre. Une clé absente vaut faux, et la migration
+      // depuis l'ancien schéma se fait après la boucle.
+      parsed.restart_pending = value == "1";
+      vu_restart_pending = true;
     } else if (key == "pid") {
       std::int64_t v = 0;
       if (read_int64(value, v) && v > 0) parsed.pid = static_cast<pid_t>(v);
@@ -221,6 +229,15 @@ UpdateState parse_update_state(std::string_view raw, std::int64_t now_epoch) {
   }
 
   if (!schema_ok) return out;  // état vierge, sans message
+
+  // MIGRATION DEPUIS L'ANCIEN SCHEMA. Un fichier écrit par un script
+  // antérieur à cette clé n'a pas le champ, mais son `status=restart-pending`
+  // dit exactement la même chose. Le reconstruire évite de perdre un
+  // redémarrage en attente au moment précis de la mise à jour qui introduit
+  // la clé -- c'est-à-dire au pire moment possible.
+  if (!vu_restart_pending && parsed.status == UpdateStatus::RestartPending) {
+    parsed.restart_pending = true;
+  }
 
   // LA SUITE 1, 2, 3... ET ON S'ARRETE AU PREMIER TROU. Ramasser « note_9 »
   // apres un « note_2 » absent afficherait une liste dont l'ordre ne veut

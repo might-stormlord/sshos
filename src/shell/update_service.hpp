@@ -77,10 +77,9 @@ class UpdateService {
   bool wants_restart() const { return wants_restart_; }
 
   // Un redemarrage reste a faire : le binaire est pose, mais ce n'est pas
-  // encore lui qui tourne.
-  bool needs_restart() const {
-    return state_.status == UpdateStatus::RestartPending;
-  }
+  // encore lui qui tourne. C'est un FAIT du disque croise avec une
+  // comparaison d'inodes, jamais une conclusion de verification.
+  bool needs_restart() const { return restart_needed_; }
 
   // CE QU'ON DOIT DIRE A L'UTILISATEUR, ET UNE SEULE FOIS.
   //
@@ -154,6 +153,9 @@ class UpdateService {
   bool have_deadline_ = false;
   std::chrono::steady_clock::time_point deadline_{};
   bool wants_restart_ = false;
+  // « Un binaire est pose et ce n'est pas celui qui tourne. » Recalcule a
+  // chaque reload() ; seule source du redemarrage propose.
+  bool restart_needed_ = false;
 };
 
 }  // namespace sshos

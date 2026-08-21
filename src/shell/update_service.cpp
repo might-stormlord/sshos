@@ -92,15 +92,27 @@ void UpdateService::reload() {
     message_ = state_.message;
   }
 
-  // « IL FAUT REDEMARRER » CONTRE « ON A REDEMARRE ». Le script ecrit
-  // restart-pending et ne peut pas savoir quand le redemarrage a eu lieu :
-  // c'est le demon qui le sait, en constatant qu'il EST le binaire pose.
+  // « IL FAUT REDEMARRER » CONTRE « ON A REDEMARRE ». Le script arme un
+  // FAIT -- un binaire est pose -- et ne peut pas savoir quand le
+  // redemarrage a eu lieu. Le demon, lui, le sait : il constate qu'il EST
+  // le binaire pose.
   //
   // On ne reecrit pas le fichier pour autant -- le C++ ne l'ecrit jamais,
   // c'est ce qui garde git et le reseau hors de son fil. On cesse
-  // simplement de croire un etat que la realite a depasse ; la prochaine
-  // verification remettra le fichier droit.
-  if (state_.status == UpdateStatus::RestartPending && running_is_installed()) {
+  // simplement de croire un fait que la realite a depasse ; la prochaine
+  // verification lancee par le demon le redressera, en comparant l'inode de
+  // son parent a celle du binaire pose.
+  //
+  // C'est desormais la SEULE source du « faut-il redemarrer ? » : l'entree,
+  // la pastille et la commande de redemarrage la lisent toutes les trois,
+  // au lieu de lire un `status` que n'importe quelle conclusion ecrasait.
+  restart_needed_ = state_.restart_pending && !running_is_installed();
+
+  // Et le statut cesse de le redire quand ce n'est plus vrai : le script
+  // ecrit `restart-pending` dans les DEUX champs pour les demons anterieurs
+  // a la cle, donc sans cette ligne un redemarrage deja fait continuerait
+  // d'etre annonce par build_report().
+  if (state_.status == UpdateStatus::RestartPending && !restart_needed_) {
     state_.status = UpdateStatus::UpToDate;
   }
 }
@@ -192,7 +204,11 @@ UpdateEntry UpdateService::entry() const {
     }
     return {"Verification en cours...", false, "update:check"};
   }
-  if (state_.status == UpdateStatus::RestartPending) {
+  // LE REDEMARRAGE PASSE AVANT UNE NOUVEAUTE, et c'est un choix : il coute
+  // trois secondes contre deux minutes de compilation, l'utilisateur l'a
+  // deja paye, et il maintient l'invariant « au plus un binaire pose jamais
+  // execute ». La nouveaute, elle, sera encore la au tour suivant.
+  if (restart_needed_) {
     return {"Redemarrer pour terminer", true, "update:restart"};
   }
   // Aucune comparaison n'est possible quand on ne sait pas d'où vient
@@ -211,8 +227,7 @@ UpdateEntry UpdateService::entry() const {
 bool UpdateService::badge() const {
   const UpdateEntry e = entry();
   return e.enabled && (e.id == "update:apply" || e.id == "update:restart") &&
-         (state_.status == UpdateStatus::Available ||
-          state_.status == UpdateStatus::RestartPending);
+         (state_.status == UpdateStatus::Available || restart_needed_);
 }
 
 std::string UpdateService::message() const { return message_; }
@@ -230,7 +245,7 @@ void UpdateService::run(std::string_view id) {
   if (id == "update:restart") {
     // Le redémarrage ne passe par aucun script : c'est la session qui ferme
     // le bureau, et le client qui se rattache.
-    if (state_.status == UpdateStatus::RestartPending) wants_restart_ = true;
+    if (restart_needed_) wants_restart_ = true;
     return;
   }
 

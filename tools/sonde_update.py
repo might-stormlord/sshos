@@ -127,12 +127,14 @@ class Fixture:
         e["SSHOS_REPO_URL"] = self.repo
         return e
 
-    def write_state(self, status, installed, previous="", source="git"):
+    def write_state(self, status, installed, previous="", source="git",
+                    restart_pending=""):
         with open(os.path.join(self.state_dir, "state"), "w") as f:
             f.write("schema=1\nprefix=%s\nsource=%s\ninstalled_commit=%s\n"
                     "previous_commit=%s\nremote_commit=\nchecked_at=0\n"
-                    "status=%s\npid=\nmessage=\n"
-                    % (self.prefix, source, installed, previous, status))
+                    "status=%s\nrestart_pending=%s\npid=\nmessage=\n"
+                    % (self.prefix, source, installed, previous, status,
+                       restart_pending))
 
     def get(self, key):
         p = os.path.join(self.state_dir, "state")
@@ -308,52 +310,104 @@ def etape7_etxtbsy(fix):
         p.wait()
 
 
-def etape8_restart_pending_survit(fix):
-    say("\n== 8. --check n'efface JAMAIS un redemarrage en attente")
-    # RESTART-PENDING N'EST PAS UNE CONCLUSION, C'EST UN FAIT : un binaire est
-    # pose et ce n'est pas celui qui tourne. Une verification ne regarde que
-    # le depot distant -- elle n'observe pas ce fait, donc elle ne peut pas le
-    # dementir. Seuls un --apply (qui repose un binaire) et le demon (qui
-    # compare les inodes) le peuvent.
-    #
-    # Sans cette regle : la verification automatique tombe une fois par jour,
-    # ecrit « up-to-date » par-dessus, la pastille s'eteint, l'entree redevient
-    # « Verifier les mises a jour » -- et plus RIEN ne propose le redemarrage
-    # alors que le binaire pose n'est toujours pas celui qui tourne. Le trou
-    # se refermait tout seul, en silence.
+def etape8_le_fait_et_la_conclusion(fix):
+    say("\n== 8. `restart_pending` est un FAIT, pas une conclusion")
+    # UN BINAIRE EST POSE ET CE N'EST PAS CELUI QUI TOURNE : c'est un fait du
+    # disque. `status` porte la CONCLUSION de la derniere verification. Les
+    # avoir confondus dans une seule cle rendait le fait effacable par
+    # n'importe quelle conclusion -- et la verification automatique, qui tombe
+    # une fois par jour sans que personne ait rien demande, le faisait en
+    # silence.
     installed = fix.head()
 
-    # a. rien de neuf en face : le fait survit
-    fix.write_state("restart-pending", installed=installed)
-    r = fix.update("--check")
-    check("code de retour nul", r.returncode == 0)
-    check("status TOUJOURS restart-pending (et non up-to-date)",
+    # a. une application ARME le fait, et le redit dans status pour les
+    #    demons anterieurs a la cle
+    fix.write_project(version="vA", tests_ok=True)
+    neuf_commit = fix.commit("de quoi appliquer")
+    fix.write_state("available", installed=installed)
+    r = fix.update("--apply")
+    check("--apply : code de retour nul", r.returncode == 0)
+    check("--apply arme restart_pending=1", fix.get("restart_pending") == "1")
+    check("--apply redit restart-pending dans status",
           fix.get("status") == "restart-pending")
-    check("remote_commit quand meme mis a jour",
-          fix.get("remote_commit") == installed)
+    installed = neuf_commit
 
-    # b. le reseau tombe : le fait survit aussi. C'est le cas le plus
+    # b. rien de neuf en face : le fait survit a une verification tapee a la
+    #    main, dont le parent n'est pas un demon
+    r = fix.update("--check")
+    check("--check (a la main) : code de retour nul", r.returncode == 0)
+    check("le fait survit", fix.get("restart_pending") == "1")
+    check("status le redit encore", fix.get("status") == "restart-pending")
+
+    # c. le reseau tombe : le fait survit aussi. C'est le cas le plus
     #    probable des deux, et il ne compare meme pas.
-    fix.write_state("restart-pending", installed=installed)
     env = fix.env()
     env["SSHOS_REPO_URL"] = os.path.join(fix.base, "depot-qui-n-existe-pas")
     r = run(["sh", UPDATE_SH, "--check"], env=env, timeout=120)
-    check("code de retour non nul", r.returncode != 0)
-    check("status TOUJOURS restart-pending (et non check-failed)",
-          fix.get("status") == "restart-pending")
+    check("--check en echec : code de retour non nul", r.returncode != 0)
+    check("le fait survit a un echec reseau", fix.get("restart_pending") == "1")
 
-    # c. une version VRAIMENT plus recente, elle, a le droit de gagner : elle
-    #    PROPOSE quelque chose, donc l'entree reste actionnable et
-    #    l'application qui suit reposera un binaire de toute facon.
-    fix.write_project(version="v9", tests_ok=True)
+    # d. une version VRAIMENT plus recente : la conclusion passe a
+    #    « available », mais LE FAIT NE BOUGE PAS. C'est ce que l'ancienne
+    #    cle unique ne pouvait pas exprimer -- il fallait choisir.
+    fix.write_project(version="vB", tests_ok=True)
     plus_neuf = fix.commit("encore une")
-    fix.write_state("restart-pending", installed=installed)
     r = fix.update("--check")
-    check("code de retour nul", r.returncode == 0)
-    check("status=available (une nouveaute prime)",
+    check("--check : code de retour nul", r.returncode == 0)
+    check("status=available (la nouveaute est dite)",
           fix.get("status") == "available")
+    check("ET le fait tient toujours", fix.get("restart_pending") == "1")
     check("remote_commit = le commit neuf",
           fix.get("remote_commit") == plus_neuf)
+
+    # e. LE REDRESSEMENT. Une verification lancee PAR le binaire pose -- donc
+    #    dont le parent tourne l'inode posee -- constate que le redemarrage a
+    #    eu lieu et efface le fait. C'est la seule chose qui rende le fichier
+    #    a nouveau honnete, et sans elle il mentirait pour toujours.
+    lanceur_src = os.path.join(fix.base, "lanceur.cpp")
+    with open(lanceur_src, "w") as f:
+        # IL FORKE, PUIS EXEC -- exactement comme launch_updater du demon
+        # (src/daemon/session.cpp). Un `execl` nu REMPLACERAIT ce processus
+        # par le shell, et le parent du script serait alors python : le cas
+        # ne prouverait rien. Piege paye comptant au premier essai.
+        f.write("#include <sys/wait.h>\n"
+                "#include <unistd.h>\n"
+                "int main(int, char** argv) {\n"
+                "  const pid_t p = ::fork();\n"
+                "  if (p == 0) {\n"
+                "    ::execl(\"/bin/sh\", \"sh\", argv[1], \"--check\", (char*)0);\n"
+                "    ::_exit(127);\n"
+                "  }\n"
+                "  int st = 0;\n"
+                "  ::waitpid(p, &st, 0);\n"
+                "  return WIFEXITED(st) ? WEXITSTATUS(st) : 1;\n"
+                "}\n")
+    lanceur = os.path.join(fix.base, "lanceur")
+    c = run(["c++", "-O0", "-o", lanceur, lanceur_src], timeout=120)
+    if c.returncode != 0:
+        check("compilation du faux demon", False)
+        return
+    # Il prend LA PLACE du binaire pose : c'est son inode que le script
+    # comparera a celle de son parent.
+    shutil.copy(lanceur, fix.exe())
+    os.chmod(fix.exe(), 0o755)
+    # Rien de neuf en face : la conclusion honnete est « a jour », et c'est
+    # justement celle que l'ancienne cle unique ne pouvait pas ecrire sans
+    # perdre le fait.
+    fix.write_state("restart-pending", installed=fix.head(), restart_pending="1")
+    r = run([fix.exe(), UPDATE_SH], env=fix.env(), timeout=300)
+    check("le faux demon a lance --check", r.returncode == 0)
+    check("LE FAIT EST EFFACE", fix.get("restart_pending") == "")
+    check("et status dit enfin la verite", fix.get("status") == "up-to-date")
+
+    # f. un retour arriere repose un binaire : le fait se rearme
+    fix.write_state("up-to-date", installed=installed, previous=installed)
+    shutil.copy(lanceur, fix.previous())
+    r = fix.update("--rollback")
+    check("--rollback : code de retour nul", r.returncode == 0)
+    check("--rollback rearme le fait", fix.get("restart_pending") == "1")
+    check("status=available, on peut reappliquer",
+          fix.get("status") == "available")
 
 
 def main():
@@ -369,7 +423,7 @@ def main():
         etape5_rollback(fix)
         etape6_historique_reecrit(fix)
         etape7_etxtbsy(fix)
-        etape8_restart_pending_survit(fix)
+        etape8_le_fait_et_la_conclusion(fix)
     finally:
         shutil.rmtree(base, ignore_errors=True)
 

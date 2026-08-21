@@ -84,11 +84,45 @@ INSTALLED=$(get installed_commit); [ -n "$INSTALLED" ] || INSTALLED=unknown
 PREVIOUS=$(get previous_commit)
 CHECKED=$(get checked_at);       [ -n "$CHECKED" ] || CHECKED=0
 REMOTE=$(get remote_commit)
-# CE QUE DISAIT L'ETAT AVANT NOUS. Une seule des valeurs de `status` est un
-# FAIT et non une conclusion : `restart-pending` dit qu'un binaire est posé et
-# que ce n'est pas celui qui tourne. Une vérification ne regarde que le dépôt
-# distant -- elle n'observe pas ce fait, donc elle ne peut pas le démentir.
+# LE FAIT, SEPARE DE LA CONCLUSION.
+#
+# `status` porte la CONCLUSION de la dernière vérification -- à jour,
+# disponible, échouée... `restart_pending` porte un FAIT tout autre : un
+# binaire est posé et ce n'est pas celui qui tourne. Les avoir confondus dans
+# une seule clé rendait le fait effaçable par n'importe quelle conclusion, et
+# la vérification quotidienne le faisait en silence.
+#
+# MIGRATION : un fichier écrit par un script antérieur n'a pas la clé, mais
+# son `status=restart-pending` dit exactement la même chose. On la reconstruit
+# plutôt que de perdre un redémarrage en attente au moment de la mise à jour
+# qui introduit la clé.
 STATUT_AVANT=$(get status)
+RESTART_PENDING=$(get restart_pending)
+if [ -z "$RESTART_PENDING" ] && [ "$STATUT_AVANT" = restart-pending ]; then
+  RESTART_PENDING=1
+fi
+[ "$RESTART_PENDING" = 1 ] || RESTART_PENDING=""
+
+# LE SEUL ENDROIT QUI PUISSE CONSTATER QUE LE REDEMARRAGE A EU LIEU.
+#
+# Le démon nous a lancés par un `fork()` SIMPLE suivi d'un `execv` (voir
+# `launch_updater`, src/daemon/session.cpp) : notre parent EST donc le démon,
+# et comparer l'inode de son binaire à celle du binaire posé dit si c'est bien
+# lui qui tourne. `stat -L` déréférence le lien magique -- sans le `-L` on
+# mesurerait `/proc/PID/exe` lui-même, qui vit sur procfs, et la comparaison
+# serait toujours fausse (§9 du dossier de reprise).
+#
+# Tapé à la main depuis un shell, notre parent n'est pas un démon : on ne
+# conclut pas, et le fait est conservé. C'est le sens sûr de l'incertitude --
+# garder un redémarrage en attente ne coûte qu'une proposition de trop, le
+# perdre coûte un bureau qui tourne sur l'ancien binaire sans le dire.
+redemarrage_fait() {
+  [ -n "$RESTART_PENDING" ] || return 1
+  [ -r "/proc/$PPID/exe" ] || return 1
+  _parent=$(stat -Lc '%d:%i' "/proc/$PPID/exe" 2>/dev/null) || return 1
+  _pose=$(stat -c '%d:%i' "$EXE" 2>/dev/null) || return 1
+  [ "$_parent" = "$_pose" ]
+}
 
 # --- ecriture de l'etat ---------------------------------------------------
 # UN SEUL RETOUR A LA LIGNE DANS UN MESSAGE FORGERAIT UNE PAIRE CLE=VALEUR.
@@ -188,6 +222,7 @@ stage=$STAGE
 progress=$PROGRESS
 checked_at=$CHECKED
 status=$_st
+restart_pending=$RESTART_PENDING
 pid=$_pid
 message=$_msg
 FIN
@@ -224,7 +259,13 @@ fail() { # fail <status> <message>
 # `history-rewritten` laissent une entrée actionnable, et l'application qui
 # suivra reposera un binaire de toute façon.
 conclure() { # conclure <status> <message> [pid]
-  if [ "$STATUT_AVANT" = restart-pending ]; then
+  # TANT QUE LE FAIT TIENT, `status` LE REDIT. La clé `restart_pending`
+  # suffirait à un démon récent, mais un démon ANTERIEUR à cette clé ne lit
+  # que `status` : lui écrire « à jour » alors qu'un binaire posé attend son
+  # redémarrage lui ferait éteindre la pastille pour toujours. C'est la
+  # compatibilité qui l'impose, et elle ne coûte rien -- les deux disent la
+  # même chose.
+  if [ -n "$RESTART_PENDING" ]; then
     case "$1" in
       checking|up-to-date|check-failed)
         write_state restart-pending "redemarrez pour terminer" "${3:-}"
@@ -306,6 +347,14 @@ remote_head() {
 
 # --- --check --------------------------------------------------------------
 do_check() {
+  # LE FAIT SE RESOUT AVANT TOUT LE RESTE. Si notre parent est le demon et
+  # qu'il tourne DEJA le binaire pose, le redemarrage a eu lieu : le fait
+  # tombe, et `status` peut enfin dire la verite. C'est la seule occasion ou
+  # quelqu'un puisse le constater -- le demon le sait aussi, mais le C++
+  # n'ecrit jamais ce fichier.
+  if redemarrage_fait; then
+    RESTART_PENDING=""
+  fi
   if [ "$SOURCE" = local ]; then
     write_state updates-disabled "installation locale, pas de source distante"
     return 0
@@ -478,10 +527,11 @@ do_apply() {
   COMMITS_AHEAD=""
   CHECKED=$(date +%s)
   rm -rf "$_tmp"
-  # RESTART-PENDING, PAS UP-TO-DATE. Le binaire pose n'est pas celui qui
-  # tourne : annoncer « a jour » eteindrait la pastille alors que
-  # l'utilisateur continue sur l'ancienne version.
-  STAGE=""; PROGRESS=""
+  # LE FAIT EST ARME ICI, ET NULLE PART AILLEURS. Le binaire pose n'est pas
+  # celui qui tourne : annoncer « a jour » eteindrait la pastille alors que
+  # l'utilisateur continue sur l'ancienne version. `status` le redit pour les
+  # demons anterieurs a la cle, qui ne lisent que lui.
+  STAGE=""; PROGRESS=""; RESTART_PENDING=1
   write_state restart-pending "redemarrez pour terminer"
 }
 
@@ -623,6 +673,10 @@ do_rollback() {
     INSTALLED_VERSION=""
   fi
   COMMITS_AHEAD=""
+  # UN RETOUR ARRIERE POSE UN BINAIRE, LUI AUSSI -- avec une inode neuve, donc
+  # ce n'est pas celui qui tourne. Le fait vaut ici exactement comme apres une
+  # application ; `status` reste `available`, puisqu'on PEUT reappliquer.
+  RESTART_PENDING=1
   write_state available "version precedente restauree"
 }
 

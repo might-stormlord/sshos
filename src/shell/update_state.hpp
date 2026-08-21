@@ -66,6 +66,21 @@ struct UpdateState {
   int progress = -1;
   std::string message;
 
+  // UN FAIT, PAS UNE CONCLUSION : un binaire est posé et ce n'est pas celui
+  // qui tourne. `status` porte la conclusion de la dernière vérification --
+  // à jour, disponible, échouée -- et les avoir confondus dans une seule clé
+  // rendait le fait effaçable par n'importe quelle conclusion. La
+  // vérification automatique, qui tombe une fois par jour sans que personne
+  // ait rien demandé, le faisait en silence : la pastille s'éteignait et
+  // plus rien ne proposait le redémarrage.
+  //
+  // Seuls deux acteurs peuvent l'armer -- une application et un retour
+  // arrière, qui posent tous deux un binaire -- et le démon cesse d'y croire
+  // quand il constate qu'il EST le binaire posé. Il ne l'efface pas : le C++
+  // n'écrit jamais ce fichier, c'est le script qui le redresse à la
+  // vérification suivante.
+  bool restart_pending = false;
+
   // CE QUI A CHANGE, et non seulement combien. « 5 nouveautes » ne dit pas
   // LESQUELLES : le script extrait les sujets de commit -- il a git sous la
   // main, le C++ ne l'aura jamais -- et les depose numerotes, `note_1` a
