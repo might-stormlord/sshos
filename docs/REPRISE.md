@@ -7,10 +7,10 @@
 > **Dernière mise à jour :** 20 août 2026, branche `m1-noyau`. **Le dépôt est publié :**
 > <https://github.com/might-stormlord/sshos> — public, sous AGPL-3.0. Le §2 bis dit
 > comment, et surtout ce que la publication a changé dans l'historique.
-> **1303 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
+> **1311 tests au vert** en `Release` comme sous ASan/UBSan, 0 avertissement, et
 > **aussi dans un conteneur `ubuntu:26.04` nu** (mesure du conteneur : 15 août,
 > elle portait alors sur 1146 cas). Arbre de travail propre.
-> **272 commits** sur `m1-noyau`, 124 fichiers dans `src/`, version **1.36**.
+> **275 commits** sur `m1-noyau`, 124 fichiers dans `src/`, version **1.39**.
 > ⚠️ **Ces quatre nombres périment à chaque commit. Les recompter, jamais les
 > citer** — c'est la seule discipline qui tienne, et ce dossier a déjà menti trois
 > fois sur des totaux :
@@ -34,6 +34,8 @@
 > lire avant de lancer un démon ou de toucher aux chemins* ·
 > **§2 quater** *la mise à jour du 20 août, faite — et la règle permanente qu'elle
 > laisse : une mise à jour ne bénéficie JAMAIS du correctif qu'elle installe* ·
+> **§2 quinquies** *le fait contre la conclusion : comment se lit `state`, et
+> pourquoi `status` et `restart_pending` disent parfois la même chose* ·
 > **§3** où l'on en est · **§3 bis** la carte du code ·
 > **§4** ce qui n'est pas négociable · **§6 / §6 bis** quel fichier est né à quel
 > jalon, les 124 de `src/` · **§8 bis** le rythme de travail et la campagne
@@ -137,7 +139,7 @@ cmake --build build-debug -j"$(nproc)"
 ./build-release/sshos_tests files_     # filtre par sous-chaîne du nom
 ```
 
-**Attendu : `1303 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
+**Attendu : `1311 cas, 0 en echec, 0 assertions echouees`,** en Release comme en
 Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 
 > Le binaire de test s'appelle **`sshos_tests`** (pas `sshos-test`). Erreur commise
@@ -147,7 +149,7 @@ Debug, avec 0 avertissement de compilation (`-Wall -Wextra -Wpedantic -Werror`).
 > fois** — « 189 cas » puis « 1120 cas », chaque fois assez longtemps pour qu'un
 > contexte neuf puisse croire avoir tout cassé. Le compter plutôt que le croire :
 > `grep -ch '^TEST(' tests/*.cpp | awk '{s+=$1} END {print s}'` doit rendre le
-> même nombre que la ligne de bilan de `sshos_tests`. Au 20 août au soir : **1303**.
+> même nombre que la ligne de bilan de `sshos_tests`. Au 21 août : **1311**.
 >
 > ⚠️ **`-h`, et pas un découpage sur `:`.** La version qu'a portée ce dossier
 > jusqu'au 20 août 2026 faisait `grep -c ... | awk -F: '{s+=$2}'`. Or `grep -c`
@@ -448,8 +450,22 @@ sshos: le demon n'a pas repondu          (ou « le redemarrage n'a pas abouti »
 
 ```bash
 tail -5 ~/.local/share/sshos/journal.log
-grep -E 'installed_commit|installed_version|status' ~/.local/share/sshos/state
+grep -E 'installed_commit|installed_version|status|restart_pending' \
+     ~/.local/share/sshos/state
 ```
+
+**Lire ces deux dernières lignes ensemble, et savoir laquelle dit quoi :**
+
+| Clé | Ce qu'elle porte |
+|---|---|
+| `status` | la **conclusion** de la dernière vérification — `up-to-date`, `available`, `check-failed`… |
+| `restart_pending` | un **fait** : un binaire est posé et ce n'est pas celui qui tourne. `1` ou vide |
+
+Les deux ont longtemps vécu dans la seule clé `status`, et c'est ce qui a
+coûté : une conclusion pouvait effacer un fait qu'elle n'avait même pas
+observé. ⚠️ **Tant que le fait tient, `status` le redit aussi** (`restart-pending`
+dans les deux) — c'est voulu, pour les démons antérieurs à la clé, qui ne lisent
+que `status`. Voir §2 quinquies.
 
 ### Ce que le journal sait dire
 
@@ -465,6 +481,81 @@ grep -E 'installed_commit|installed_version|status' ~/.local/share/sshos/state
 secondes est la signature du défaut du 19 août** : le démon a mis plus longtemps
 à revenir que le client n'a attendu. Le budget est passé de 1 s à 30 s ; la sonde
 qui le garde est `tools/verif_redemarrage_lent.py`.
+
+---
+
+## 2 quinquies. Le fait et la conclusion — comment se lit l'état de mise à jour
+
+Le fichier `<données>/state` porte deux choses de nature différente, et les avoir
+confondues a produit deux défauts successifs. La distinction vaut d'être tenue.
+
+**`status` est une CONCLUSION.** C'est ce qu'a trouvé la dernière vérification :
+`up-to-date`, `available`, `check-failed`, `history-rewritten`… Elle se refait à
+chaque `--check`.
+
+**`restart_pending` est un FAIT.** « Un binaire est posé et ce n'est pas celui qui
+tourne. » Une vérification ne regarde que le dépôt distant — elle n'observe pas ce
+fait, **donc elle ne peut pas le démentir**.
+
+| Qui | Peut armer le fait | Peut l'effacer |
+|---|---|---|
+| `--apply` | ✅ il pose un binaire | — |
+| `--rollback` | ✅ il pose un binaire (inode neuve) | — |
+| `--check` | ❌ jamais | ✅ **seulement** s'il constate le redémarrage |
+| le démon | ❌ le C++ n'écrit jamais ce fichier | il **cesse d'y croire**, sans l'effacer |
+
+### Comment `--check` peut constater un redémarrage
+
+Le démon lance le script par un `fork()` **simple** suivi d'un `execv`
+(`launch_updater`, `src/daemon/session.cpp`) : **notre parent EST le démon**.
+Comparer l'inode de son binaire à celle du binaire posé dit donc si c'est bien lui
+qui tourne.
+
+```sh
+stat -Lc '%d:%i' /proc/$PPID/exe     # -L : sans lui on mesure le lien magique,
+stat -c  '%d:%i' "$EXE"              #      qui vit sur procfs (§9)
+```
+
+Tapé à la main depuis un shell, le parent n'est pas un démon : **on ne conclut
+pas, et le fait est conservé.** C'est le sens sûr de l'incertitude — garder un
+redémarrage en attente ne coûte qu'une proposition de trop ; le perdre coûte un
+bureau qui tourne sur l'ancien binaire sans le dire.
+
+### Les deux défauts que cette séparation a soldés
+
+1. **Le cul-de-sac** (20 août). `--check` écrasait `restart-pending` par
+   `up-to-date` : la pastille s'éteignait, l'entrée redevenait « Verifier les mises
+   a jour », et plus rien ne proposait le redémarrage. La vérification automatique
+   tombe une fois par jour, sans que personne ait rien demandé : le trou se
+   refermait tout seul, en silence.
+2. **Le fichier qui ment** (21 août). Le premier correctif préservait
+   `restart-pending` dès que c'était l'état d'avant — ce qui fermait le cul-de-sac,
+   mais le fichier ne se redressait alors **plus jamais**. Or le §2 quater dit
+   littéralement de lire ce champ pour diagnostiquer. On avait échangé un défaut
+   fonctionnel contre un fichier trompeur.
+
+### Deux détails qui surprennent, et qui sont voulus
+
+- **`status` redit `restart-pending` tant que le fait tient.** Un démon *antérieur*
+  à la clé ne lit que `status` ; lui écrire « à jour » pendant qu'un binaire posé
+  attend son redémarrage lui ferait éteindre la pastille pour toujours —
+  exactement le défaut n° 1. La redondance est le prix de la compatibilité.
+- **Un fichier sans la clé mais avec `status=restart-pending` est migré** vers
+  `restart_pending=1`, côté script **et** côté analyseur. Le perdre coûterait un
+  bureau au moment précis de la mise à jour qui introduit la clé. Mais la clé
+  **présente** fait autorité, même contre le statut : sans quoi la migration
+  deviendrait un « toujours vrai » et le fait ne pourrait plus jamais retomber.
+
+### Côté C++
+
+`restart_needed_` est la **seule** source du « faut-il redémarrer ? » — l'entrée de
+menu, la pastille, `needs_restart()` et la commande de redémarrage la lisent toutes.
+Elle vaut `state_.restart_pending && !running_is_installed()`.
+
+**Le redémarrage passe avant une nouveauté**, et c'est un choix : il coûte trois
+secondes contre deux minutes de compilation, l'utilisateur l'a déjà payé, et il
+maintient l'invariant « au plus un binaire posé jamais exécuté ». La nouveauté sera
+encore là au tour suivant.
 
 ---
 
@@ -688,6 +779,24 @@ l'optimisation par tranches, **7 380 ms après**. Deux cas expirent volontaireme
 des `TEST(...)` sert de filtre** en ligne de commande — d'où `files_`, `copy_`,
 `terminal_`, `session_`, `daemon_`, `dir_`, `snapassist_`…
 
+> ⚠️ **UNE FIXTURE NE DOIT PAS NETTOYER SEULEMENT CE QU'ELLE A CRÉÉ.** Le code
+> testé crée AUSSI — c'est même tout l'objet de Fichiers et de `FileJob` : ils
+> copient, déplacent, fabriquent des dossiers, et un travail arrêté en cours de
+> route laisse un reste à mi-chemin. Deux `Tree` ne retiraient que leur propre
+> liste : le `rmdir` de la racine échouait alors sur `ENOTEMPTY`, **en silence**,
+> et l'arbre entier fuyait. Mesure du 21 août 2026 : **1943 répertoires** oubliés
+> dans `/tmp` — un tmpfs de 2,7 Go qu'une compilation d'essai a déjà rempli une
+> fois. Le nettoyage se fait par `nftw(..., FTW_DEPTH | FTW_PHYS)` ; **`FTW_PHYS`
+> n'est pas une précaution** : sans lui, `nftw` suit les liens symboliques, et
+> cette suite en fabrique — effacer la cible d'un lien est le pire dégât qu'un
+> gestionnaire de fichiers puisse faire.
+>
+> Et le répertoire d'isolation `XDG_DATA_HOME` du harnais n'était jamais repris :
+> un par **lancement** du binaire. ⚠️ **Pas d'`atexit()` pour le faire** — le
+> lanceur forke un ouvrier qui sort par `std::exit(0)`, lequel déroule les
+> `atexit` : il effacerait le répertoire sous les pieds des lots suivants. Seul le
+> superviseur atteint la fin de `main()`.
+>
 > ⚠️ **Tous les cas tournent dans le MÊME processus**, et ceux de `test_daemon.cpp`
 > appellent `reap_children()`, qui fait `waitpid(-1, WNOHANG)`. Un cas qui `fork()`
 > doit donc **récolter ses propres pids avant de rendre la main**, même ceux qu'il
