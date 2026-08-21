@@ -218,6 +218,42 @@ TEST(sysinfo_draws_its_signature_in_block_letters) {
   CHECK(!(surf.at(0, 0).fg == sshos::Theme::mono16().desktop_bg));
 }
 
+// CHAQUE LETTRE DU MOT DOIT PEINDRE QUELQUE CHOSE, et ce cas existe parce
+// que l'oubli est SILENCIEUX. `glyph_rows()` finit par `default: return
+// kSpace[row]` : une lettre sans dessin ne casse rien, ne produit aucun
+// avertissement sous -Werror, et sort simplement blanche. Le cas voisin
+// (`..._draws_its_signature_in_block_letters`) ne cherche qu'un seul bloc
+// dans toute la vue -- deux lettres definies sur six lui suffisent, et il
+// resterait vert avec quatre trous au milieu du mot.
+//
+// On verifie donc bande par bande : chaque lettre occupe kGlyphW colonnes a
+// x0 + i * (kGlyphW + kGap), et chacune doit porter au moins un bloc. Le mot
+// n'a pas d'espace, sinon il faudrait exempter sa bande.
+TEST(sysinfo_paints_every_single_letter_of_its_signature) {
+  constexpr int kW = 40, kH = 12;
+  constexpr int kGlyphW = 3, kGap = 1, kRows = 5;
+  constexpr int kLetters = 6;  // « TERMOS »
+  const int word_w = kLetters * (kGlyphW + kGap) - kGap;
+
+  sshos::Surface surf(kW, kH);
+  SysInfo::draw_banner(sshos::View(surf, sshos::Rect{0, 0, kW, kH}),
+                       sshos::Theme::mono16(), sshos::Border::Unicode);
+
+  const int x0 = (kW - word_w) / 2;
+  const int y0 = (kH - kRows) / 2;
+  for (int i = 0; i < kLetters; ++i) {
+    int blocs = 0;
+    for (int row = 0; row < kRows; ++row) {
+      for (int c = 0; c < kGlyphW; ++c) {
+        if (surf.at(x0 + i * (kGlyphW + kGap) + c, y0 + row).ch == U'\u2588') ++blocs;
+      }
+    }
+    // CHECK plutot que REQUIRE : on veut savoir COMBIEN de lettres manquent,
+    // pas seulement qu'il en manque une. REQUIRE sortirait a la premiere.
+    CHECK(blocs > 0);
+  }
+}
+
 // Trop à l'étroit, elle ne s'écrit pas : une signature tronquée est un
 // défaut d'affichage, pas une décoration.
 TEST(sysinfo_skips_its_signature_when_the_space_is_too_small) {

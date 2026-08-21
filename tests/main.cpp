@@ -509,7 +509,7 @@ struct SeedOnce {
 // LA SUITE NE DOIT RIEN SAVOIR DE LA MACHINE QUI LA FAIT TOURNER.
 //
 // `Session` lit l'etat de la mise a jour dans
-// `${XDG_DATA_HOME:-$HOME/.local/share}/sshos/state`. Sans cette
+// `${XDG_DATA_HOME:-$HOME/.local/share}/termos/state`. Sans cette
 // redirection, chaque test qui construit une Session lisait l'INSTALLATION
 // REELLE de l'utilisateur : le jour ou son etat est passe a « available »,
 // la pastille est apparue dans la barre et sept references golden ont

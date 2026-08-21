@@ -4,7 +4,7 @@
 
 namespace sshos {
 
-// LE REPERTOIRE DE DONNEES DE L'UTILISATEUR, `<...>/sshos`. Il vit sous son
+// LE REPERTOIRE DE DONNEES DE L'UTILISATEUR, `<...>/termos`. Il vit sous son
 // home quel que soit le prefixe d'installation choisi : l'etat des mises a
 // jour et le journal du demon sont propres a la PERSONNE, pas a
 // l'installation.

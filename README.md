@@ -1,4 +1,4 @@
-<h1 align="center">ssh_os 2.0</h1>
+<h1 align="center">termos</h1>
 
 <p align="center">
   <strong>Un bureau en mode texte qui survit à la déconnexion.</strong><br>
@@ -15,12 +15,12 @@
 
 ```
 ┌─ Terminal (build) ────────────┐ ┌─ Fichiers ───────────────────┐
-│ $ make -j8                    │ │ ~/dev/ssh_os_2.0             │
-│ [100%] Built target sshos     │ │  ..                          │
+│ $ make -j8                    │ │ ~/dev/termos                 │
+│ [100%] Built target termos    │ │  ..                          │
 │ $ _                           │ │  src/            <REP>       │
 │                               │ │  tests/          <REP>       │
 └───────────────────────────────┘ └──────────────────────────────┘
- [SSH OS]  Terminal  Fichiers  Editeur              CPU 12%  14:32
+ [TERMOS]  Terminal  Fichiers  Editeur              CPU 12%  14:32
 ```
 
 <p align="center"><strong>Français</strong> · <a href="#english">English</a></p>
@@ -112,7 +112,7 @@ cmake --build build-debug -j"$(nproc)" && ./build-debug/termos_tests
 **GNU AGPL-3.0** — voir [`LICENSE`](LICENSE). Forkez, modifiez, redistribuez ; mais toute
 version dérivée reste sous la même licence et doit publier ses sources, y compris si
 elle n'est **exploitée qu'en service** sans jamais être distribuée. C'est le cas d'usage
-qui compte ici : `sshos` est un démon que l'on joint à distance.
+qui compte ici : `termos` est un démon que l'on joint à distance.
 
 Copyright © 2026 [might-stormlord](https://github.com/might-stormlord).
 
@@ -192,6 +192,6 @@ pitfalls, working method, and what is left to do. Read it before touching the co
 **GNU AGPL-3.0** — see [`LICENSE`](LICENSE). Fork it, modify it, redistribute it; but any
 derivative stays under the same license and must publish its sources, **including when
 it is only ever run as a service** and never distributed. That is the case that matters
-here: `sshos` is a daemon you reach over the network.
+here: `termos` is a daemon you reach over the network.
 
 Copyright © 2026 [might-stormlord](https://github.com/might-stormlord).

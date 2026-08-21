@@ -647,7 +647,7 @@ int run_daemon(std::string_view socket_name, const std::string& journal_path) {
           if (hello_seen) {
             if (hello_seen->build_id != kBuildId) {
               pending->out.push(encode(Msg{Incompatible{
-                  "version du demon differente : relancez `sshos --kill`"}}));
+                  "version du demon differente : relancez `termos --kill`"}}));
               pending->out.flush(pending->fd.get());
               drop_pending();
               continue;

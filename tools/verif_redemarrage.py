@@ -15,8 +15,8 @@ Ce quatrieme point est la raison d'etre de ce fichier depuis le 21 aout
 0; attempt < 2; ++attempt)` -- en croyant empecher un emballement. Elle
 comptait en realite les redemarrages de TOUTE LA VIE DU CLIENT : le
 deuxieme etait refuse sans meme essayer de relancer un demon, sur
-« sshos: le redemarrage n'a pas abouti », et l'utilisateur perdait son
-bureau alors que rien n'etait casse. Un `sshos` retape repartait avec un
+« termos: le redemarrage n'a pas abouti », et l'utilisateur perdait son
+bureau alors que rien n'etait casse. Un `termos` retape repartait avec un
 compteur neuf : d'ou le « une fois sur deux » exact que l'utilisateur
 rapportait. Un seul redemarrage verifie ne voit RIEN de ce defaut -- c'est
 precisement ce qui l'a laisse passer.

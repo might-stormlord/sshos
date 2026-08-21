@@ -2,13 +2,13 @@
 // terminer ».
 //
 // CE QUE CE FICHIER EXISTE POUR ATTRAPER. Le 21 août 2026, un redémarrage de
-// bureau sur deux échouait sur « sshos: le redemarrage n'a pas abouti ». Le
+// bureau sur deux échouait sur « termos: le redemarrage n'a pas abouti ». Le
 // compte vivait dans `src/main.cpp` -- `for (int attempt = 0; attempt < 2;
 // ++attempt)` -- et comptait les redémarrages de TOUTE LA VIE DU CLIENT, pas
 // les allers-retours stériles. Le premier redémarrage passait, le second
 // était refusé sans même essayer de relancer un démon : l'utilisateur
 // retombait au shell, bureau perdu, alors que rien n'était cassé. Un
-// utilisateur qui relançait `sshos` repartait avec un compteur neuf --
+// utilisateur qui relançait `termos` repartait avec un compteur neuf --
 // d'où le « une fois sur deux » exact.
 //
 // Comme pour `src/client/launch.cpp` (voir test_launch.cpp), sortir la

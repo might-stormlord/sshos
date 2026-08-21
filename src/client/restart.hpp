@@ -10,9 +10,9 @@ namespace sshos {
 // redémarrages de TOUTE LA VIE DU CLIENT, alors qu'il croyait borner une
 // boucle. Conséquence exacte, mesurée le 21 août 2026 : le premier
 // redémarrage d'une session passait, le second était refusé **sans même
-// essayer de relancer un démon** -- « sshos: le redemarrage n'a pas abouti »,
+// essayer de relancer un démon** -- « termos: le redemarrage n'a pas abouti »,
 // bureau perdu, retour au shell, alors que rien n'était cassé. Un
-// utilisateur qui retapait `sshos` repartait avec un compteur neuf : d'où le
+// utilisateur qui retapait `termos` repartait avec un compteur neuf : d'où le
 // « une fois sur deux » exact que le défaut présentait.
 //
 // CE QUI MÉRITE D'ÊTRE BORNÉ N'EST PAS LE NOMBRE DE REDÉMARRAGES. Un

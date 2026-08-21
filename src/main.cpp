@@ -44,16 +44,16 @@ int start_daemon_and_connect(const std::string& name) {
   // était ici, dans le seul fichier qu'aucun test ne peut atteindre.
   const sshos::DaemonLaunch r = sshos::launch_daemon(
       name, sshos::daemon_exe_path(), [] {
-        std::fprintf(stderr, "sshos: le demon met du temps a demarrer, patience...\n");
+        std::fprintf(stderr, "termos: le demon met du temps a demarrer, patience...\n");
       });
   switch (r) {
     case sshos::DaemonLaunch::Connected:
       return 0;
     case sshos::DaemonLaunch::SpawnFailed:
-      std::fprintf(stderr, "sshos: impossible de lancer le demon\n");
+      std::fprintf(stderr, "termos: impossible de lancer le demon\n");
       return 1;
     case sshos::DaemonLaunch::TimedOut:
-      std::fprintf(stderr, "sshos: le demon n'a pas repondu\n");
+      std::fprintf(stderr, "termos: le demon n'a pas repondu\n");
       return 1;
   }
   return 1;
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
   try {
     name = current_socket_name();
   } catch (const std::exception& e) {
-    std::fprintf(stderr, "sshos: %s\n", e.what());
+    std::fprintf(stderr, "termos: %s\n", e.what());
     return 1;
   }
   const std::string mode = argc > 1 ? argv[1] : "";
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
   }
 
   if (!mode.empty()) {
-    std::fprintf(stderr, "usage: sshos [--daemon|--status|--kill]\n");
+    std::fprintf(stderr, "usage: termos [--daemon|--status|--kill]\n");
     return 2;
   }
 
@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
   // redémarrages de toute la vie du client : le deuxième était refusé sans
   // même essayer de relancer un démon, et l'utilisateur perdait son bureau
   // sur « le redemarrage n'a pas abouti » alors que rien n'était cassé. Un
-  // `sshos` retapé repartait avec un compteur neuf, d'où le « une fois sur
+  // `termos` retapé repartait avec un compteur neuf, d'où le « une fois sur
   // deux » exact. Le compte vit désormais dans RestartBudget
   // (src/client/restart.hpp), à portée de la suite de tests, et ne compte que
   // les allers-retours qui n'ont servi à rien.
@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
       // répéter après une mise à jour serait du bruit.
       if (premier_lancement && logind_kills_user_processes()) {
         std::fprintf(stderr,
-                     "sshos: attention, logind est configure avec "
+                     "termos: attention, logind est configure avec "
                      "KillUserProcesses=yes ;\n        vos fenetres ne "
                      "survivront pas a la deconnexion.\n        Parade : "
                      "loginctl enable-linger %d\n",
@@ -159,10 +159,10 @@ int main(int argc, char** argv) {
     // qui a servi : le redémarrage qu'elle demande est celui de
     // l'utilisateur, pas celui d'une boucle.
     if (!budget.allow(trace.desktop_shown && trace.user_acted)) {
-      std::fprintf(stderr, "sshos: le redemarrage n'a pas abouti\n");
+      std::fprintf(stderr, "termos: le redemarrage n'a pas abouti\n");
       return 1;
     }
 
-    std::fprintf(stderr, "sshos: mise a jour installee, redemarrage...\n");
+    std::fprintf(stderr, "termos: mise a jour installee, redemarrage...\n");
   }
 }

@@ -165,7 +165,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
   try {
     sock = connect_with_timeout(socket_name, kConnectTimeoutMs);
   } catch (const std::exception& e) {
-    std::fprintf(stderr, "sshos: connexion au demon impossible : %s\n", e.what());
+    std::fprintf(stderr, "termos: connexion au demon impossible : %s\n", e.what());
     return 1;
   }
 
@@ -210,7 +210,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
         // rc=0 muet pour les autres pannes d'écriture/lecture ci-dessous --
         // indiscernable d'un détachement propre pour l'utilisateur comme
         // pour un script qui inspecte le code de retour.
-        std::fprintf(stderr, "\r\nsshos: envoi du redimensionnement au demon impossible : %s\r\n",
+        std::fprintf(stderr, "\r\ntermos: envoi du redimensionnement au demon impossible : %s\r\n",
                      std::strerror(errno));
         rc = 1;
         break;
@@ -224,7 +224,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
       // évènement" : la référence initiale sortait ici en silence avec
       // rc=0, indiscernable d'un détachement propre. EINVAL/EBADF signalent
       // un vrai défaut plutôt qu'une condition attendue.
-      std::fprintf(stderr, "\r\nsshos: poll() a echoue : %s\r\n", std::strerror(errno));
+      std::fprintf(stderr, "\r\ntermos: poll() a echoue : %s\r\n", std::strerror(errno));
       rc = 1;
       break;
     }
@@ -245,7 +245,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
       if (!sent) {
         // Même panne, même traitement que le redimensionnement ci-dessus :
         // un rc=0 muet se confondrait avec un détachement propre.
-        std::fprintf(stderr, "\r\nsshos: envoi de l'entree au demon impossible : %s\r\n",
+        std::fprintf(stderr, "\r\ntermos: envoi de l'entree au demon impossible : %s\r\n",
                      std::strerror(errno));
         rc = 1;
         break;
@@ -262,7 +262,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
         // Là aussi la référence sortait en silence avec rc=0 : une erreur de
         // lecture réelle (ECONNRESET...) est pourtant distincte d'un
         // détachement propre annoncé par le protocole (message Detached).
-        std::fprintf(stderr, "\r\nsshos: lecture depuis le demon impossible : %s\r\n",
+        std::fprintf(stderr, "\r\ntermos: lecture depuis le demon impossible : %s\r\n",
                      std::strerror(errno));
         rc = 1;
         break;
@@ -272,7 +272,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
         // kill -9...). Un exit silencieux à 0 masquerait cette différence à
         // l'utilisateur comme à tout script qui inspecte le code de retour.
         std::fprintf(stderr,
-                     "\r\nsshos: le demon a ferme la connexion sans annoncer de detachement\r\n");
+                     "\r\ntermos: le demon a ferme la connexion sans annoncer de detachement\r\n");
         rc = 1;
         break;
       }
@@ -281,7 +281,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
       while (auto m = dec.next()) {
         if (const auto* f = std::get_if<FrameMsg>(&*m)) {
           if (!write_all(STDOUT_FILENO, f->ansi)) {
-            std::fprintf(stderr, "\r\nsshos: ecriture vers stdout impossible : %s\r\n",
+            std::fprintf(stderr, "\r\ntermos: ecriture vers stdout impossible : %s\r\n",
                          std::strerror(errno));
             rc = 1;
             stop = true;
@@ -300,11 +300,11 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
             stop = true;
             break;
           }
-          std::fprintf(stderr, "\r\nsshos: detache (%s)\r\n", d->reason.c_str());
+          std::fprintf(stderr, "\r\ntermos: detache (%s)\r\n", d->reason.c_str());
           stop = true;
           break;
         } else if (const auto* i = std::get_if<Incompatible>(&*m)) {
-          std::fprintf(stderr, "\r\nsshos: %s\r\n", i->reason.c_str());
+          std::fprintf(stderr, "\r\ntermos: %s\r\n", i->reason.c_str());
           rc = 1;
           stop = true;
           break;
@@ -320,7 +320,7 @@ int run_client(std::string_view socket_name, SessionTrace* trace) {
       // destructeurs déroulés -- TtyGuard restaure le terminal) plutôt que
       // de reboucler indéfiniment sur un décodeur inerte.
       if (!stop && dec.failed()) {
-        std::fprintf(stderr, "\r\nsshos: message de protocole invalide recu du demon\r\n");
+        std::fprintf(stderr, "\r\ntermos: message de protocole invalide recu du demon\r\n");
         rc = 1;
         stop = true;
       }

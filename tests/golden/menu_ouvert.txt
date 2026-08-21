@@ -17,4 +17,4 @@
 |Panneau : gauche                |                          
 |Panneau : droite                |                          
 +--------------------------------+                          
- ssh_os  Terminal  Fichiers  Editeur *Bloc  ^A = aide 10:05 
+ termos  Terminal  Fichiers  Editeur *Bloc  ^A = aide 10:05 

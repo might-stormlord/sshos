@@ -383,7 +383,7 @@ TEST(panel_stacks_its_entries_on_a_vertical_edge) {
   View v = s.root();
   p.draw(v, Theme::mono16(), "10:05", "lun 10 aou");
 
-  CHECK(s.text_row(0).find("ssh_os") != std::string::npos);
+  CHECK(s.text_row(0).find("termos") != std::string::npos);
   CHECK(s.text_row(22).find("lun 10 aou") != std::string::npos);
   CHECK(s.text_row(23).find("10:05") != std::string::npos);
   CHECK(p.hit(3, 23).what == PanelHit::Clock);

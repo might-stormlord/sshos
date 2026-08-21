@@ -183,7 +183,7 @@ void Panel::layout_horizontal(const WindowManager& wm) {
   // Le bouton de menu porte la marque du projet. En UTF-8 il gagne son
   // glyphe ; sans UTF-8 le mot seul reste lisible, là où un point
   // d'interrogation ne dirait rien.
-  const std::string menu = utf8_ ? "☰ ssh_os" : "ssh_os";
+  const std::string menu = utf8_ ? "☰ termos" : "termos";
   const int menu_w = text_cells(menu);
   items_.push_back(
       {PanelHit::MenuButton, -1, 0, false, Rect{x, y, menu_w, 1}, menu});
@@ -294,7 +294,7 @@ void Panel::layout_vertical(const WindowManager& wm) {
   }
 
   int y = rect_.y;
-  const std::string menu = utf8_ ? "☰ ssh_os" : "ssh_os";
+  const std::string menu = utf8_ ? "☰ termos" : "termos";
   items_.push_back(
       {PanelHit::MenuButton, -1, 0, false, Rect{x, y, w, 1}, menu});
   ++y;

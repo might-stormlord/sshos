@@ -182,7 +182,7 @@ TEST(session_draws_a_panel_on_the_last_row) {
   // heure d'été active).
   CHECK(panel.find("10:05") != std::string::npos);
   CHECK(panel.find("14:05") == std::string::npos);
-  CHECK(panel.find("ssh_os") != std::string::npos);
+  CHECK(panel.find("termos") != std::string::npos);
 }
 
 // Round horloge (clock-round-brief.md), item 4. Sous UN SEUL fuseau
@@ -414,8 +414,8 @@ TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
 
   Surface a(40, 12);
   sess.render(a);
-  CHECK(a.text_row(11).find("ssh_os") != std::string::npos);
-  CHECK(a.text_row(10).find("ssh_os") == std::string::npos);
+  CHECK(a.text_row(11).find("termos") != std::string::npos);
+  CHECK(a.text_row(10).find("termos") == std::string::npos);
   bool found_title_a = false;
   for (int y = 0; y < 11; ++y) {
     if (a.text_row(y).find("Bloc") != std::string::npos) found_title_a = true;
@@ -424,8 +424,8 @@ TEST(session_geometry_follows_the_surface_not_the_constructor_arguments) {
 
   Surface b(60, 20);
   sess.render(b);
-  CHECK(b.text_row(19).find("ssh_os") != std::string::npos);
-  CHECK(b.text_row(18).find("ssh_os") == std::string::npos);
+  CHECK(b.text_row(19).find("termos") != std::string::npos);
+  CHECK(b.text_row(18).find("termos") == std::string::npos);
   bool found_title_b = false;
   for (int y = 0; y < 19; ++y) {
     if (b.text_row(y).find("Bloc") != std::string::npos) found_title_b = true;
@@ -521,7 +521,7 @@ TEST(session_keeps_every_window_above_the_panel) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  CHECK(s.text_row(23).find("ssh_os") != std::string::npos);
+  CHECK(s.text_row(23).find("termos") != std::string::npos);
 }
 
 namespace {
@@ -1155,14 +1155,14 @@ TEST(session_hides_the_panel_under_a_fullscreen_window) {
   Session sess(plat, g_fds, 80, 24);
   Surface s(80, 24);
   sess.render(s);
-  REQUIRE(s.text_row(23).find("ssh_os") != std::string::npos);
+  REQUIRE(s.text_row(23).find("termos") != std::string::npos);
 
   sess.on_input(sshos::InputEvent{
       sshos::KeyEvent{sshos::Key::Char, U'a', sshos::mod::Ctrl}});
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'f', 0}});
   Surface full(80, 24);
   sess.render(full);
-  CHECK(full.text_row(23).find("ssh_os") == std::string::npos);
+  CHECK(full.text_row(23).find("termos") == std::string::npos);
   // Et le repeint complet est réclamé : aucun delta ne dit « le panneau a
   // disparu » de façon fiable.
   CHECK(sess.take_repaint());
@@ -1172,7 +1172,7 @@ TEST(session_hides_the_panel_under_a_fullscreen_window) {
   sess.on_input(sshos::InputEvent{sshos::KeyEvent{sshos::Key::Char, U'f', 0}});
   Surface again(80, 24);
   sess.render(again);
-  CHECK(again.text_row(23).find("ssh_os") != std::string::npos);
+  CHECK(again.text_row(23).find("termos") != std::string::npos);
 }
 
 // Bloc refuse de se fermer une fois modifiée : la session doit poser la
@@ -1444,15 +1444,15 @@ std::string unique_name() {
 }
 
 // Fait tourner un vrai démon dans un processus fils distinct, sans passer
-// par `sshos --daemon` : /proc/self/exe depuis le binaire sshos_tests
-// résout vers sshos_tests lui-même, dont main() (tests/main.cpp) traite
+// par `termos --daemon` : /proc/self/exe depuis le binaire termos_tests
+// résout vers termos_tests lui-même, dont main() (tests/main.cpp) traite
 // argv[1] comme un filtre de nom de test, pas comme un mode démon — cette
 // route est donc inutilisable ici. run_daemon() est lié statiquement via
 // sshos_core (voir CMakeLists.txt) : l'appeler directement dans le fils,
 // puis _exit() sans jamais revenir à main(), obtient le même résultat
 // (un vrai process, un vrai socket, un vrai epoll) sans dupliquer
 // l'aiguillage de main.cpp. Choix explicitement offert par le brief de
-// tâche, en alternative à l'exécutable `sshos` réel.
+// tâche, en alternative à l'exécutable `termos` réel.
 //
 // become_daemon() (double fork, setsid, redirection vers /dev/null) n'est
 // délibérément PAS appelé : ce n'est pas ce que ce test vérifie (daemonize.*
@@ -1730,7 +1730,7 @@ sshos::Fd accept_with_timeout(int listen_fd, int timeout_ms) {
 }
 
 // Fait tourner un vrai client (fork() + appel direct à run_client() dans
-// le fils, sans passer par l'exécutable `sshos` -- même schéma et même
+// le fils, sans passer par l'exécutable `termos` -- même schéma et même
 // raison d'être que DaemonHandle plus haut) avec STDIN_FILENO redirigé
 // vers l'extrémité lecture d'un tube dont l'écriture reste ouverte côté
 // appelant pendant toute la durée du test (jamais fermée, jamais écrite) :
@@ -1839,7 +1839,7 @@ TEST(daemon_clean_overflow_keeps_the_connection_alive) {
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Resize{80, 24}})));
 
   sshos::Decoder dec;
-  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 12000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "termos", "termos", 12000));
 }
 
 // A7, cas Dirty : obtenir un rejet Dirty exige plus qu'un simple gros
@@ -1976,8 +1976,8 @@ TEST(daemon_dirty_overflow_closes_the_connection) {
 
 // Le test bout-en-bout exigé par la tâche : un vrai démon, un vrai client
 // sur socket abstrait, un aller Hello/Welcome, une trame reçue contenant le
-// titre de la fenêtre ("Bloc") et le texte du panneau ("ssh_os"), puis
-// un arrêt propre (SIGTERM, comme `sshos --kill`) vérifié par le code de
+// titre de la fenêtre ("Bloc") et le texte du panneau ("termos"), puis
+// un arrêt propre (SIGTERM, comme `termos --kill`) vérifié par le code de
 // sortie ET par la disparition du socket abstrait. Les étapes 12 et 14 du
 // plan (lancement interactif, Ctrl+Q sous un vrai tty) ne sont pas
 // exécutables sans tty et ne sont PAS couvertes ici — voir le rapport de
@@ -2001,14 +2001,14 @@ TEST(end_to_end_attach_render_detach_kill) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 2000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "termos", 2000));
 
   // Détachement côté client : fermer notre bout ne doit rien perturber côté
   // démon (le bouchon M1 n'a qu'un seul client à la fois, sans notion de
   // session détachée séparément du processus démon — voir Session).
   client.reset();
 
-  // Arrêt comme le ferait `sshos --kill` : SIGTERM, pas SIGKILL.
+  // Arrêt comme le ferait `termos --kill` : SIGTERM, pas SIGKILL.
   REQUIRE(::kill(daemon.pid(), SIGTERM) == 0);
 
   int status = 0;
@@ -2229,14 +2229,14 @@ TEST(daemon_repaints_everything_when_the_desktop_asks_for_it) {
   sshos::Decoder dec;
   auto welcome = recv_one(client.get(), dec, 2000);
   REQUIRE(welcome.has_value());
-  REQUIRE(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 3000));
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "Bloc", "termos", 3000));
 
   // Ctrl+A puis 'r'. RIEN n'a change a l'ecran : sans invalidate() le delta
   // serait vide, et seule une trame complete peut porter a la fois le titre
   // de la fenetre et le texte du panneau.
   REQUIRE(send_all(client.get(),
                    sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
-  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "termos", 3000));
 }
 
 TEST(daemon_handles_client_takeover_with_reused_fd_in_one_epoll_batch) {
@@ -2411,7 +2411,7 @@ TEST(daemon_mute_probe_does_not_evict_the_attached_client) {
   REQUIRE(welcome.has_value());
   CHECK(std::holds_alternative<sshos::Welcome>(*welcome));
 
-  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "ssh_os", 2000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "Bloc", "termos", 2000));
 
   // La sonde muette : ouvre puis referme, sans écrire un seul octet --
   // exactement --status/--kill/la sonde d'attache initiale de main.cpp.
@@ -2440,7 +2440,7 @@ TEST(daemon_mute_probe_does_not_evict_the_attached_client) {
   // échoue aussi (la connexion a déjà été fermée par la sonde précédente,
   // wait_for_frame_containing rend faux dès le premier recv_one en échec).
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{sshos::Resize{100, 30}})));
-  CHECK(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(client.get(), dec, "termos", "termos", 3000));
 }
 
 namespace {
@@ -2602,7 +2602,7 @@ TEST(daemon_keeps_clicks_sent_just_before_the_client_closes) {
   // Référence avant tout clic, et point de synchronisation : attendre une
   // trame effectivement composée garantit que le démon est retombé en attente
   // dans epoll_wait() avant qu'on ne le gèle.
-  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "ssh_os", 3000));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "termos", 3000));
 
   REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
 
@@ -2635,7 +2635,7 @@ TEST(daemon_keeps_clicks_sent_just_before_the_client_closes) {
   // Contre le code d'avant le correctif, les trois pressions sont parties à la
   // poubelle avec le HUP : la session affiche « clics: 0 » et cette attente
   // expire.
-  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 3", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 3", "termos", 3000));
 }
 
 // Le scénario tel que l'utilisateur le vit, et la seule chose que ce
@@ -2680,7 +2680,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   // le différentiel n'envoyait que le reste. Un motif ne survit à un delta
   // que par chance ; le repeint retire la chance de l'équation.
   REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{sshos::Input{"\x01r"}})));
-  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Fichiers", "ssh_os", 3000));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Fichiers", "termos", 3000));
 
   REQUIRE(send_all(a.get(),
                    sshos::encode(sshos::Msg{sshos::Input{"\x11"}})));  // Ctrl+Q
@@ -2712,7 +2712,7 @@ TEST(daemon_keeps_the_desktop_across_a_voluntary_detach) {
   REQUIRE(welcome_b.has_value());
   REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome_b));
 
-  CHECK(wait_for_frame_containing(b.get(), dec_b, "Fichiers", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "Fichiers", "termos", 3000));
 }
 
 // Même round, second emplacement du même motif : la branche `pending`
@@ -2746,7 +2746,7 @@ TEST(daemon_honours_a_hello_coalesced_with_its_senders_closure) {
   auto welcome = recv_one(a.get(), dec_a, 2000);
   REQUIRE(welcome.has_value());
   REQUIRE(std::holds_alternative<sshos::Welcome>(*welcome));
-  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "ssh_os", 3000));
+  REQUIRE(wait_for_frame_containing(a.get(), dec_a, "clics: 0", "termos", 3000));
 
   REQUIRE(::kill(daemon.pid(), SIGSTOP) == 0);
 
@@ -2809,7 +2809,7 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
     REQUIRE(a.valid());
     REQUIRE(send_all(a.get(), sshos::encode(sshos::Msg{hello})));
     sshos::Decoder dec_a;
-    REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Bloc", "ssh_os", 3000));
+    REQUIRE(wait_for_frame_containing(a.get(), dec_a, "Bloc", "termos", 3000));
 
     // Presser sur la barre de titre (ligne 1, colonne 6 en base 0 -> 7;2 en
     // SGR, qui compte à partir de 1), bouger bouton enfoncé (cb = 32), et
@@ -2824,7 +2824,7 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
   REQUIRE(b.valid());
   REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{hello})));
   sshos::Decoder dec_b;
-  REQUIRE(wait_for_frame_containing(b.get(), dec_b, "Bloc", "ssh_os", 3000));
+  REQUIRE(wait_for_frame_containing(b.get(), dec_b, "Bloc", "termos", 3000));
 
   // Un mouvement bouton enfoncé : si le glissement avait survécu au
   // détachement, la fenêtre suivrait le curseur jusqu'en bas de l'écran.
@@ -2845,7 +2845,7 @@ TEST(daemon_forgets_a_drag_left_behind_by_a_departed_client) {
   // figure jamais, et aucune aiguille textuelle n'aurait de quoi mordre.
   // Le socket garantit l'ordre : le clic est traité avant le Resize.
   REQUIRE(send_all(b.get(), sshos::encode(sshos::Msg{sshos::Resize{80, 24}})));
-  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "ssh_os", 3000));
+  CHECK(wait_for_frame_containing(b.get(), dec_b, "clics: 1", "termos", 3000));
 }
 
 
@@ -3412,7 +3412,7 @@ TEST(daemon_delivers_a_lone_escape_after_the_ambiguity_delay) {
   REQUIRE(send_all(client.get(), sshos::encode(sshos::Msg{make_hello(80, 24)})));
 
   sshos::Decoder dec;
-  REQUIRE(wait_for_frame_containing(client.get(), dec, "ssh_os", "ssh_os", 5000));
+  REQUIRE(wait_for_frame_containing(client.get(), dec, "termos", "termos", 5000));
 
   // Ctrl+A, Espace, puis un filtre : le menu s'ouvre sur les commandes de
   // panneau, dont AUCUNE n'existe ailleurs à l'écran.
@@ -3444,7 +3444,7 @@ TEST(daemon_delivers_a_lone_escape_after_the_ambiguity_delay) {
     if (f == nullptr) continue;
     // Le repeint complet se reconnaît à la barre des tâches, qu'il porte
     // toujours en entier.
-    if (f->ansi.find("ssh_os") == std::string::npos) continue;
+    if (f->ansi.find("termos") == std::string::npos) continue;
     saw_full_frame = true;
     menu_gone = f->ansi.find("Panneau") == std::string::npos;
     break;
@@ -3771,7 +3771,7 @@ TEST(daemon_shows_the_cursor_of_the_focused_application) {
 
   // `\033[?25h` : le curseur RENDU VISIBLE. Une trame sans caret le laisse
   // caché par le `?25l` de tête et ne le rallume jamais.
-  CHECK(wait_for_frame_containing(client.get(), dec, "\033[?25h", "ssh_os",
+  CHECK(wait_for_frame_containing(client.get(), dec, "\033[?25h", "termos",
                                   3000));
 }
 
@@ -4251,7 +4251,7 @@ TEST(session_keeps_the_wheel_out_of_the_panel) {
 namespace {
 
 // Une installation jetable : XDG_DATA_HOME, un fichier d'etat, et un vrai
-// script sshos-update. La session lit ce chemin A LA CONSTRUCTION, donc la
+// script termos-update. La session lit ce chemin A LA CONSTRUCTION, donc la
 // variable doit etre posee AVANT de construire la Session.
 class UpdateFixture {
  public:

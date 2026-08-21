@@ -290,19 +290,40 @@ void SysInfo::draw(View v, const Theme& th, Border b) const {
 
 namespace {
 
-// Une police de blocs, cinq lignes par lettre. Ecrite a la main : trois
-// colonnes suffisent a rendre S, H et O lisibles, et une police plus large
-// deborderait de la moitie gauche sur un terminal de quatre-vingts
-// colonnes.
+// Une police de blocs, cinq lignes par lettre. Écrite à la main : trois
+// colonnes suffisent à rendre les six lettres de « TERMOS » lisibles, et une
+// police plus large déborderait de la moitié gauche sur un terminal de
+// quatre-vingts colonnes.
+//
+// LE `M` EST LE SEUL ARBITRAGE DE CE TABLEAU. Sur trois colonnes, la
+// diagonale centrale d'un M n'a pas la place de descendre : elle devient un
+// bloc plein sur les deux premières rangées, entre deux jambages. Le sommet
+// EST plein -- un `# #` en rangée 0 ouvrirait la lettre par le haut et se
+// lirait « Π », pas « M ».
+//
+// Le `H` a été retiré avec le renommage : plus aucune lettre du mot n'en
+// demande, et c'est ce retrait qui rend le compromis du M sans conséquence
+// -- les deux se ressemblaient à cette taille, ils ne se croisent plus.
+//
+// `default: return kSpace[row]` fait qu'une lettre sans dessin sort BLANCHE,
+// sans avertissement du compilateur. C'est pour ça que
+// sysinfo_paints_every_single_letter_of_its_signature vérifie bande par
+// bande plutôt que de chercher un bloc quelque part.
 const char* glyph_rows(char c, int row) {
-  static const char* kS[5] = {"###", "#  ", "###", "  #", "###"};
-  static const char* kH[5] = {"# #", "# #", "###", "# #", "# #"};
+  static const char* kT[5] = {"###", " # ", " # ", " # ", " # "};
+  static const char* kE[5] = {"###", "#  ", "###", "#  ", "###"};
+  static const char* kR[5] = {"## ", "# #", "## ", "# #", "# #"};
+  static const char* kM[5] = {"###", "###", "# #", "# #", "# #"};
   static const char* kO[5] = {"###", "# #", "# #", "# #", "###"};
+  static const char* kS[5] = {"###", "#  ", "###", "  #", "###"};
   static const char* kSpace[5] = {"   ", "   ", "   ", "   ", "   "};
   switch (c) {
-    case 'S': return kS[row];
-    case 'H': return kH[row];
+    case 'T': return kT[row];
+    case 'E': return kE[row];
+    case 'R': return kR[row];
+    case 'M': return kM[row];
     case 'O': return kO[row];
+    case 'S': return kS[row];
     default: return kSpace[row];
   }
 }
@@ -310,7 +331,7 @@ const char* glyph_rows(char c, int row) {
 }  // namespace
 
 void SysInfo::draw_banner(View v, const Theme& th, Border b) {
-  const char* kWord = "SSH OS";
+  const char* kWord = "TERMOS";
   constexpr int kRows = 5;
   constexpr int kGlyphW = 3;
   constexpr int kGap = 1;

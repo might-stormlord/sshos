@@ -7,7 +7,7 @@ terminal du bureau installe, et les outils de developpement ne doivent
 jamais pouvoir l'atteindre.
 
 Technique reprise de tools/sonde.py : pty.fork() + execv du LANCEUR, sans
---daemon. Lancer « sshos --daemon » directement bloquerait -- become_daemon()
+--daemon. Lancer « termos --daemon » directement bloquerait -- become_daemon()
 ne forke pas, il execute la boucle du demon dans le processus appelant ; le
 detachement vient de spawn_detached, cote client.
 

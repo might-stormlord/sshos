@@ -10,7 +10,7 @@ namespace sshos {
 // ne sache laquelle il utilise.
 struct Theme {
   Color desktop_bg;
-  // La signature « SSH OS » du fond. PROCHE du fond, pas lisible de loin :
+  // La signature « TERMOS » du fond. PROCHE du fond, pas lisible de loin :
   // une signature qui se lit aussi bien que le contenu detourne l'oeil de
   // ce qu'on est venu faire.
   Color desktop_sign;

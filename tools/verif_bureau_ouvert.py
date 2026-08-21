@@ -33,7 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = "/var/tmp/sshos-verif-bureau-ouvert"
 # UNE INSTANCE A NOUS, ET SURTOUT PAS LE DEFAUT. « bureau01 » est le nom
 # que l installeur donne au bureau reel de la machine : install.sh --kill
-# viserait alors le socket sshos/<uid>/bureau01, c est-a-dire le bureau
+# viserait alors le socket termos/<uid>/bureau01, c est-a-dire le bureau
 # vivant -- et la session de travail qui tourne dedans. Le filtre par HOME
 # de daemons() ne protege pas de ca : c est install.sh qui tue, pas nous.
 INSTANCE = "verif-bureau-ouvert"

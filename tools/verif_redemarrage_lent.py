@@ -234,7 +234,7 @@ def main():
     if "status=restart-pending" not in etat:
         dit("ECHEC DE MONTAGE : l'application n'a pas eu lieu (status=%s)"
             % (re.search(r"status=(\S+)", etat).group(1) if "status=" in etat else "?"))
-        for l in re.findall(r"sshos: [^\r\n\x1b]+", tout.decode("utf-8", "replace")):
+        for l in re.findall(r"termos: [^\r\n\x1b]+", tout.decode("utf-8", "replace")):
             dit("   client : %s" % l.strip())
         os.kill(pid, signal.SIGKILL)
         tuer_les_notres()
@@ -285,12 +285,12 @@ def main():
         pass
     os.close(fd)
 
-    print("\n=== CE QUE LE CLIENT A ECRIT (lignes sshos:) ===")
+    print("\n=== CE QUE LE CLIENT A ECRIT (lignes termos:) ===")
     texte = tout.decode("utf-8", "replace")
     # UNE TRAME N'A PAS DE RETOUR A LA LIGNE : elle positionne le curseur.
     # Decouper en lignes rend donc tout le bureau dans une seule « ligne »
     # qui contient le message. On extrait le message lui-meme.
-    vues = re.findall(r"sshos: [^\r\n\x1b]+", texte)
+    vues = re.findall(r"termos: [^\r\n\x1b]+", texte)
     for l in vues:
         print("   %s" % l.strip())
     if not vues:

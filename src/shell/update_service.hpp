@@ -103,7 +103,7 @@ class UpdateService {
   // demon ne connait pas son propre commit -- rien ne le grave dedans,
   // CMakeLists etant intouchable -- mais il peut comparer son inode a celle
   // du fichier pose. Un demon reste sur l'ancienne version tient une inode
-  // differente : deliee, ou devenue sshos.previous.
+  // differente : deliee, ou devenue termos.previous.
   bool running_is_installed() const;
 
   // « Mise a jour en cours : compilation... », ou l'etape est celle que le

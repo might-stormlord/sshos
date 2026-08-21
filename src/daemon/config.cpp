@@ -45,7 +45,7 @@ DesktopConfig parse_config(std::string_view texte) {
 
 std::string render_config(const DesktopConfig& c) {
   std::string out =
-      "# Reglages du bureau ssh_os. Modifiable a la main ; le demon le relit\n"
+      "# Reglages du bureau termos. Modifiable a la main ; le demon le relit\n"
       "# a son demarrage et le reecrit quand on change un reglage depuis le\n"
       "# bureau. Une ligne inconnue est ignoree, pas effacee au prochain tour.\n";
   // RIEN POUR UNE VALEUR VIDE. « start_dir = » se relirait en chaine vide,

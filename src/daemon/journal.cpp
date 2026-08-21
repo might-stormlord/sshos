@@ -43,7 +43,7 @@ int open_appending(const char* path) {
   // Le repertoire de donnees peut ne pas exister encore : une installation
   // neuve n'a jamais rien ecrit. On cree CHAQUE segment -- sur une machine
   // ou personne n'a jamais rien pose sous le home, c'est `.local` et
-  // `.local/share` qui manquent avant `sshos`, et un mkdir() du seul
+  // `.local/share` qui manquent avant `termos`, et un mkdir() du seul
   // dernier segment echouerait sur ENOENT sans rien dire.
   const char* slash = std::strrchr(path, '/');
   if (slash == nullptr || slash == path) return -1;
