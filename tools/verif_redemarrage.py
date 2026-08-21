@@ -40,7 +40,7 @@ import os as _os
 # l'auteur : le depot est public et personne d'autre n'a /home/storm.
 _RACINE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 DEV = _os.environ.get("TERMOS_DEV_BIN",
-                      _os.path.join(_RACINE, "build-release", "sshos"))
+                      _os.path.join(_RACINE, "build-release", "termos"))
 BOOT = "verif-redemarrage"
 
 
@@ -96,8 +96,8 @@ def drain(fd, seconds):
 
 def main():
     root = "/var/tmp/sshos-verif-redemarrage"
-    os.system("rm -rf %s && mkdir -p %s/sshos %s/libexec" % (root, root, root))
-    with open(root + "/sshos/state", "w") as f:
+    os.system("rm -rf %s && mkdir -p %s/termos %s/libexec" % (root, root, root))
+    with open(root + "/termos/state", "w") as f:
         f.write("schema=1\nprefix=%s\nsource=git\nstatus=restart-pending\n" % root)
 
     env = dict(os.environ)

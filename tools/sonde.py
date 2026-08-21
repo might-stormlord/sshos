@@ -58,7 +58,7 @@ import time
 # l'auteur : le depot est public et personne d'autre n'a /home/storm.
 _RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.environ.get("TERMOS_DEV_BIN",
-                     os.path.join(_RACINE, "build-release", "sshos"))
+                     os.path.join(_RACINE, "build-release", "termos"))
 
 # L'ETIQUETTE DE CETTE SONDE, posee par spawn() et relue par demons().
 # Valeur FIXE, jamais derivee du pid : une sonde doit pouvoir recolter le

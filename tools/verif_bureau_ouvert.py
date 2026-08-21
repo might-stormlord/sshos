@@ -80,7 +80,7 @@ def daemons():
 
 
 def open_desktop():
-    launcher = os.path.join(HOME, ".local/bin/sshos")
+    launcher = os.path.join(HOME, ".local/bin/termos")
     env = dict(os.environ)
     env["HOME"] = HOME
     env["TERM"] = "xterm-256color"

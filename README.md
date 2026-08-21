@@ -8,7 +8,7 @@
 <p align="center">
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="dépendances externes : 0" src="https://img.shields.io/badge/d%C3%A9pendances%20externes-0-2ea44f">
-  <img alt="1146 tests" src="https://img.shields.io/badge/tests-1146%20%C2%B7%200%20%C3%A9chec-2ea44f">
+  <img alt="1318 tests" src="https://img.shields.io/badge/tests-1318%20%C2%B7%200%20%C3%A9chec-2ea44f">
   <img alt="licence AGPL-3.0" src="https://img.shields.io/badge/licence-AGPL--3.0-blue">
   <img alt="Linux / glibc" src="https://img.shields.io/badge/cible-Linux%20%C2%B7%20glibc-lightgrey">
 </p>
@@ -32,7 +32,7 @@ Fermer la fenêtre du terminal ne tue pas la session : on se rebranche et on ret
 des applications.
 
 Le geste qui montre l'intérêt du projet : lancer un Terminal, y poser
-`MARQUE=persiste`, **fermer la fenêtre du terminal**, relancer `./build-release/sshos` —
+`MARQUE=persiste`, **fermer la fenêtre du terminal**, relancer `./build-release/termos` —
 `echo $MARQUE` répond `persiste`.
 
 ## Ce qui le caractérise
@@ -58,10 +58,10 @@ Le geste qui montre l'intérêt du projet : lancer un Terminal, y poser
 cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release -j"$(nproc)"
 
-./build-release/sshos            # lance le bureau (démarre le démon si besoin)
-./build-release/sshos --status   # « demon actif (pid N) » ou « aucun demon »
-./build-release/sshos --kill     # arrête le démon
-./build-release/sshos --daemon   # démarre le démon sans s'attacher
+./build-release/termos            # lance le bureau (démarre le démon si besoin)
+./build-release/termos --status   # « demon actif (pid N) » ou « aucun demon »
+./build-release/termos --kill     # arrête le démon
+./build-release/termos --daemon   # démarre le démon sans s'attacher
 ```
 
 `Ctrl+A` puis `Espace` ouvre le menu. `Ctrl+Q` **détache** la session sans la détruire ;
@@ -71,17 +71,17 @@ confirmation.
 ## Tests
 
 ```bash
-./build-release/sshos_tests          # 1146 cas, ~20 s
-./build-release/sshos_tests files_   # filtre par sous-chaîne du nom
+./build-release/termos_tests          # 1318 cas, ~36 s
+./build-release/termos_tests files_   # filtre par sous-chaîne du nom
 ```
 
-Attendu : `1146 cas, 0 en echec, 0 assertions echouees`, avec 0 avertissement
+Attendu : `1318 cas, 0 en echec, 0 assertions echouees`, avec 0 avertissement
 (`-Wall -Wextra -Wpedantic -Werror`). Le type `Debug` ajoute ASan et UBSan et fait
-tourner la même suite en ~47 s :
+tourner la même suite en ~67 s :
 
 ```bash
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-debug -j"$(nproc)" && ./build-debug/sshos_tests
+cmake --build build-debug -j"$(nproc)" && ./build-debug/termos_tests
 ```
 
 ## Ce que contient le bureau
@@ -125,7 +125,7 @@ exactly where you left it — like `tmux`, but with windows, a menu, a taskbar a
 applications.
 
 The gesture that makes the point: open a Terminal, set `MARK=persists`, **close the
-terminal window**, run `./build-release/sshos` again — `echo $MARK` answers `persists`.
+terminal window**, run `./build-release/termos` again — `echo $MARK` answers `persists`.
 
 ### What makes it what it is
 
@@ -150,10 +150,10 @@ terminal window**, run `./build-release/sshos` again — `echo $MARK` answers `p
 cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release -j"$(nproc)"
 
-./build-release/sshos            # start the desktop (spawns the daemon if needed)
-./build-release/sshos --status   # daemon running (pid N), or none
-./build-release/sshos --kill     # stop the daemon
-./build-release/sshos --daemon   # start the daemon without attaching
+./build-release/termos            # start the desktop (spawns the daemon if needed)
+./build-release/termos --status   # daemon running (pid N), or none
+./build-release/termos --kill     # stop the daemon
+./build-release/termos --daemon   # start the daemon without attaching
 ```
 
 `Ctrl+A` then `Space` opens the menu. `Ctrl+Q` **detaches** without destroying the
@@ -163,13 +163,13 @@ confirmation.
 ### Tests
 
 ```bash
-./build-release/sshos_tests          # 1146 cases, ~20 s
-./build-release/sshos_tests files_   # filter by substring of the test name
+./build-release/termos_tests          # 1318 cases, ~36 s
+./build-release/termos_tests files_   # filter by substring of the test name
 ```
 
-Expected: `1146 cas, 0 en echec, 0 assertions echouees`, with zero compiler warnings
+Expected: `1318 cas, 0 en echec, 0 assertions echouees`, with zero compiler warnings
 (`-Wall -Wextra -Wpedantic -Werror`). The `Debug` type adds ASan and UBSan and runs the
-same suite in ~47 s.
+same suite in ~67 s.
 
 ### What the desktop ships with
 

@@ -138,8 +138,8 @@ def main():
     home = sys.argv[1]
     dev_root = sys.argv[2] if len(sys.argv) > 2 else DEV_ROOT
 
-    launcher = os.path.join(home, ".local/bin/sshos")
-    dev_bin = os.path.join(dev_root, "build-release/sshos")
+    launcher = os.path.join(home, ".local/bin/termos")
+    dev_bin = os.path.join(dev_root, "build-release/termos")
     for p in (launcher, dev_bin):
         if not os.path.exists(p):
             print("ECHEC : %s est absent" % p)

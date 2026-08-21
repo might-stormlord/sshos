@@ -481,8 +481,8 @@ build_tree() { # build_tree <racine> -> pose BUILT_EXE/BUILT_TESTS/GOLDEN_SRC
   say "  compilation dans $_root ..."
   cmake -S "$_root" -B "$_root/build-release" -DCMAKE_BUILD_TYPE=Release >/dev/null
   cmake --build "$_root/build-release" -j"$(nproc)" >/dev/null
-  BUILT_EXE="$_root/build-release/sshos"
-  BUILT_TESTS="$_root/build-release/sshos_tests"
+  BUILT_EXE="$_root/build-release/termos"
+  BUILT_TESTS="$_root/build-release/termos_tests"
   GOLDEN_SRC="$_root/tests/golden"
 }
 
@@ -517,7 +517,7 @@ try_release() {
   _base=$(sed -n 's/.*"browser_download_url": *"\([^"]*\)".*/\1/p' "$_json" | head -1)
   [ -n "$_base" ] || { say "  aucune release publiee"; return 1; }
   _dir=$(dirname "$_base")
-  for f in sshos sshos_tests golden.tar.gz SHA256SUMS; do
+  for f in termos termos_tests golden.tar.gz SHA256SUMS; do
     fetch "$_dir/$f" "$TMP/$f" || { say "  $f absent de la release"; return 1; }
   done
   if [ "$HAVE_SHA" = yes ]; then
@@ -527,11 +527,11 @@ try_release() {
     say "  sha256sum absent : integrite NON verifiee, echelon abandonne"
     return 1
   fi
-  chmod 0755 "$TMP/sshos" "$TMP/sshos_tests"
-  probe_binary "$TMP/sshos" || { say "  le binaire ne se charge pas ici"; return 1; }
+  chmod 0755 "$TMP/termos" "$TMP/termos_tests"
+  probe_binary "$TMP/termos" || { say "  le binaire ne se charge pas ici"; return 1; }
   mkdir -p "$TMP/refs" && tar xzf "$TMP/golden.tar.gz" -C "$TMP/refs"
-  BUILT_EXE="$TMP/sshos"
-  BUILT_TESTS="$TMP/sshos_tests"
+  BUILT_EXE="$TMP/termos"
+  BUILT_TESTS="$TMP/termos_tests"
   GOLDEN_SRC="$TMP/refs/golden"
   COMMIT=$(sed -n 's/.*"tag_name": *"commit-\([0-9a-f]*\)".*/\1/p' "$_json" | head -1)
   [ -n "$COMMIT" ] || COMMIT=unknown

@@ -52,7 +52,7 @@ jobs:
             cmake --build build-release -j"$(nproc)"
             # LE CRITERE EST ZERO ECHEC, jamais un compte de cas : le total
             # perime a chaque commit qui ajoute un test.
-            ./build-release/sshos_tests
+            ./build-release/termos_tests
           '
 
       # Les references voyagent avec le binaire de tests. Sans elles, les cas
@@ -63,8 +63,8 @@ jobs:
         run: |
           set -eu
           tar czf golden.tar.gz -C tests golden
-          cp build-release/sshos build-release/sshos_tests .
-          sha256sum sshos sshos_tests golden.tar.gz > SHA256SUMS
+          cp build-release/termos build-release/termos_tests .
+          sha256sum termos termos_tests golden.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
       # Le commit exact est dans le nom de la release : c'est lui que
@@ -84,4 +84,4 @@ jobs:
           gh release create "$tag" \
             --title "version $version" \
             --notes "Version $version, compilee dans ubuntu:26.04, suite complete au vert." \
-            sshos sshos_tests golden.tar.gz SHA256SUMS
+            termos termos_tests golden.tar.gz SHA256SUMS

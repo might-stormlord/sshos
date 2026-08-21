@@ -39,11 +39,11 @@ UNITES = 12
 CAS = 40
 
 CMAKELISTS = """cmake_minimum_required(VERSION 3.20)
-project(sshos CXX)
+project(termos CXX)
 set(CMAKE_CXX_STANDARD 20)
 file(GLOB LENTS ${CMAKE_SOURCE_DIR}/src/lent_*.cpp)
-add_executable(sshos src/main.cpp ${LENTS})
-add_executable(sshos_tests tests/test_faux.cpp)
+add_executable(termos src/main.cpp ${LENTS})
+add_executable(termos_tests tests/test_faux.cpp)
 """
 
 # Une unite volontairement couteuse a compiler : des gabarits recursifs.

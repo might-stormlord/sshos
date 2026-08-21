@@ -456,7 +456,7 @@ do_apply() {
         || { rm -rf "$_tmp"; fail apply-failed "checkout impossible"; }
       _new=$(git -C "$SRC" rev-parse HEAD)
       build_and_test_tree "$SRC" "$_tmp" || { rm -rf "$_tmp"; exit 1; }
-      _bin="$SRC/build-release/sshos"
+      _bin="$SRC/build-release/termos"
       _refs="$SRC/tests/golden"
       ;;
     archive)
@@ -469,7 +469,7 @@ do_apply() {
       tar xzf "$_tmp/src.tar.gz" -C "$SRC" --strip-components=1 \
         || { rm -rf "$_tmp"; fail apply-failed "archive illisible"; }
       build_and_test_tree "$SRC" "$_tmp" || { rm -rf "$_tmp"; exit 1; }
-      _bin="$SRC/build-release/sshos"
+      _bin="$SRC/build-release/termos"
       _refs="$SRC/tests/golden"
       ;;
     release)
@@ -480,24 +480,24 @@ do_apply() {
       _base=$(sed -n 's/.*"browser_download_url": *"\([^"]*\)".*/\1/p' "$_json" | head -1)
       [ -n "$_base" ] || { rm -rf "$_tmp"; fail apply-failed "aucun asset publie"; }
       _dir=$(dirname "$_base")
-      for f in sshos sshos_tests golden.tar.gz SHA256SUMS; do
+      for f in termos termos_tests golden.tar.gz SHA256SUMS; do
         fetch_to "$_dir/$f" "$_tmp/$f" \
           || { rm -rf "$_tmp"; fail apply-failed "$f absent de la release"; }
       done
       have sha256sum || { rm -rf "$_tmp"; fail apply-failed "sha256sum absent"; }
       ( cd "$_tmp" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
         || { rm -rf "$_tmp"; fail apply-failed "SHA256 non concordant"; }
-      chmod 0755 "$_tmp/sshos" "$_tmp/sshos_tests"
+      chmod 0755 "$_tmp/termos" "$_tmp/termos_tests"
       mkdir -p "$_tmp/refs" && tar xzf "$_tmp/golden.tar.gz" -C "$_tmp/refs"
-      run_suite "$_tmp/sshos_tests" "$_tmp/refs/golden" \
+      run_suite "$_tmp/termos_tests" "$_tmp/refs/golden" \
         || { rm -rf "$_tmp"; fail apply-failed "la suite de tests echoue"; }
-      _bin="$_tmp/sshos"
+      _bin="$_tmp/termos"
       _refs="$_tmp/refs/golden"
       ;;
     *) rm -rf "$_tmp"; fail apply-failed "source inconnue : $SOURCE" ;;
   esac
 
-  # Les references suivent le binaire : sans elles, un sshos_tests publie
+  # Les references suivent le binaire : sans elles, un termos_tests publie
   # chercherait le repertoire de la machine qui l'a compile.
   STAGE="installation"; PROGRESS=$P_INSTALL; write_state applying "" "$$"
   rm -rf "$GOLDEN" && cp -r "$_refs" "$GOLDEN"
@@ -643,7 +643,7 @@ build_and_test_tree() { # build_and_test_tree <racine> <tmp>
   : > "$STATE_DIR/tests.log"
   demarrer_surveillance tests "$STATE_DIR/tests.log" "$P_TESTS" "$P_INSTALL" \
     "$(total_des_cas "$1")"
-  if ! run_suite "$1/build-release/sshos_tests" "$1/tests/golden"; then
+  if ! run_suite "$1/build-release/termos_tests" "$1/tests/golden"; then
     arreter_surveillance
     fail apply-failed "la suite de tests echoue, rien n'est installe"; return 1
   fi

@@ -100,7 +100,7 @@ for name, rel, old, new in M:
     dead, line = False, ""
     for f in FILTERS:
         try:
-            r = subprocess.run(["./build-release/sshos_tests", f], cwd=ROOT,
+            r = subprocess.run(["./build-release/termos_tests", f], cwd=ROOT,
                                capture_output=True, text=True, timeout=300, errors="replace")
             t = [l for l in r.stdout.splitlines() if "en echec" in l]
             cur = t[-1] if t else "PAS DE BILAN"

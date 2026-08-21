@@ -38,8 +38,8 @@ DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Par defaut, le binaire de l'arbre des deux cotes : la sonde juge le code
 # COURANT. TERMOS_ANCIEN permet de la rejouer contre une version anterieure.
 ANCIEN = os.environ.get("TERMOS_ANCIEN",
-                        os.path.join(DEPOT, "build-release/sshos"))
-NEUF = os.environ.get("TERMOS_NEUF", os.path.join(DEPOT, "build-release/sshos"))
+                        os.path.join(DEPOT, "build-release/termos"))
+NEUF = os.environ.get("TERMOS_NEUF", os.path.join(DEPOT, "build-release/termos"))
 
 T0 = time.time()
 
@@ -99,55 +99,55 @@ def vider(fd, secondes):
 
 def poser_le_decor():
     os.system("rm -rf %s" % ROOT)
-    for d in ("prefix/bin", "prefix/libexec", "data/sshos"):
+    for d in ("prefix/bin", "prefix/libexec", "data/termos"):
         os.makedirs(os.path.join(ROOT, d), exist_ok=True)
     prefix = ROOT + "/prefix"
 
     # Le lanceur, tel que tools/install.sh l'ecrit.
-    with open(prefix + "/bin/sshos", "w") as f:
+    with open(prefix + "/bin/termos", "w") as f:
         f.write(
             "#!/bin/sh\n"
             'TERMOS_BOOT_ID="${TERMOS_BOOT_ID:-%s}"\n'
-            'TERMOS_EXE="%s/libexec/sshos-lent"\n'
+            'TERMOS_EXE="%s/libexec/termos-lent"\n'
             "export TERMOS_BOOT_ID TERMOS_EXE\n"
             'exec "$TERMOS_EXE" "$@"\n' % (BOOT, prefix)
         )
-    os.chmod(prefix + "/bin/sshos", 0o755)
+    os.chmod(prefix + "/bin/termos", 0o755)
 
     # L'ENVELOPPEUR : il dort RETARD secondes puis exec le vrai binaire.
     # Le demon met donc ce temps-la a ecouter, et rien d'autre ne change.
-    with open(prefix + "/libexec/sshos-lent", "w") as f:
+    with open(prefix + "/libexec/termos-lent", "w") as f:
         f.write('#!/bin/sh\n[ -f "%s/lent" ] && sleep %s\n'
-                'exec "%s/libexec/sshos" "$@"\n'
+                'exec "%s/libexec/termos" "$@"\n'
                 % (ROOT, os.environ.get("RETARD", "3"), prefix))
-    os.chmod(prefix + "/libexec/sshos-lent", 0o755)
+    os.chmod(prefix + "/libexec/termos-lent", 0o755)
 
     # Le binaire installe : l'ANCIEN.
-    os.system("cp %s %s/libexec/sshos" % (ANCIEN, prefix))
+    os.system("cp %s %s/libexec/termos" % (ANCIEN, prefix))
 
     # Le faux updater : il fait EXACTEMENT ce que fait tools/update.sh --apply
     # dans sa derniere etape -- deposer le binaire neuf et ecrire l'etat --
     # sans compiler quoi que ce soit.
-    with open(prefix + "/libexec/sshos-update", "w") as f:
+    with open(prefix + "/libexec/termos-update", "w") as f:
         f.write(
             "#!/bin/sh\n"
             "set -e\n"
-            'ETAT="%s/data/sshos/state"\n'
+            'ETAT="%s/data/termos/state"\n'
             'PREFIX="%s"\n'
             'if [ "$1" = "--apply" ]; then\n'
             "  sleep 1\n"
-            '  mv "$PREFIX/libexec/sshos" "$PREFIX/libexec/sshos.previous"\n'
-            '  cp %s "$PREFIX/libexec/sshos"\n'
+            '  mv "$PREFIX/libexec/termos" "$PREFIX/libexec/termos.previous"\n'
+            '  cp %s "$PREFIX/libexec/termos"\n'
             '  printf \'schema=1\\nprefix=%%s\\nsource=git\\nstatus=restart-pending\\n'
             "installed_commit=neufneuf\\nprevious_commit=vieuxvieux\\n"
             "installed_version=9.9\\nremote_version=9.9\\n' \"$PREFIX\" > \"$ETAT.tmp\"\n"
             '  mv "$ETAT.tmp" "$ETAT"\n  : > "%s/lent"\n'
             "fi\n" % (ROOT, prefix, NEUF, ROOT)
         )
-    os.chmod(prefix + "/libexec/sshos-update", 0o755)
+    os.chmod(prefix + "/libexec/termos-update", 0o755)
 
     # L'etat de depart : une mise a jour est disponible.
-    with open(ROOT + "/data/sshos/state", "w") as f:
+    with open(ROOT + "/data/termos/state", "w") as f:
         f.write(
             "schema=1\nprefix=%s\nsource=git\nstatus=available\n"
             "installed_commit=vieuxvieux\nremote_commit=neufneuf\n"
@@ -173,7 +173,7 @@ def main():
     for cle in ("TERMOS_EXE",):
         env.pop(cle, None)
 
-    lanceur = prefix + "/bin/sshos"
+    lanceur = prefix + "/bin/termos"
     pid, fd = pty.fork()
     if pid == 0:
         os.environ.clear()
@@ -188,7 +188,7 @@ def main():
     t = time.time()
     while time.time() - t < 30.0:
         tout += vider(fd, 0.2)
-        jr = ROOT + "/data/sshos/journal.log"
+        jr = ROOT + "/data/termos/journal.log"
         if os.path.exists(jr) and "demarrage" in open(jr).read():
             break
     tout += vider(fd, 2.0)
@@ -226,11 +226,11 @@ def main():
     while time.time() - t < 20.0:
         tout += vider(fd, 0.2)
         try:
-            if "status=restart-pending" in open(ROOT + "/data/sshos/state").read():
+            if "status=restart-pending" in open(ROOT + "/data/termos/state").read():
                 break
         except OSError:
             pass
-    etat = open(ROOT + "/data/sshos/state").read()
+    etat = open(ROOT + "/data/termos/state").read()
     if "status=restart-pending" not in etat:
         dit("ECHEC DE MONTAGE : l'application n'a pas eu lieu (status=%s)"
             % (re.search(r"status=(\S+)", etat).group(1) if "status=" in etat else "?"))
@@ -239,7 +239,7 @@ def main():
         os.kill(pid, signal.SIGKILL)
         tuer_les_notres()
         return 2
-    inode_pose = os.stat(prefix + "/libexec/sshos").st_ino
+    inode_pose = os.stat(prefix + "/libexec/termos").st_ino
     dit("applique : binaire pose inode %d (l'ancien tournait sur %d)"
         % (inode_pose, inode_ancien))
     # Laisser le demon recolter l'enfant et changer sa modale en question.
@@ -297,7 +297,7 @@ def main():
         print("   (aucune)")
 
     print("\n=== JOURNAL DU DEMON ===")
-    jr = ROOT + "/data/sshos/journal.log"
+    jr = ROOT + "/data/termos/journal.log"
     print(open(jr).read().rstrip() if os.path.exists(jr) else "   (aucun)")
 
     tuer_les_notres()

@@ -210,7 +210,7 @@ long resolve_timeout_ms() {
   const long v = std::strtol(raw, &end, 10);
   if (errno != 0 || end == raw || *end != '\0') {
     std::fprintf(stderr,
-                 "sshos_tests: TERMOS_TEST_TIMEOUT_MS='%s' invalide, valeur "
+                 "termos_tests: TERMOS_TEST_TIMEOUT_MS='%s' invalide, valeur "
                  "par defaut (%ld ms) conservee\n",
                  raw, kDefaultMs);
     return kDefaultMs;
@@ -234,7 +234,7 @@ SharedState* make_shared_state() {
                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
   if (p == MAP_FAILED) {
     std::fprintf(stderr,
-                 "sshos_tests: mmap a echoue (%s) ; garde-temps par cas "
+                 "termos_tests: mmap a echoue (%s) ; garde-temps par cas "
                  "desactive pour cette execution\n",
                  std::strerror(errno));
     return nullptr;

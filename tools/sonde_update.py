@@ -12,7 +12,7 @@ Ce qui est verifie, dans l'ordre :
   2. --apply REFUSE d'installer quand la suite est rouge -- la propriete de
      surete centrale ;
   3. --apply installe quand la suite est verte, et conserve .previous ;
-  4. deux --apply concurrents ne se marchent pas dessus : sshos.previous ne
+  4. deux --apply concurrents ne se marchent pas dessus : termos.previous ne
      doit JAMAIS contenir le binaire neuf, sinon --rollback restaure la
      version cassee ;
   5. --rollback remet le binaire ET reecrit installed_commit ;
@@ -37,14 +37,14 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPDATE_SH = os.path.join(ROOT, "tools", "update.sh")
 
-# Un faux projet minuscule : il produit un sshos et un sshos_tests, et rien
+# Un faux projet minuscule : il produit un termos et un termos_tests, et rien
 # d'autre. Compiler le vrai projet a chaque cas couterait des minutes par
 # verdict.
 CMAKELISTS = """cmake_minimum_required(VERSION 3.20)
-project(sshos CXX)
+project(termos CXX)
 set(CMAKE_CXX_STANDARD 20)
-add_executable(sshos src/main.cpp)
-add_executable(sshos_tests tests/main.cpp)
+add_executable(termos src/main.cpp)
+add_executable(termos_tests tests/main.cpp)
 """
 
 MAIN_CPP = """#include <cstdio>
@@ -149,10 +149,10 @@ class Fixture:
         return run(["sh", UPDATE_SH, mode], env=self.env(), timeout=timeout)
 
     def exe(self):
-        return os.path.join(self.prefix, "libexec", "sshos")
+        return os.path.join(self.prefix, "libexec", "termos")
 
     def previous(self):
-        return os.path.join(self.prefix, "libexec", "sshos.previous")
+        return os.path.join(self.prefix, "libexec", "termos.previous")
 
 
 def marker(path):
@@ -205,7 +205,7 @@ def etape3_application(fix, installed):
     check("installed_commit = le commit neuf", fix.get("installed_commit") == neuf)
     check("previous_commit = l'ancien", fix.get("previous_commit") == installed)
     check("le binaire pose est le neuf", marker(fix.exe()) == "MARQUE=v4")
-    check("sshos.previous existe", os.path.exists(fix.previous()))
+    check("termos.previous existe", os.path.exists(fix.previous()))
     return neuf
 
 
@@ -230,7 +230,7 @@ def etape4_concurrence(fix, installed):
     apres_previous = marker(fix.previous())
     check("un seul a travaille (l'autre refuse ou attend)",
           a.returncode == 0 or b.returncode == 0)
-    check("sshos.previous ne contient PAS le binaire neuf",
+    check("termos.previous ne contient PAS le binaire neuf",
           apres_previous != marker(fix.exe()) or apres_previous == avant_previous)
 
 
