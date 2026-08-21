@@ -36,7 +36,7 @@ struct GoldenPlatform : sshos::Platform {
   std::string read_file(std::string_view) const override { return {}; }
 };
 
-// SSHOS_GOLDEN_DIR d'abord, __FILE__ ensuite.
+// TERMOS_GOLDEN_DIR d'abord, __FILE__ ensuite.
 //
 // __FILE__ est absolu (CMake passe des chemins absolus), donc le répertoire
 // des références se déduit de la position de ce fichier, sans dépendre du
@@ -45,7 +45,7 @@ struct GoldenPlatform : sshos::Platform {
 // test PUBLIÉ : le chemin gravé est celui de la machine qui a compilé, et
 // il n'existe pas chez celui qui le télécharge.
 std::string golden_dir() {
-  if (const char* d = std::getenv("SSHOS_GOLDEN_DIR")) {
+  if (const char* d = std::getenv("TERMOS_GOLDEN_DIR")) {
     std::string p = d;
     if (!p.empty()) {
       if (p.back() != '/') p.push_back('/');
@@ -322,19 +322,19 @@ TEST(golden_the_panel_on_the_left_edge) {
 // La variable est donc consultée d'abord ; le chemin compilé reste le repli
 // du développement, où il est exactement ce qu'il faut.
 TEST(golden_dir_prefers_the_environment_over_the_compiled_path) {
-  EnvVarGuard guard("SSHOS_GOLDEN_DIR");
+  EnvVarGuard guard("TERMOS_GOLDEN_DIR");
 
-  ::setenv("SSHOS_GOLDEN_DIR", "/tmp/refs", 1);
+  ::setenv("TERMOS_GOLDEN_DIR", "/tmp/refs", 1);
   CHECK_EQ(golden_dir(), std::string("/tmp/refs/"));
 
   // La barre oblique finale est ajoutée si elle manque, jamais doublée.
-  ::setenv("SSHOS_GOLDEN_DIR", "/tmp/refs/", 1);
+  ::setenv("TERMOS_GOLDEN_DIR", "/tmp/refs/", 1);
   CHECK_EQ(golden_dir(), std::string("/tmp/refs/"));
 
   // Vide vaut absente : on ne va pas chercher les références à la racine.
-  ::setenv("SSHOS_GOLDEN_DIR", "", 1);
+  ::setenv("TERMOS_GOLDEN_DIR", "", 1);
   CHECK(golden_dir().find("tests/golden/") != std::string::npos);
 
-  ::unsetenv("SSHOS_GOLDEN_DIR");
+  ::unsetenv("TERMOS_GOLDEN_DIR");
   CHECK(golden_dir().find("tests/golden/") != std::string::npos);
 }

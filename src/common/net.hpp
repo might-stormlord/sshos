@@ -26,7 +26,7 @@ struct AddressInUse : std::runtime_error {
 // dans le code ne vérifie ni ne peut vérifier cette identité -- c'est
 // exactement pourquoi ce n'est qu'une échappatoire explicite, pas une
 // source ambiante lue automatiquement comme boot_id.
-inline constexpr const char* kBootIdEnvVar = "SSHOS_BOOT_ID";
+inline constexpr const char* kBootIdEnvVar = "TERMOS_BOOT_ID";
 
 // Lit, dans l'ordre : la variable d'environnement kBootIdEnvVar (si elle est
 // définie et non vide), puis /proc/sys/kernel/random/boot_id (uuid

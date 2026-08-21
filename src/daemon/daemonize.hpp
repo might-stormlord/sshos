@@ -72,7 +72,7 @@ void become_daemon();
 // silence. Le contrôle de compatibilité du protocole ne rattraperait même
 // pas l'erreur, puisque le démon relancé serait le jumeau du client.
 //
-// Le lanceur installé pose `SSHOS_EXE` ; quand elle est définie et non
+// Le lanceur installé pose `TERMOS_EXE` ; quand elle est définie et non
 // vide, elle fait autorité. Vide vaut absente, pour qu'un lanceur mal écrit
 // ne rende pas le démon inlançable.
 //

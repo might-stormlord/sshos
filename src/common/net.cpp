@@ -69,7 +69,7 @@ std::string read_boot_id(std::string_view boot_id_path) {
   // Échappatoire explicite en premier : voir le contrat documenté sur
   // kBootIdEnvVar dans net.hpp. Une variable définie mais vide est traitée
   // comme absente plutôt que comme un identifiant valide -- un export raté
-  // (`SSHOS_BOOT_ID=`) ne doit pas produire silencieusement un identifiant
+  // (`TERMOS_BOOT_ID=`) ne doit pas produire silencieusement un identifiant
   // partagé par toute la machine.
   if (const char* forced = std::getenv(kBootIdEnvVar); forced != nullptr && *forced != '\0') {
     return forced;
@@ -115,7 +115,7 @@ std::string read_boot_id(std::string_view boot_id_path) {
 }
 
 std::string socket_name(uid_t uid, std::string_view boot_id) {
-  return "sshos/" + std::to_string(uid) + "/" + std::string(boot_id);
+  return "termos/" + std::to_string(uid) + "/" + std::string(boot_id);
 }
 
 Fd bind_abstract(std::string_view name) {

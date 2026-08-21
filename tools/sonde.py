@@ -31,12 +31,12 @@ LES TROIS REGLES DURES, chacune payee comptant :
    machine porte « --daemon » dans sa ligne de commande et le meme uid que
    la sonde : enumerer par ce motif le trouve, et `kill_daemon()` le tue --
    avec la session de travail qui tourne dedans. L'etiquette est
-   SSHOS_BOOT_ID : `spawn()` la POSE dans l'enfant, `demons()` la RELIT dans
+   TERMOS_BOOT_ID : `spawn()` la POSE dans l'enfant, `demons()` la RELIT dans
    /proc/PID/environ. Les deux moities vont ensemble, l'une sans l'autre ne
    vaut rien.
 
    Et c'est une marque POSITIVE, jamais « different du mien » : un demon
-   lance a la main depuis l'arbre de dev n'a AUCUN SSHOS_BOOT_ID dans son
+   lance a la main depuis l'arbre de dev n'a AUCUN TERMOS_BOOT_ID dans son
    environnement -- net.cpp retombe alors sur l'uuid du noyau, calcule dans
    le processus -- donc « different du mien » serait vrai pour lui, et on le
    tuerait.
@@ -57,23 +57,23 @@ import time
 # La racine se deduit du fichier, jamais du chemin de la machine de
 # l'auteur : le depot est public et personne d'autre n'a /home/storm.
 _RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.environ.get("SSHOS_DEV_BIN",
+BIN = os.environ.get("TERMOS_DEV_BIN",
                      os.path.join(_RACINE, "build-release", "sshos"))
 
 # L'ETIQUETTE DE CETTE SONDE, posee par spawn() et relue par demons().
 # Valeur FIXE, jamais derivee du pid : une sonde doit pouvoir recolter le
 # demon qu'un essai precedent a laisse derriere lui (regle dure numero 1).
-BOOT = os.environ.get("SSHOS_SONDE_BOOT", "sonde")
+BOOT = os.environ.get("TERMOS_SONDE_BOOT", "sonde")
 
 
 def demons(boot=None):
-    """Les demons de CETTE sonde, reconnus par leur SSHOS_BOOT_ID.
+    """Les demons de CETTE sonde, reconnus par leur TERMOS_BOOT_ID.
 
     JAMAIS par « --daemon dans cmdline + uid » : le bureau INSTALLE de la
     machine porte exactement ces deux marques, et la session de travail
     tourne dedans. Voir la regle dure numero 4.
     """
-    marque = ("SSHOS_BOOT_ID=" + (boot or BOOT)).encode()
+    marque = ("TERMOS_BOOT_ID=" + (boot or BOOT)).encode()
     out = []
     me = os.getpid()
     for e in os.listdir("/proc"):
@@ -120,7 +120,7 @@ def spawn(boot=None):
         os.environ["COLORTERM"] = "truecolor"
         # LA MOITIE QU'ON OUBLIE : sans cette ligne, demons() ne retrouvera
         # jamais le demon que cette sonde vient de lever.
-        os.environ["SSHOS_BOOT_ID"] = boot
+        os.environ["TERMOS_BOOT_ID"] = boot
         os.execv(BIN, [BIN])
         os._exit(1)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))

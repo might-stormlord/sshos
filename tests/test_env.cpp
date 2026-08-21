@@ -84,7 +84,7 @@ TEST(child_env_fixes_the_terminal_it_actually_provides) {
   const std::vector<std::string> env = child_env(base, EnvDelta{});
   CHECK_EQ(value_of(env, "TERM"), std::string("xterm-256color"));
   CHECK_EQ(value_of(env, "COLORTERM"), std::string("truecolor"));
-  CHECK_EQ(value_of(env, "SSHOS"), std::string("1"));
+  CHECK_EQ(value_of(env, "TERMOS"), std::string("1"));
 }
 
 // Même un client qui envoie TERM dans son delta ne l'impose pas : la
@@ -145,17 +145,45 @@ TEST(child_env_is_deterministic) {
 }
 
 // L'IDENTITÉ DU BUREAU NE DESCEND PAS DANS SES PROPRES SHELLS. Un shell
-// ouvert dans le bureau installé qui hérite de SSHOS_BOOT_ID calcule le
-// même nom de socket que lui : « sshos --kill » tapé là tue la session de
-// travail, et « sshos » s'y rattache au lieu d'ouvrir une instance neuve.
+// ouvert dans le bureau installé qui hérite de TERMOS_BOOT_ID calcule le
+// même nom de socket que lui : « termos --kill » tapé là tue la session de
+// travail, et « termos » s'y rattache au lieu d'ouvrir une instance neuve.
 // C'est exactement le piège que l'installation isolée existe pour fermer.
 //
-// SSHOS_EXE part pour la même raison : c'est le chemin de relance du
+// TERMOS_EXE part pour la même raison : c'est le chemin de relance du
 // bureau, pas une information dont un invité a besoin.
+//
+// LES DEUX ANCIENS NOMS RESTENT BANNIS, ET CE N'EST PAS UN OUBLI. Le projet
+// s'appelait `sshos` ; un lanceur `~/.local/bin/sshos` d'avant le renommage
+// peut survivre dans le PATH d'un utilisateur, ou un `~/.profile` peut
+// encore exporter SSHOS_BOOT_ID à la main. Dans ce cas la variable descend
+// dans le shell, un vieux binaire y recalcule le nom de socket de l'époque,
+// et `sshos --kill` tapé là tue le bureau -- la régression exacte que cette
+// liste existe pour fermer. Deux entrées de plus dans un tableau constexpr
+// coûtent zéro ; les oublier coûte une session.
 TEST(child_env_never_leaks_the_desktop_identity_to_a_shell) {
   const std::vector<std::string> base = {
       "PATH=/usr/bin",
-      "SSHOS_BOOT_ID=local",
+      "TERMOS_BOOT_ID=local",
+      "TERMOS_EXE=/home/u/.local/libexec/termos",
+  };
+
+  const std::vector<std::string> env = child_env(base, {});
+
+  CHECK_EQ(value_of(env, "TERMOS_BOOT_ID"), std::string("<absente>"));
+  CHECK_EQ(value_of(env, "TERMOS_EXE"), std::string("<absente>"));
+
+  // On bannit quatre variables, pas l'environnement : le reste passe.
+  CHECK_EQ(value_of(env, "PATH"), std::string("/usr/bin"));
+}
+
+// LE RENOMMAGE NE ROUVRE PAS LA BRÈCHE. Ce cas est le jumeau du précédent,
+// sur les noms d'avant `termos`. Il tombe si quelqu'un « nettoie » kBanned
+// des deux entrées héritées en les croyant mortes.
+TEST(child_env_still_bans_the_pre_rename_desktop_identity) {
+  const std::vector<std::string> base = {
+      "PATH=/usr/bin",
+      "SSHOS_BOOT_ID=bureau01",
       "SSHOS_EXE=/home/u/.local/libexec/sshos",
   };
 
@@ -163,8 +191,6 @@ TEST(child_env_never_leaks_the_desktop_identity_to_a_shell) {
 
   CHECK_EQ(value_of(env, "SSHOS_BOOT_ID"), std::string("<absente>"));
   CHECK_EQ(value_of(env, "SSHOS_EXE"), std::string("<absente>"));
-
-  // On bannit deux variables, pas l'environnement : le reste passe.
   CHECK_EQ(value_of(env, "PATH"), std::string("/usr/bin"));
 }
 

@@ -4265,7 +4265,7 @@ class UpdateFixture {
        << "-xdg";
     dir_ = os.str();
     ::mkdir(dir_.c_str(), 0700);
-    ::mkdir((dir_ + "/sshos").c_str(), 0700);
+    ::mkdir((dir_ + "/termos").c_str(), 0700);
     ::mkdir((dir_ + "/libexec").c_str(), 0700);
 
     if (const char* v = ::getenv("XDG_DATA_HOME")) {
@@ -4276,7 +4276,7 @@ class UpdateFixture {
 
     write_state(status, extra);
 
-    const std::string sp = dir_ + "/libexec/sshos-update";
+    const std::string sp = dir_ + "/libexec/termos-update";
     {
       std::ofstream out(sp, std::ios::binary | std::ios::trunc);
       out << script_body;
@@ -4290,7 +4290,7 @@ class UpdateFixture {
         << "\n" << extra;
   }
 
-  std::string state_path() const { return dir_ + "/sshos/state"; }
+  std::string state_path() const { return dir_ + "/termos/state"; }
   std::string dir() const { return dir_; }
 
   ~UpdateFixture() {
@@ -4300,10 +4300,10 @@ class UpdateFixture {
       ::unsetenv("XDG_DATA_HOME");
     }
     ::remove(state_path().c_str());
-    ::remove((dir_ + "/libexec/sshos-update").c_str());
-    ::remove((dir_ + "/sshos/update.log").c_str());
+    ::remove((dir_ + "/libexec/termos-update").c_str());
+    ::remove((dir_ + "/termos/update.log").c_str());
     ::rmdir((dir_ + "/libexec").c_str());
-    ::rmdir((dir_ + "/sshos").c_str());
+    ::rmdir((dir_ + "/termos").c_str());
     ::rmdir(dir_.c_str());
   }
   UpdateFixture(const UpdateFixture&) = delete;
@@ -4466,7 +4466,7 @@ TEST(session_routes_a_service_child_exit_to_the_update_service) {
                     "#!/bin/sh\n"
                     "printf 'schema=1\\nprefix=%s\\nsource=git\\n"
                     "status=restart-pending\\n' \"$(dirname \"$(dirname \"$0\")\")\" "
-                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "> \"$(dirname \"$(dirname \"$0\")\")/termos/state\"\n"
                     "exit 0\n");
   FakePlatform plat;
   Session sess(plat, g_fds, 80, 24);
@@ -4590,7 +4590,7 @@ TEST(session_keeps_the_check_reachable_while_a_restart_is_pending) {
                     "printf 'schema=1\\nprefix=%s\\nsource=git\\nstatus=available\\n"
                     "installed_commit=aaa\\nremote_commit=bbb\\n' "
                     "\"$(dirname \"$(dirname \"$0\")\")\" "
-                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "> \"$(dirname \"$(dirname \"$0\")\")/termos/state\"\n"
                     "exit 0\n");
   FakePlatform plat;
   Session sess(plat, g_fds, 80, 24);
@@ -4635,7 +4635,7 @@ TEST(session_offers_the_update_right_in_the_check_result) {
                     "installed_version=1.1\\nremote_version=1.3\\n"
                     "commits_ahead=2\\n' "
                     "\"$(dirname \"$(dirname \"$0\")\")\" "
-                    "> \"$(dirname \"$(dirname \"$0\")\")/sshos/state\"\n"
+                    "> \"$(dirname \"$(dirname \"$0\")\")/termos/state\"\n"
                     "exit 0\n");
   FakePlatform plat;
   Session sess(plat, g_fds, 80, 24);

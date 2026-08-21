@@ -17,7 +17,7 @@ portait qu'un trou de treize secondes. RETARD=3 rejoue exactement ca.
 On rejoue donc le parcours entier depuis le bureau : « Mettre a jour »,
 puis « Redemarrer », et on regarde ce que le client ecrit sur son terminal.
 
-Isole par SSHOS_BOOT_ID : ne touche jamais au bureau vivant.
+Isole par TERMOS_BOOT_ID : ne touche jamais au bureau vivant.
 """
 import fcntl
 import os
@@ -36,10 +36,10 @@ DEPOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # L'ancien binaire installe (celui que la mise a jour a remplace) et le neuf.
 # Par defaut, le binaire de l'arbre des deux cotes : la sonde juge le code
-# COURANT. SSHOS_ANCIEN permet de la rejouer contre une version anterieure.
-ANCIEN = os.environ.get("SSHOS_ANCIEN",
+# COURANT. TERMOS_ANCIEN permet de la rejouer contre une version anterieure.
+ANCIEN = os.environ.get("TERMOS_ANCIEN",
                         os.path.join(DEPOT, "build-release/sshos"))
-NEUF = os.environ.get("SSHOS_NEUF", os.path.join(DEPOT, "build-release/sshos"))
+NEUF = os.environ.get("TERMOS_NEUF", os.path.join(DEPOT, "build-release/sshos"))
 
 T0 = time.time()
 
@@ -49,7 +49,7 @@ def dit(msg):
 
 
 def demons():
-    """Les demons de CETTE instance, reconnus par leur SSHOS_BOOT_ID -- jamais
+    """Les demons de CETTE instance, reconnus par leur TERMOS_BOOT_ID -- jamais
     par un motif de nom : pgrep -f se trouve lui-meme."""
     out = []
     me = os.getpid()
@@ -63,7 +63,7 @@ def demons():
             continue
         if b"--daemon" not in cmd:
             continue
-        if ("SSHOS_BOOT_ID=" + BOOT).encode() in env:
+        if ("TERMOS_BOOT_ID=" + BOOT).encode() in env:
             out.append(int(e))
     return sorted(out)
 
@@ -107,10 +107,10 @@ def poser_le_decor():
     with open(prefix + "/bin/sshos", "w") as f:
         f.write(
             "#!/bin/sh\n"
-            'SSHOS_BOOT_ID="${SSHOS_BOOT_ID:-%s}"\n'
-            'SSHOS_EXE="%s/libexec/sshos-lent"\n'
-            "export SSHOS_BOOT_ID SSHOS_EXE\n"
-            'exec "$SSHOS_EXE" "$@"\n' % (BOOT, prefix)
+            'TERMOS_BOOT_ID="${TERMOS_BOOT_ID:-%s}"\n'
+            'TERMOS_EXE="%s/libexec/sshos-lent"\n'
+            "export TERMOS_BOOT_ID TERMOS_EXE\n"
+            'exec "$TERMOS_EXE" "$@"\n' % (BOOT, prefix)
         )
     os.chmod(prefix + "/bin/sshos", 0o755)
 
@@ -166,11 +166,11 @@ def main():
 
     env = dict(os.environ)
     env["XDG_DATA_HOME"] = ROOT + "/data"
-    env["SSHOS_BOOT_ID"] = BOOT
+    env["TERMOS_BOOT_ID"] = BOOT
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
     env["HOME"] = ROOT
-    for cle in ("SSHOS_EXE",):
+    for cle in ("TERMOS_EXE",):
         env.pop(cle, None)
 
     lanceur = prefix + "/bin/sshos"

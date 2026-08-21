@@ -709,16 +709,16 @@ class EnvVarGuard {
 // version, en silence, et le contrôle de compatibilité du protocole ne se
 // déclencherait même pas puisque les deux binaires seraient les mêmes.
 TEST(daemon_exe_path_prefers_the_installed_path_over_the_running_inode) {
-  EnvVarGuard guard("SSHOS_EXE");
+  EnvVarGuard guard("TERMOS_EXE");
 
-  ::setenv("SSHOS_EXE", "/home/u/.local/libexec/sshos", 1);
-  CHECK_EQ(sshos::daemon_exe_path(), std::string("/home/u/.local/libexec/sshos"));
+  ::setenv("TERMOS_EXE", "/home/u/.local/libexec/termos", 1);
+  CHECK_EQ(sshos::daemon_exe_path(), std::string("/home/u/.local/libexec/termos"));
 
   // Vide vaut absente. Un lanceur mal écrit ne doit pas rendre le démon
   // inlançable : on retombe sur le comportement de l'arbre de dev.
-  ::setenv("SSHOS_EXE", "", 1);
+  ::setenv("TERMOS_EXE", "", 1);
   CHECK_EQ(sshos::daemon_exe_path(), std::string("/proc/self/exe"));
 
-  ::unsetenv("SSHOS_EXE");
+  ::unsetenv("TERMOS_EXE");
   CHECK_EQ(sshos::daemon_exe_path(), std::string("/proc/self/exe"));
 }

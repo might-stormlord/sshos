@@ -28,7 +28,7 @@ import sonde  # noqa: E402
 # « --daemon dans cmdline + uid » qui vivait ici trouvait le bureau INSTALLE
 # de la machine -- il porte exactement ces deux marques -- et le tuait, avec
 # la session de travail qui tourne dedans. sonde.spawn(BOOT) pose
-# SSHOS_BOOT_ID dans l'enfant, sonde.demons(BOOT) le relit dans /proc.
+# TERMOS_BOOT_ID dans l'enfant, sonde.demons(BOOT) le relit dans /proc.
 BOOT = "verif-repos"
 BIN = sonde.BIN
 

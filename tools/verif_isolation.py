@@ -32,15 +32,15 @@ DEV_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def boot_du_lanceur(launcher):
     """L'instance que ce lanceur vise : install.sh y grave
-    SSHOS_BOOT_ID="${SSHOS_BOOT_ID:-<instance>}". C'est la SEULE chose qui
+    TERMOS_BOOT_ID="${TERMOS_BOOT_ID:-<instance>}". C'est la SEULE chose qui
     separe deux bureaux (docs/REPRISE.md §2 ter)."""
-    m = re.search(r'SSHOS_BOOT_ID="\$\{SSHOS_BOOT_ID:-([^}]*)\}"',
+    m = re.search(r'TERMOS_BOOT_ID="\$\{TERMOS_BOOT_ID:-([^}]*)\}"',
                   open(launcher).read())
     return m.group(1) if m else None
 
 
 def daemon_pids(boot):
-    """Les demons de L'INSTANCE TESTEE, reconnus par leur SSHOS_BOOT_ID.
+    """Les demons de L'INSTANCE TESTEE, reconnus par leur TERMOS_BOOT_ID.
 
     JAMAIS par « --daemon dans cmdline + uid » : le bureau installe de la
     machine porte exactement ces deux marques, et la session de travail
@@ -48,7 +48,7 @@ def daemon_pids(boot):
     """
     if not boot:
         return []
-    marque = ("SSHOS_BOOT_ID=" + boot).encode()
+    marque = ("TERMOS_BOOT_ID=" + boot).encode()
     out = []
     me = os.getpid()
     for e in os.listdir("/proc"):
@@ -147,7 +147,7 @@ def main():
 
     boot = boot_du_lanceur(launcher)
     if not boot:
-        print("ECHEC : le lanceur %s ne grave aucun SSHOS_BOOT_ID" % launcher)
+        print("ECHEC : le lanceur %s ne grave aucun TERMOS_BOOT_ID" % launcher)
         return 1
     print("== Instance visee : %s" % boot)
 
@@ -209,12 +209,12 @@ def main():
 
         print("\n== 5. Le lanceur pose-t-il bien l'identite ?")
         launcher_text = open(launcher).read()
-        for needle in ("SSHOS_BOOT_ID", "SSHOS_EXE", "exec "):
+        for needle in ("TERMOS_BOOT_ID", "TERMOS_EXE", "exec "):
             if needle not in launcher_text:
                 print("   ECHEC : %s absent du lanceur" % needle)
                 ok = False
         if ok:
-            print("   OK : SSHOS_BOOT_ID, SSHOS_EXE et exec sont la")
+            print("   OK : TERMOS_BOOT_ID, TERMOS_EXE et exec sont la")
 
         print("\n== 6. L'environnement du demon installe porte-t-il l'identite ?")
         try:
@@ -222,10 +222,10 @@ def main():
             env = dict(
                 kv.split(b"=", 1) for kv in env_raw.split(b"\0")
                 if b"=" in kv)
-            boot = env.get(b"SSHOS_BOOT_ID", b"<absente>").decode()
-            exe = env.get(b"SSHOS_EXE", b"<absente>").decode()
-            print("   SSHOS_BOOT_ID = %s" % boot)
-            print("   SSHOS_EXE     = %s" % exe)
+            boot = env.get(b"TERMOS_BOOT_ID", b"<absente>").decode()
+            exe = env.get(b"TERMOS_EXE", b"<absente>").decode()
+            print("   TERMOS_BOOT_ID = %s" % boot)
+            print("   TERMOS_EXE     = %s" % exe)
             if boot == "<absente>":
                 print("   ECHEC : le demon n'a pas herite de l'identite")
                 ok = False

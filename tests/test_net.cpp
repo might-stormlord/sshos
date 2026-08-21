@@ -74,7 +74,7 @@ Fd try_queue_connection(const std::string& name) {
 // Restaure une variable d'environnement à sa valeur d'avant le test, qu'elle
 // ait été définie ou non. Tous les test_*.cpp sont liés dans le même binaire
 // et tournent dans le même processus (voir tests/main.cpp) : sans ça, un
-// test qui appelle setenv() sur SSHOS_BOOT_ID ferait fuiter cette valeur
+// test qui appelle setenv() sur TERMOS_BOOT_ID ferait fuiter cette valeur
 // vers tous les cas suivants du run, et l'ordre d'exécution se mettrait à
 // compter pour le résultat.
 class EnvVarGuard {
@@ -142,7 +142,7 @@ TEST(net_unique_name_does_not_depend_on_the_pid_alone) {
 }
 
 TEST(net_socket_name_is_stable) {
-  CHECK_EQ(sshos::socket_name(1000, "abc"), std::string("sshos/1000/abc"));
+  CHECK_EQ(sshos::socket_name(1000, "abc"), std::string("termos/1000/abc"));
 }
 
 TEST(net_bind_acts_as_a_mutex) {
@@ -274,11 +274,11 @@ TEST(net_connect_fails_when_nobody_listens) {
 }
 
 TEST(net_boot_id_prefers_the_kernel_source_when_available) {
-  // Neutralise une SSHOS_BOOT_ID qui traînerait dans l'environnement du run
+  // Neutralise une TERMOS_BOOT_ID qui traînerait dans l'environnement du run
   // (peu probable, mais sinon ce test dépendrait de l'invocateur) : on veut
   // vérifier la source noyau elle-même, pas l'échappatoire.
-  EnvVarGuard env_guard("SSHOS_BOOT_ID");
-  ::unsetenv("SSHOS_BOOT_ID");
+  EnvVarGuard env_guard("TERMOS_BOOT_ID");
+  ::unsetenv("TERMOS_BOOT_ID");
 
   const std::string id = sshos::read_boot_id();
   CHECK(!id.empty());
@@ -298,8 +298,8 @@ TEST(net_boot_id_throws_when_the_kernel_source_is_absent) {
   // alors la valeur par défaut "/proc/stat", bien réel, et l'ancien code
   // réussit via le repli qu'on supprime -- ce CHECK échoue) que contre la
   // signature actuelle à un seul paramètre.
-  EnvVarGuard env_guard("SSHOS_BOOT_ID");
-  ::unsetenv("SSHOS_BOOT_ID");
+  EnvVarGuard env_guard("TERMOS_BOOT_ID");
+  ::unsetenv("TERMOS_BOOT_ID");
 
   bool threw = false;
   try {
@@ -311,11 +311,11 @@ TEST(net_boot_id_throws_when_the_kernel_source_is_absent) {
 }
 
 TEST(net_boot_id_treats_an_empty_override_as_absent) {
-  // Un export raté (`SSHOS_BOOT_ID=` sans valeur) ne doit pas être pris pour
+  // Un export raté (`TERMOS_BOOT_ID=` sans valeur) ne doit pas être pris pour
   // un identifiant valide : sinon tout le monde sur la machine se
   // retrouverait avec la même chaîne vide, silencieusement.
-  EnvVarGuard env_guard("SSHOS_BOOT_ID");
-  ::setenv("SSHOS_BOOT_ID", "", 1);
+  EnvVarGuard env_guard("TERMOS_BOOT_ID");
+  ::setenv("TERMOS_BOOT_ID", "", 1);
 
   bool threw = false;
   try {
@@ -333,14 +333,14 @@ TEST(net_boot_id_env_override_takes_priority_over_the_kernel_source) {
   // conteneur restreint sur une machine, mais teste d'abord sur une machine
   // normale, obtiendrait un résultat différent selon la machine.
   //
-  // "SSHOS_BOOT_ID" est répété en toutes lettres plutôt que via
+  // "TERMOS_BOOT_ID" est répété en toutes lettres plutôt que via
   // sshos::kBootIdEnvVar : uniquement pour ce test, c'est voulu -- rendre le
   // test insensible au nom du symbole (qui n'existe pas dans le net.hpp
   // d'avant ce correctif) est ce qui permet de le compiler tel quel contre
   // l'ancien code et de constater, à l'exécution, qu'il ignorait
   // entièrement la variable : ce CHECK_EQ échoue contre lui.
-  EnvVarGuard env_guard("SSHOS_BOOT_ID");
-  ::setenv("SSHOS_BOOT_ID", "sentinelle-de-test-3c9f", 1);
+  EnvVarGuard env_guard("TERMOS_BOOT_ID");
+  ::setenv("TERMOS_BOOT_ID", "sentinelle-de-test-3c9f", 1);
 
   CHECK_EQ(sshos::read_boot_id(), std::string("sentinelle-de-test-3c9f"));
 }

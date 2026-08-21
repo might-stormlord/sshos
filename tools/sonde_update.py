@@ -21,8 +21,8 @@ Ce qui est verifie, dans l'ordre :
      ecriture en place rendrait ETXTBSY a tous les coups.
 
 ISOLATION. La sonde tourne sur un faux depot git local, un prefixe et un
-repertoire d'etat temporaires. SSHOS_BOOT_ID n'isole QUE le nom du socket :
-les chemins, eux, se surchargent par SSHOS_PREFIX et SSHOS_STATE_DIR. Sans
+repertoire d'etat temporaires. TERMOS_BOOT_ID n'isole QUE le nom du socket :
+les chemins, eux, se surchargent par TERMOS_PREFIX et TERMOS_STATE_DIR. Sans
 ca elle ecraserait le vrai binaire de l'utilisateur.
 
 Aucune commande detachee : deux agents s'y sont bloques definitivement sur ce
@@ -122,9 +122,9 @@ class Fixture:
 
     def env(self):
         e = dict(os.environ)
-        e["SSHOS_PREFIX"] = self.prefix
-        e["SSHOS_STATE_DIR"] = self.state_dir
-        e["SSHOS_REPO_URL"] = self.repo
+        e["TERMOS_PREFIX"] = self.prefix
+        e["TERMOS_STATE_DIR"] = self.state_dir
+        e["TERMOS_REPO_URL"] = self.repo
         return e
 
     def write_state(self, status, installed, previous="", source="git",
@@ -342,7 +342,7 @@ def etape8_le_fait_et_la_conclusion(fix):
     # c. le reseau tombe : le fait survit aussi. C'est le cas le plus
     #    probable des deux, et il ne compare meme pas.
     env = fix.env()
-    env["SSHOS_REPO_URL"] = os.path.join(fix.base, "depot-qui-n-existe-pas")
+    env["TERMOS_REPO_URL"] = os.path.join(fix.base, "depot-qui-n-existe-pas")
     r = run(["sh", UPDATE_SH, "--check"], env=env, timeout=120)
     check("--check en echec : code de retour non nul", r.returncode != 0)
     check("le fait survit a un echec reseau", fix.get("restart_pending") == "1")

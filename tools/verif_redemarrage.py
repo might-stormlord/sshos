@@ -39,13 +39,13 @@ import os as _os
 # La racine se deduit du fichier, jamais du chemin de la machine de
 # l'auteur : le depot est public et personne d'autre n'a /home/storm.
 _RACINE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-DEV = _os.environ.get("SSHOS_DEV_BIN",
+DEV = _os.environ.get("TERMOS_DEV_BIN",
                       _os.path.join(_RACINE, "build-release", "sshos"))
 BOOT = "verif-redemarrage"
 
 
 def daemon_pids():
-    """Les demons de CETTE instance, reconnus par leur SSHOS_BOOT_ID et non
+    """Les demons de CETTE instance, reconnus par leur TERMOS_BOOT_ID et non
     par un motif de nom."""
     out = []
     me = os.getpid()
@@ -59,7 +59,7 @@ def daemon_pids():
             continue
         if b"--daemon" not in a:
             continue
-        if ("SSHOS_BOOT_ID=" + BOOT).encode() in env:
+        if ("TERMOS_BOOT_ID=" + BOOT).encode() in env:
             out.append(int(e))
     return out
 
@@ -102,8 +102,8 @@ def main():
 
     env = dict(os.environ)
     env["XDG_DATA_HOME"] = root
-    env["SSHOS_BOOT_ID"] = BOOT
-    env["SSHOS_EXE"] = DEV
+    env["TERMOS_BOOT_ID"] = BOOT
+    env["TERMOS_EXE"] = DEV
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
 

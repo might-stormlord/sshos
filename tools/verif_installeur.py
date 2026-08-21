@@ -135,7 +135,7 @@ def main():
         widths = sorted(set(len(l) for l in lines))
         check("toutes les lignes du cadre ont la meme largeur",
               len(widths) == 1, "largeurs vues : %s" % widths)
-        check("le titre est la", "Installation de ssh_os" in frame)
+        check("le titre est la", "Installation de termos" in frame)
         check("la question 1 est la", "Ou installer ?" in frame)
         check("les trois choix sont la",
               ".local" in frame and "/usr/local" in frame and "autre" in frame)

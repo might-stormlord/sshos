@@ -115,7 +115,7 @@ void become_daemon() {
 }
 
 std::string daemon_exe_path() {
-  if (const char* p = std::getenv("SSHOS_EXE")) {
+  if (const char* p = std::getenv("TERMOS_EXE")) {
     if (*p != '\0') return p;
   }
   return "/proc/self/exe";

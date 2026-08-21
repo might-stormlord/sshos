@@ -192,7 +192,7 @@ extern "C" const char* __ubsan_default_options() {
 // laquelle des deux s'est produite.
 namespace {
 
-// Lit SSHOS_TEST_TIMEOUT_MS. 0 (ou negatif) desactive explicitement le
+// Lit TERMOS_TEST_TIMEOUT_MS. 0 (ou negatif) desactive explicitement le
 // garde-temps -- utile pour deboguer un blocage sous gdb sans que le
 // harnais l'interrompe entre-temps (et sans qu'il fasse tourner les cas
 // dans un processus different de celui que gdb a attache). Absente/
@@ -202,7 +202,7 @@ namespace {
 // garde-temps.
 long resolve_timeout_ms() {
   constexpr long kDefaultMs = 30000;
-  const char* raw = std::getenv("SSHOS_TEST_TIMEOUT_MS");
+  const char* raw = std::getenv("TERMOS_TEST_TIMEOUT_MS");
   if (raw == nullptr || *raw == '\0') return kDefaultMs;
 
   errno = 0;
@@ -210,7 +210,7 @@ long resolve_timeout_ms() {
   const long v = std::strtol(raw, &end, 10);
   if (errno != 0 || end == raw || *end != '\0') {
     std::fprintf(stderr,
-                 "sshos_tests: SSHOS_TEST_TIMEOUT_MS='%s' invalide, valeur "
+                 "sshos_tests: TERMOS_TEST_TIMEOUT_MS='%s' invalide, valeur "
                  "par defaut (%ld ms) conservee\n",
                  raw, kDefaultMs);
     return kDefaultMs;
@@ -242,7 +242,7 @@ SharedState* make_shared_state() {
   return static_cast<SharedState*>(p);
 }
 
-// Corps original, partage par le chemin sans garde (SSHOS_TEST_TIMEOUT_MS=0
+// Corps original, partage par le chemin sans garde (TERMOS_TEST_TIMEOUT_MS=0
 // ou repli sur echec de fork()/mmap) et par l'ouvrier du chemin garde.
 //
 // Un test qui lève au lieu d'échouer proprement ne doit pas emporter le
@@ -433,7 +433,7 @@ void run_worker(const std::vector<const th::Case*>& cases, std::size_t start,
 // d'annulation (ex. pthread_cancel differe), et la preuve que ce
 // garde-temps n'en a pas besoin puisqu'il agit depuis un AUTRE processus.
 // N'est jamais executee par la suite normale -- seulement si
-// SSHOS_TEST_SELFTEST_HANG est positionnee. Voir le rapport de cette tache
+// TERMOS_TEST_SELFTEST_HANG est positionnee. Voir le rapport de cette tache
 // pour la commande de preuve complete.
 void selftest_hang() {
   for (;;) {
@@ -446,12 +446,12 @@ void selftest_hang() {
 }
 
 // Construit la liste des cas a executer : soit le cas synthetique de
-// demonstration (SSHOS_TEST_SELFTEST_HANG positionnee -- n'ajoute rien a
+// demonstration (TERMOS_TEST_SELFTEST_HANG positionnee -- n'ajoute rien a
 // th::registry(), le compte de la suite normale reste donc a 166), soit le
 // registre normal filtre par `filter` comme avant ce round.
 std::vector<const th::Case*> build_cases(const char* filter) {
   std::vector<const th::Case*> cases;
-  if (std::getenv("SSHOS_TEST_SELFTEST_HANG") != nullptr) {
+  if (std::getenv("TERMOS_TEST_SELFTEST_HANG") != nullptr) {
     static const th::Case selftest{"selftest_timeout_guard_hangs_on_purpose",
                                     &selftest_hang};
     if (filter == nullptr || std::strstr(selftest.name, filter) != nullptr) {
@@ -561,7 +561,7 @@ int main(int argc, char** argv) {
   int failed_cases = 0;
 
   if (!guard_enabled) {
-    // SSHOS_TEST_TIMEOUT_MS=0, ou repli sur echec de mmap : aucun fork,
+    // TERMOS_TEST_TIMEOUT_MS=0, ou repli sur echec de mmap : aucun fork,
     // execution directe dans ce processus -- comportement d'origine,
     // pratique pour deboguer sous gdb sans second processus dans le jeu.
     for (const auto* c : cases) run_case_and_track(*c, ran, failed_cases);

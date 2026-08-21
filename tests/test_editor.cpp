@@ -414,7 +414,7 @@ TEST(editor_leaves_no_temporary_file_behind) {
   e.on_key(ctrl(U's'));
 
   struct stat st {};
-  CHECK_EQ(::lstat((f.path() + ".sshos-tmp").c_str(), &st), -1);
+  CHECK_EQ(::lstat((f.path() + ".termos-tmp").c_str(), &st), -1);
   CHECK_EQ(f.read(), std::string("xavant\n"));
 }
 

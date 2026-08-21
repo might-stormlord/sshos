@@ -55,7 +55,7 @@ UpdateService::UpdateService(const Platform& plat, std::string state_path,
 
 bool UpdateService::running_is_installed() const {
   if (state_.prefix.empty()) return false;
-  const std::string installed = state_.prefix + "/libexec/sshos";
+  const std::string installed = state_.prefix + "/libexec/termos";
   struct stat a {};
   struct stat b {};
   if (::stat(self_exe_.c_str(), &a) != 0) return false;
@@ -68,7 +68,7 @@ bool UpdateService::running_is_installed() const {
 
 std::string UpdateService::updater_path() const {
   if (state_.prefix.empty()) return {};
-  return state_.prefix + "/libexec/sshos-update";
+  return state_.prefix + "/libexec/termos-update";
 }
 
 void UpdateService::reload() {

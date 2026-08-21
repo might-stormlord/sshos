@@ -4,7 +4,7 @@
 # LE DEMON NE FAIT QUE LIRE CE QUE CE SCRIPT ECRIT. C'est ce qui garde git,
 # cmake et le reseau hors de son fil unique.
 #
-# usage : sshos-update --check | --apply | --rollback
+# usage : termos-update --check | --apply | --rollback
 #
 # Conception : docs/superpowers/specs/2026-08-17-installation-et-mise-a-jour-design.md
 set -eu
@@ -13,9 +13,9 @@ set -eu
 # net.hpp : sans ca, la sonde bout-en-bout devrait parler au vrai GitHub et
 # compiler le vrai projet a chaque cas -- des minutes par verdict, et un
 # reseau dans la boucle d'un test.
-REPO_URL="${SSHOS_REPO_URL:-https://github.com/might-stormlord/sshos.git}"
-API="https://api.github.com/repos/might-stormlord/sshos"
-CODELOAD="https://codeload.github.com/might-stormlord/sshos"
+REPO_URL="${TERMOS_REPO_URL:-https://github.com/might-stormlord/termos.git}"
+API="https://api.github.com/repos/might-stormlord/termos"
+CODELOAD="https://codeload.github.com/might-stormlord/termos"
 
 # Par defaut curl suit une redirection https -> http, et les URL d'assets
 # GitHub redirigent. On l'interdit.
@@ -28,22 +28,22 @@ CHECK_TIMEOUT=60
 APPLY_TIMEOUT=1800
 
 # --- ou l'on vit ----------------------------------------------------------
-# Le prefixe se deduit du chemin du script -- <prefixe>/libexec/sshos-update --
+# Le prefixe se deduit du chemin du script -- <prefixe>/libexec/termos-update --
 # et jamais de ~ en dur : c'est ce qui permet a la sonde de ne pas ecraser
 # l'installation reelle.
 SELF=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PREFIX="${SSHOS_PREFIX:-$(dirname -- "$SELF")}"
+PREFIX="${TERMOS_PREFIX:-$(dirname -- "$SELF")}"
 
 # L'etat est propre a l'UTILISATEUR, pas a l'installation.
-STATE_DIR="${SSHOS_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/sshos}"
+STATE_DIR="${TERMOS_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/termos}"
 STATE="$STATE_DIR/state"
 LOCK="$STATE_DIR/lock"
 SRC="$STATE_DIR/src"
 GOLDEN="$STATE_DIR/golden"
 
-EXE="$PREFIX/libexec/sshos"
-UPDATER="$PREFIX/libexec/sshos-update"
-VERSIONER="$PREFIX/libexec/sshos-version"
+EXE="$PREFIX/libexec/termos"
+UPDATER="$PREFIX/libexec/termos-update"
+VERSIONER="$PREFIX/libexec/termos-version"
 
 mkdir -p "$STATE_DIR" "$PREFIX/libexec"
 
@@ -237,7 +237,7 @@ FIN
 
 fail() { # fail <status> <message>
   write_state "$1" "$2"
-  printf 'sshos-update: %s\n' "$2" >&2
+  printf 'termos-update: %s\n' "$2" >&2
   exit 1
 }
 
@@ -279,18 +279,18 @@ conclure() { # conclure <status> <message> [pid]
 # le cas le plus probable des deux, et c'est celui qui ne compare même pas.
 fail_check() { # fail_check <message>
   conclure check-failed "$1"
-  printf 'sshos-update: %s\n' "$1" >&2
+  printf 'termos-update: %s\n' "$1" >&2
   exit 1
 }
 
 # --- le verrou ------------------------------------------------------------
 # Il couvre TOUTE la sequence : rotation du binaire, pose, ecriture d'etat.
-# Sans lui, deux applications concurrentes font que sshos.previous finit par
+# Sans lui, deux applications concurrentes font que termos.previous finit par
 # contenir le NOUVEAU binaire, et --rollback restaure alors la version
 # cassee : le filet de securite detruit par la course qu'il devait rattraper.
 if have flock; then
   exec 9>"$LOCK"
-  flock -n 9 || { echo "sshos-update: un autre travail est en cours" >&2; exit 1; }
+  flock -n 9 || { echo "termos-update: un autre travail est en cours" >&2; exit 1; }
 fi
 
 fetch_stdout() {
@@ -321,7 +321,7 @@ ensure_git_tree() {
 }
 
 # « 1.12 » plutot que « cce9d11 ». Le calcul vit dans un seul endroit,
-# sshos-version, que l'installeur pose a cote de ce script.
+# termos-version, que l'installeur pose a cote de ce script.
 version_of() { # version_of <arbre> <ref>
   [ -x "$VERSIONER" ] || return 1
   "$VERSIONER" "$1" "$2" 2>/dev/null
@@ -430,7 +430,7 @@ place() { # place <binaire neuf>
 }
 
 run_suite() { # run_suite <binaire de tests> <repertoire des references>
-  SSHOS_GOLDEN_DIR="$2" timeout "$APPLY_TIMEOUT" "$1" >"$STATE_DIR/tests.log" 2>&1
+  TERMOS_GOLDEN_DIR="$2" timeout "$APPLY_TIMEOUT" "$1" >"$STATE_DIR/tests.log" 2>&1
 }
 
 do_apply() {
@@ -662,7 +662,7 @@ do_rollback() {
   # jour » et l'utilisateur ne pourrait PLUS JAMAIS reappliquer la mise a
   # jour dont il vient de revenir.
   #
-  # Il n'y a qu'UN SEUL niveau de retour : sshos.previous est ecrase a
+  # Il n'y a qu'UN SEUL niveau de retour : termos.previous est ecrase a
   # chaque mise a jour.
   INSTALLED="${PREVIOUS:-unknown}"
   PREVIOUS=""
@@ -684,6 +684,6 @@ case "${1:---check}" in
   --check)    do_check ;;
   --apply)    do_apply ;;
   --rollback) do_rollback ;;
-  --help|-h)  echo "usage: sshos-update --check | --apply | --rollback" ;;
-  *) echo "sshos-update: mode inconnu : $1" >&2; exit 2 ;;
+  --help|-h)  echo "usage: termos-update --check | --apply | --rollback" ;;
+  *) echo "termos-update: mode inconnu : $1" >&2; exit 2 ;;
 esac

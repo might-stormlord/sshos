@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installation de ssh_os dans le home de l'utilisateur, isolee de l'arbre de
+# Installation de termos dans le home de l'utilisateur, isolee de l'arbre de
 # developpement.
 #
 # Ce script ne decide rien a la place de l'utilisateur, et il ne modifie
@@ -8,9 +8,9 @@
 # Conception : docs/superpowers/specs/2026-08-17-installation-et-mise-a-jour-design.md
 set -eu
 
-REPO_URL="https://github.com/might-stormlord/sshos.git"
-API="https://api.github.com/repos/might-stormlord/sshos"
-CODELOAD="https://codeload.github.com/might-stormlord/sshos"
+REPO_URL="https://github.com/might-stormlord/termos.git"
+API="https://api.github.com/repos/might-stormlord/termos"
+CODELOAD="https://codeload.github.com/might-stormlord/termos"
 
 # Par defaut curl suit une redirection https -> http, et les URL d'assets
 # GitHub redirigent. On l'interdit.
@@ -125,12 +125,12 @@ fetch_stdout() { # fetch_stdout <url>
 
 # L'etat vit TOUJOURS sous le home de l'utilisateur, quel que soit le
 # prefixe : il lui est propre, pas propre a l'installation.
-SHARE="${XDG_DATA_HOME:-$HOME/.local/share}/sshos"
+SHARE="${XDG_DATA_HOME:-$HOME/.local/share}/termos"
 mkdir -p "$SHARE"
 
 # Le verrou couvre TOUTE la sequence : rotation du binaire, pose, ecriture
 # de l'etat. Sans lui, deux installations concurrentes font que
-# sshos.previous finit par contenir le NOUVEAU binaire, et le retour arriere
+# termos.previous finit par contenir le NOUVEAU binaire, et le retour arriere
 # restaure alors la version cassee.
 if have flock; then
   exec 9>"$SHARE/lock"
@@ -143,11 +143,11 @@ fi
 #
 #  - un shell de CONNEXION -- celui d'une session SSH -- ne lit ~/.bashrc que
 #    si ~/.profile le source. C'est le cas sur Ubuntu, ce n'est pas une regle.
-#    Ecrire dans ~/.bashrc laisse donc « sshos » introuvable sur toute machine
+#    Ecrire dans ~/.bashrc laisse donc « termos » introuvable sur toute machine
 #    ou ce chainage n'existe pas ;
 #  - ~/.bashrc commence presque toujours par « [ -z "$PS1" ] && return », donc
 #    la ligne n'y vaudrait que pour les shells INTERACTIFS : « ssh machine
-#    sshos » ne la verrait jamais. Depuis ~/.profile, si.
+#    termos » ne la verrait jamais. Depuis ~/.profile, si.
 #
 # zsh ne lit pas ~/.profile : pour lui, ~/.zprofile, qui joue le meme role.
 profile_file() {
@@ -193,7 +193,7 @@ wiz_load() { # wiz_load <etape>
     2) QUESTION="Ajouter au PATH ?"
        NOTE="La ligne ira dans ~/.profile, que tout shell de connexion lit."
        NOTE2="Sans elle, il faut taper le chemin complet a chaque fois."
-       CH1="oui";  CD1="taper sshos depuis n'importe ou"
+       CH1="oui";  CD1="taper termos depuis n'importe ou"
        CH2="non";  CD2="lancer par son chemin complet"
        CN=2 ;;
     3) QUESTION="Nom d'instance"
@@ -229,7 +229,7 @@ wiz_draw() {
   ui_home
   R=1
   ui_top;                                      R=$((R + 1))
-  ui_title "Installation de ssh_os";           R=$((R + 1))
+  ui_title "Installation de termos";           R=$((R + 1))
   ui_blank;                                    R=$((R + 1))
 
   [ -n "$W_PREFIX_LABEL" ] && { wiz_answered_row "Ou installer ?" "$W_PREFIX_LABEL"; R=$((R + 1)); }
@@ -264,7 +264,7 @@ wiz_draw() {
     ui_pad "" $((UI_COLS - 29))
     printf ' %s\n' "$G_V"
     R=$((R + 1))
-    ui_row ' ' "  adresse du socket : sshos/$(id -u)/$BUF"
+    ui_row ' ' "  adresse du socket : termos/$(id -u)/$BUF"
     R=$((R + 1))
   else
     [ "$CN" -ge 1 ] && { CLICK1=$R; wiz_choice_row 1 "$CH1" "$CD1"; R=$((R + 1)); }
@@ -418,10 +418,10 @@ esac
 
 BIN_DIR="$PREFIX/bin"
 LIBEXEC="$PREFIX/libexec"
-EXE="$LIBEXEC/sshos"
-LAUNCHER="$BIN_DIR/sshos"
-UPDATER="$LIBEXEC/sshos-update"
-VERSIONER="$LIBEXEC/sshos-version"
+EXE="$LIBEXEC/termos"
+LAUNCHER="$BIN_DIR/termos"
+UPDATER="$LIBEXEC/termos-update"
+VERSIONER="$LIBEXEC/termos-version"
 SRC="$SHARE/src"
 GOLDEN="$SHARE/golden"
 STATE="$SHARE/state"
@@ -462,11 +462,11 @@ GOLDEN_SRC=""
 
 # Eprouve un binaire AVANT de l'installer. La sonde est un appel avec un
 # drapeau inconnu : main.cpp repond « usage: » sur stderr et rend 2. Elle
-# s'execute avec SSHOS_BOOT_ID posee, sans quoi main() sort en 1 AVANT meme
+# s'execute avec TERMOS_BOOT_ID posee, sans quoi main() sort en 1 AVANT meme
 # de lire argv quand /proc/sys est masque -- un binaire sain serait alors
 # classe casse.
 probe_binary() { # probe_binary <chemin>
-  _out=$(SSHOS_BOOT_ID=probe "$1" --probe-unknown-flag 2>&1) && _rc=0 || _rc=$?
+  _out=$(TERMOS_BOOT_ID=probe "$1" --probe-unknown-flag 2>&1) && _rc=0 || _rc=$?
   case "$_rc" in
     2) printf '%s' "$_out" | grep -q '^usage:' && return 0 || return 1 ;;
     1) return 0 ;;   # charge, environnement incomplet : ce n'est pas le binaire
@@ -593,7 +593,7 @@ cp -r "$GOLDEN_SRC" "$GOLDEN"
 
 # Le critere est le CODE DE RETOUR, jamais un compte de cas : le total
 # perime a chaque commit qui ajoute un test.
-if SSHOS_GOLDEN_DIR="$GOLDEN" "$BUILT_TESTS" >"$TMP/tests.log" 2>&1; then
+if TERMOS_GOLDEN_DIR="$GOLDEN" "$BUILT_TESTS" >"$TMP/tests.log" 2>&1; then
   say "  suite au vert"
 else
   tail -20 "$TMP/tests.log" >&2
@@ -603,6 +603,54 @@ fi
 # --- 5. la pose ------------------------------------------------------------
 step "Pose"
 
+# L'INSTALLATION D'AVANT LE RENOMMAGE. Le projet s'appelait « sshos » ; une
+# installation de cette epoque pose ~/.local/bin/sshos, un binaire dans
+# libexec, et surtout un demon qui ecoute sur le socket \0sshos/<uid>/<boot>.
+#
+# Ce socket-la et le notre sont deux adresses DISJOINTES : le nom d'un socket
+# UNIX abstrait est fige au bind(), dans le noyau, et ne se renomme pas. Sans
+# ce bloc, l'ancien demon reste vivant et INVISIBLE au binaire neuf, qui en
+# demarre un second : deux bureaux, deux jeux de fenetres, et une session que
+# plus rien ne sait joindre. On l'arrete d'abord, on retire ses fichiers
+# ensuite -- jamais l'inverse, un demon dont on efface le binaire sous les
+# pieds ne peut plus se relancer.
+#
+# Les anciens fichiers sont RETIRES, pas laisses en place : deux lanceurs dans
+# le PATH donneraient deux bureaux selon la commande tapee, sans aucun indice
+# a l'ecran de ce qui les distingue.
+_legacy_exe="$LIBEXEC/sshos"
+_legacy_launcher="$BIN_DIR/sshos"
+if [ -e "$_legacy_exe" ] || [ -e "$_legacy_launcher" ]; then
+  say ""
+  say "  Une installation d'avant le renommage est presente."
+  if [ -x "$_legacy_exe" ] && SSHOS_BOOT_ID="$INSTANCE" "$_legacy_exe" --status \
+       2>/dev/null | grep -q 'demon actif'; then
+    say "  Son bureau TOURNE : il sera arrete, et ses fenetres perdues."
+    _d=non
+    [ "$ASSUME_YES" = yes ] && _d=oui
+    _r=$(ask "  Continuer ?" "$_d")
+    case "$_r" in
+      oui|o|yes|y) ;;
+      *) die "installation abandonnee, l'ancien bureau est intact" ;;
+    esac
+    say "  arret de l'ancien bureau..."
+    SSHOS_BOOT_ID="$INSTANCE" "$_legacy_exe" --kill >/dev/null 2>&1 || true
+    _n=50
+    while [ "$_n" -gt 0 ]; do
+      SSHOS_BOOT_ID="$INSTANCE" "$_legacy_exe" --status 2>/dev/null \
+        | grep -q 'demon actif' || break
+      sleep 0.1 2>/dev/null || sleep 1
+      _n=$((_n - 1))
+    done
+    [ "$_n" -eq 0 ] && die "l'ancien bureau refuse de s'arreter, rien n'a ete installe"
+    say "  ancien bureau arrete"
+  fi
+  for _f in "$_legacy_launcher" "$_legacy_exe" "$_legacy_exe.previous" \
+            "$LIBEXEC/sshos-update" "$LIBEXEC/sshos-version"; do
+    [ -e "$_f" ] && { rm -f "$_f"; say "  retire : $_f"; }
+  done
+fi
+
 # UN BUREAU DEJA OUVERT. Installer, c'est repartir a neuf : un demon en cours
 # tourne sur l'ANCIEN binaire et continuerait de le faire apres la pose, sans
 # que rien ne le signale. On demande, et on l'arrete.
@@ -610,7 +658,7 @@ step "Pose"
 # ICI, et pas plus haut : a ce point la suite est verte et le binaire est bon.
 # Demander avant la compilation ferait perdre un bureau pour une compilation
 # qui echoue ensuite.
-if [ -x "$EXE" ] && SSHOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
+if [ -x "$EXE" ] && TERMOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
      | grep -q 'demon actif'; then
   say ""
   say "  Un bureau de l'instance $INSTANCE tourne : il sera ARRETE."
@@ -624,10 +672,10 @@ if [ -x "$EXE" ] && SSHOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
   esac
 
   say "  arret du bureau..."
-  SSHOS_BOOT_ID="$INSTANCE" "$EXE" --kill >/dev/null 2>&1 || true
+  TERMOS_BOOT_ID="$INSTANCE" "$EXE" --kill >/dev/null 2>&1 || true
   _n=50
   while [ "$_n" -gt 0 ]; do
-    SSHOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
+    TERMOS_BOOT_ID="$INSTANCE" "$EXE" --status 2>/dev/null \
       | grep -q 'demon actif' || break
     sleep 0.1 2>/dev/null || sleep 1
     _n=$((_n - 1))
@@ -654,11 +702,11 @@ say "  binaire : $EXE"
 # composent le meme nom de socket.
 cat > "$LAUNCHER.new" <<FIN
 #!/bin/sh
-# Lanceur de ssh_os. Ecrit par tools/install.sh -- ne pas editer a la main.
-SSHOS_BOOT_ID="\${SSHOS_BOOT_ID:-$INSTANCE}"
-SSHOS_EXE="$EXE"
-export SSHOS_BOOT_ID SSHOS_EXE
-exec "\$SSHOS_EXE" "\$@"
+# Lanceur de termos. Ecrit par tools/install.sh -- ne pas editer a la main.
+TERMOS_BOOT_ID="\${TERMOS_BOOT_ID:-$INSTANCE}"
+TERMOS_EXE="$EXE"
+export TERMOS_BOOT_ID TERMOS_EXE
+exec "\$TERMOS_EXE" "\$@"
 FIN
 chmod 0755 "$LAUNCHER.new"
 mv -f "$LAUNCHER.new" "$LAUNCHER"
@@ -732,7 +780,7 @@ fi
 step "Termine"
 [ -n "$VERSION_STR" ] && say "  Version installee : $VERSION_STR"
 say "  Lancez : $LAUNCHER"
-say "  Instance : SSHOS_BOOT_ID=$INSTANCE"
+say "  Instance : TERMOS_BOOT_ID=$INSTANCE"
 if [ "$STATUS" = updates-disabled ]; then
   say "  Mise a jour depuis le bureau : DESACTIVEE ($MESSAGE)"
 fi

@@ -40,8 +40,8 @@ class Bac {
   ~Bac() {
     if (dir_.empty()) return;
     ::unlink((dir_ + "/journal.log").c_str());
-    ::unlink((dir_ + "/share/sshos/journal.log").c_str());
-    ::rmdir((dir_ + "/share/sshos").c_str());
+    ::unlink((dir_ + "/share/termos/journal.log").c_str());
+    ::rmdir((dir_ + "/share/termos").c_str());
     ::rmdir((dir_ + "/share").c_str());
     ::rmdir(dir_.c_str());
   }
@@ -148,14 +148,14 @@ TEST(journal_creates_the_data_directory_if_it_is_missing) {
   HorlogeFigee horloge;
 
   // DEUX niveaux manquants, pas un : sur une machine neuve, ce n'est pas
-  // seulement `~/.local/share/sshos` qui n'existe pas encore, c'est
+  // seulement `~/.local/share/termos` qui n'existe pas encore, c'est
   // `~/.local/share` -- et un mkdir() du seul dernier segment echoue alors
   // sur ENOENT sans rien dire. Constate le 18 aout 2026 par une sonde, que
   // la version d'un seul niveau de ce cas laissait passer.
-  sshos::Journal j(horloge, bac.dir() + "/share/sshos/journal.log");
+  sshos::Journal j(horloge, bac.dir() + "/share/termos/journal.log");
   j.note("demarrage pid=7");
 
-  CHECK(lire(bac.dir() + "/share/sshos/journal.log").find("demarrage pid=7") !=
+  CHECK(lire(bac.dir() + "/share/termos/journal.log").find("demarrage pid=7") !=
         std::string::npos);
 }
 
@@ -165,9 +165,9 @@ TEST(the_journal_lives_beside_the_update_state) {
   const std::string sauve = avant != nullptr ? avant : "";
   ::setenv("XDG_DATA_HOME", "/tmp/sshos-essai-xdg", 1);
 
-  CHECK_EQ(sshos::user_data_dir(), std::string("/tmp/sshos-essai-xdg/sshos"));
+  CHECK_EQ(sshos::user_data_dir(), std::string("/tmp/sshos-essai-xdg/termos"));
   CHECK_EQ(sshos::daemon_journal_path(),
-           std::string("/tmp/sshos-essai-xdg/sshos/journal.log"));
+           std::string("/tmp/sshos-essai-xdg/termos/journal.log"));
 
   if (avant != nullptr) {
     ::setenv("XDG_DATA_HOME", sauve.c_str(), 1);

@@ -74,7 +74,7 @@ void Editor::save() {
   // en place produit exactement le même fichier -- tant que rien
   // n'interrompt. C'est précisément la fenêtre d'interruption qu'on ferme
   // ici, et le fichier en jeu est celui de l'utilisateur.
-  const std::string tmp = path_ + ".sshos-tmp";
+  const std::string tmp = path_ + ".termos-tmp";
   const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
   if (fd < 0) {
     status_ = std::string("ecriture impossible : ") + std::strerror(errno);

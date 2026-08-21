@@ -26,20 +26,32 @@ constexpr std::pair<std::string_view, std::string_view> kForced[] = {
     {"TERM", "xterm-256color"},
     {"COLORTERM", "truecolor"},
     // Pour que les scripts sachent où ils tournent.
-    {"SSHOS", "1"},
+    {"TERMOS", "1"},
 };
 
 // La taille faisant autorité est celle du PTY, posée par TIOCSWINSZ ; le
 // noyau envoie SIGWINCH tout seul au groupe au premier plan. Un LINES ou
 // COLUMNS hérité serait une SECONDE vérité, figée à la taille qu'avait la
 // fenêtre au lancement de l'enfant.
-// SSHOS_BOOT_ID et SSHOS_EXE sont l'identité du bureau lui-même : le nom de
-// son socket et le chemin de son binaire. Un enfant qui en hérite peut
+// TERMOS_BOOT_ID et TERMOS_EXE sont l'identité du bureau lui-même : le nom
+// de son socket et le chemin de son binaire. Un enfant qui en hérite peut
 // s'attacher au bureau qui l'a lancé, ou le tuer -- et c'est précisément ce
 // qui arrive quand on travaille sur le projet depuis un terminal du bureau
 // installé.
-constexpr std::string_view kBanned[] = {"LINES", "COLUMNS", "SSHOS_BOOT_ID",
-                                        "SSHOS_EXE"};
+//
+// LES DEUX ANCIENS NOMS RESTENT DANS LA LISTE, ET CE N'EST PAS UN OUBLI. Le
+// projet s'appelait `sshos` avant son renommage. Un lanceur
+// `~/.local/bin/sshos` d'avant peut survivre dans le PATH, ou un `~/.profile`
+// peut encore exporter SSHOS_BOOT_ID à la main : la variable descendrait
+// alors dans chaque shell du bureau, un binaire de l'époque y recalculerait
+// le nom de socket d'alors, et `sshos --kill` tapé là tuerait la session de
+// travail. C'est la régression exacte que cette liste existe pour fermer.
+// Deux entrées de plus dans un tableau constexpr ne coûtent rien ; les
+// retirer en les croyant mortes rouvre la brèche. Gardé par
+// child_env_still_bans_the_pre_rename_desktop_identity.
+constexpr std::string_view kBanned[] = {"LINES",          "COLUMNS",
+                                        "TERMOS_BOOT_ID", "TERMOS_EXE",
+                                        "SSHOS_BOOT_ID",  "SSHOS_EXE"};
 
 bool in(const auto& table, std::string_view key) {
   return std::find(std::begin(table), std::end(table), key) != std::end(table);

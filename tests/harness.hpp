@@ -57,7 +57,7 @@ inline void fail_timeout(const char* test_name, long timeout_ms) {
   ++failures();
   std::fprintf(stderr,
                "  FAIL %s  timeout : le cas n'a pas rendu la main en %ld ms "
-               "(reglable via SSHOS_TEST_TIMEOUT_MS)\n",
+               "(reglable via TERMOS_TEST_TIMEOUT_MS)\n",
                test_name, timeout_ms);
 }
 

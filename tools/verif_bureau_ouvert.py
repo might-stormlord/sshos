@@ -74,7 +74,7 @@ def daemons():
         except OSError:
             continue
         if (b"--daemon" in a and HOME.encode() in env
-                and ("SSHOS_BOOT_ID=" + INSTANCE).encode() in env):
+                and ("TERMOS_BOOT_ID=" + INSTANCE).encode() in env):
             out.append(int(e))
     return out
 

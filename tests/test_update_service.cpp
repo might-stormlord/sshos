@@ -290,7 +290,7 @@ TEST(update_service_launches_the_updater_with_the_right_mode) {
 
   svc.run("update:apply");
   REQUIRE_EQ(launcher.calls.size(), static_cast<std::size_t>(1));
-  CHECK_EQ(launcher.calls[0][0], kPrefix + "/libexec/sshos-update");
+  CHECK_EQ(launcher.calls[0][0], kPrefix + "/libexec/termos-update");
   CHECK_EQ(launcher.calls[0][1], std::string("--apply"));
 
   // Tant que l'enfant vit, on ne relance pas.
@@ -618,7 +618,7 @@ TEST(update_service_clears_restart_pending_once_it_runs_the_installed_binary) {
   const std::string dir = temp_path("prefixe");
   ::mkdir(dir.c_str(), 0700);
   ::mkdir((dir + "/libexec").c_str(), 0700);
-  const std::string exe = dir + "/libexec/sshos";
+  const std::string exe = dir + "/libexec/termos";
   { std::ofstream out(exe); out << "binaire"; }
 
   const std::string body =
@@ -633,7 +633,7 @@ TEST(update_service_clears_restart_pending_once_it_runs_the_installed_binary) {
     CHECK_EQ(svc.entry().label, std::string("Verifier les mises a jour"));
   }
   {  // le demon tourne encore sur autre chose : il faut bien redemarrer
-    const std::string autre = dir + "/libexec/sshos.previous";
+    const std::string autre = dir + "/libexec/termos.previous";
     { std::ofstream out(autre); out << "ancien"; }
     UpdateService svc(plat, path, launcher.fn(), autre);
     svc.tick();
@@ -835,8 +835,8 @@ struct FauxPrefixe {
     dir = temp_path("prefixe");
     ::mkdir(dir.c_str(), 0700);
     ::mkdir((dir + "/libexec").c_str(), 0700);
-    pose = dir + "/libexec/sshos";
-    autre = dir + "/libexec/sshos.previous";
+    pose = dir + "/libexec/termos";
+    autre = dir + "/libexec/termos.previous";
     { std::ofstream out(pose); out << "binaire pose"; }
     { std::ofstream out(autre); out << "ancien binaire"; }
   }
