@@ -808,6 +808,22 @@ TEST(update_service_reports_no_progress_for_an_interrupted_job) {
 
 namespace {
 
+// LE CHEMIN S'EFFACE SEUL. Le harnais rend la main par un `return` NU sur un
+// REQUIRE rate (§5) : tout `std::remove` ecrit en fin de cas est saute ce
+// jour-la, et le fichier reste. Quatorze d'entre eux dormaient dans /tmp le
+// 21 aout 2026 -- un par echec passe.
+class UnlinkGuard {
+ public:
+  explicit UnlinkGuard(std::string p) : path_(std::move(p)) {}
+  ~UnlinkGuard() { std::remove(path_.c_str()); }
+  UnlinkGuard(const UnlinkGuard&) = delete;
+  UnlinkGuard& operator=(const UnlinkGuard&) = delete;
+  const std::string& path() const { return path_; }
+
+ private:
+  std::string path_;
+};
+
 // Un prefixe avec un « binaire » pose, et de quoi faire croire au service
 // que c'est lui -- ou un autre -- qui tourne.
 struct FauxPrefixe {
@@ -846,16 +862,15 @@ TEST(update_service_offers_the_restart_on_the_fact_not_on_the_status) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path =
-      write_state(fp.corps("up-to-date", "restart_pending=1\n"));
+  const UnlinkGuard etat(
+      write_state(fp.corps("up-to-date", "restart_pending=1\n")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.autre);  // on tourne l'ANCIEN
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.autre);  // on tourne l'ANCIEN
   svc.tick();
   CHECK(svc.needs_restart());
   CHECK(svc.badge());
   CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
   CHECK_EQ(svc.entry().id, std::string("update:restart"));
-  std::remove(path.c_str());
 }
 
 // LE FAIT TOMBE QUAND LA REALITE L'A DEPASSE, sans que le C++ ecrive quoi que
@@ -864,10 +879,10 @@ TEST(update_service_stops_believing_the_fact_once_it_runs_the_placed_binary) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path =
-      write_state(fp.corps("restart-pending", "restart_pending=1\n"));
+  const UnlinkGuard etat(
+      write_state(fp.corps("restart-pending", "restart_pending=1\n")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.pose);  // on EST le pose
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.pose);  // on EST le pose
   svc.tick();
   CHECK(!svc.needs_restart());
   CHECK(!svc.badge());
@@ -881,7 +896,6 @@ TEST(update_service_stops_believing_the_fact_once_it_runs_the_placed_binary) {
   REQUIRE(svc.has_report());
   const std::string r = svc.take_report();
   CHECK(r.find("Redemarrez") == std::string::npos);
-  std::remove(path.c_str());
 }
 
 // UNE NOUVEAUTE NE FAIT PAS OUBLIER LE REDEMARRAGE. Le fait passe avant la
@@ -891,15 +905,14 @@ TEST(update_service_puts_the_restart_before_a_newer_version) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path =
-      write_state(fp.corps("available", "restart_pending=1\n"));
+  const UnlinkGuard etat(
+      write_state(fp.corps("available", "restart_pending=1\n")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.autre);
   svc.tick();
   CHECK(svc.needs_restart());
   CHECK(svc.badge());
   CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
-  std::remove(path.c_str());
 }
 
 // LA MIGRATION, ET C'EST ELLE QUI COMPTE LE JOUR DE LA BASCULE. Un fichier
@@ -910,14 +923,13 @@ TEST(update_service_reads_an_old_state_that_predates_the_restart_key) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path = write_state(fp.corps("restart-pending", ""));
+  const UnlinkGuard etat(write_state(fp.corps("restart-pending", "")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.autre);
   svc.tick();
   CHECK(svc.needs_restart());
   CHECK(svc.badge());
   CHECK_EQ(svc.entry().label, std::string("Redemarrer pour terminer"));
-  std::remove(path.c_str());
 }
 
 // ET LE FAIT SE TAIT QUAND IL N'EST PAS LA. Sans la cle et sans le statut,
@@ -927,14 +939,13 @@ TEST(update_service_asks_for_no_restart_when_the_fact_is_absent) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path = write_state(fp.corps("up-to-date", ""));
+  const UnlinkGuard etat(write_state(fp.corps("up-to-date", "")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.autre);
   svc.tick();
   CHECK(!svc.needs_restart());
   CHECK(!svc.badge());
   CHECK_EQ(svc.entry().label, std::string("Verifier les mises a jour"));
-  std::remove(path.c_str());
 }
 
 // LA COMMANDE ELLE-MEME SUIT LE FAIT, pas l'interface : la garde ne doit pas
@@ -943,11 +954,10 @@ TEST(update_service_refuses_a_restart_when_no_binary_waits) {
   FakePlatform plat;
   FakeLauncher launcher;
   FauxPrefixe fp;
-  const std::string path = write_state(fp.corps("up-to-date", ""));
+  const UnlinkGuard etat(write_state(fp.corps("up-to-date", "")));
 
-  UpdateService svc(plat, path, launcher.fn(), fp.autre);
+  UpdateService svc(plat, etat.path(), launcher.fn(), fp.autre);
   svc.tick();
   svc.run("update:restart");
   CHECK(!svc.wants_restart());
-  std::remove(path.c_str());
 }

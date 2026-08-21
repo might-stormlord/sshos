@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -24,16 +25,28 @@ class Tree {
     const char* made = ::mkdtemp(tpl);
     if (made != nullptr) root_ = made;
   }
+  // RECURSIF, ET PAS SEULEMENT CE QUE LE TEST A CREE LUI-MEME.
+  //
+  // C'est ici que ça comptait le plus : ce fichier éprouve `FileJob`, dont
+  // le métier EST de créer -- il copie, déplace, fabrique des dossiers, et
+  // un travail arrêté en cours de route laisse un reste à mi-chemin. Ne
+  // retirer que la liste tenue ici faisait échouer le `rmdir` de la racine
+  // sur ENOTEMPTY, en silence, et l'arbre entier fuyait. Mesure du 21 août
+  // 2026 : **1331** répertoires abandonnés dans /tmp, sur un tmpfs de 2,7 Go.
+  //
+  // FTW_PHYS, et c'est le point qui compte : sans lui, `nftw` suivrait les
+  // liens symboliques, et cette suite en fabrique. Effacer la CIBLE d'un
+  // lien est le pire dégât qu'un gestionnaire de fichiers puisse faire --
+  // la production s'en garde par `lstat`, un test qui nettoie doit s'en
+  // garder pareillement. FTW_DEPTH pour voir les enfants avant leur parent.
   ~Tree() {
-    // Deux passes : les fichiers d'abord, puis les répertoires du plus
-    // profond au moins profond.
-    for (auto it = made_.rbegin(); it != made_.rend(); ++it) {
-      ::unlink(it->c_str());
-    }
-    for (auto it = made_.rbegin(); it != made_.rend(); ++it) {
-      ::rmdir(it->c_str());
-    }
-    ::rmdir(root_.c_str());
+    if (root_.empty()) return;
+    ::nftw(root_.c_str(),
+           [](const char* p, const struct stat*, int, struct FTW*) {
+             ::remove(p);  // on continue quoi qu'il arrive : un reste
+             return 0;     // têtu ne doit pas retenir tout le reste
+           },
+           16, FTW_DEPTH | FTW_PHYS);
   }
   Tree(const Tree&) = delete;
   Tree& operator=(const Tree&) = delete;
@@ -44,7 +57,6 @@ class Tree {
   std::string dir(const std::string& rel) {
     const std::string p = root_ + "/" + rel;
     ::mkdir(p.c_str(), 0755);
-    made_.push_back(p);
     return p;
   }
   std::string file(const std::string& rel, const std::string& body = {}) {
@@ -58,13 +70,11 @@ class Tree {
       }
       ::close(fd);
     }
-    made_.push_back(p);
     return p;
   }
 
  private:
   std::string root_;
-  std::vector<std::string> made_;
 };
 
 std::string read_all(const std::string& path) {

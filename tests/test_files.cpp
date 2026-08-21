@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <ftw.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -31,12 +32,28 @@ class Tree {
     const char* made = ::mkdtemp(tpl);
     if (made != nullptr) root_ = made;
   }
+  // RECURSIF, ET PAS SEULEMENT CE QUE LE TEST A CREE LUI-MEME.
+  //
+  // Le code teste cree AUSSI -- c'est meme tout l'objet du gestionnaire de
+  // fichiers : il copie, deplace, fabrique des dossiers, et une suppression
+  // arretee en cours de route laisse un reste. Ne retirer que la liste tenue
+  // ici faisait echouer le `rmdir` de la racine sur ENOTEMPTY, en silence,
+  // et l'arbre ENTIER fuyait. Mesure du 21 aout 2026 : 242 repertoires
+  // abandonnes dans /tmp depuis le 13, sur un tmpfs de 2,7 Go.
+  //
+  // FTW_PHYS, ET C'EST LE POINT QUI COMPTE : sans lui, nftw suivrait les
+  // liens symboliques, et cette suite en fabrique. Effacer la CIBLE d'un lien
+  // est le pire degat qu'un gestionnaire de fichiers puisse faire -- la
+  // production s'en garde par `lstat`, un test qui nettoie doit s'en garder
+  // pareillement. FTW_DEPTH pour voir les enfants avant leur parent.
   ~Tree() {
-    for (auto it = made_.rbegin(); it != made_.rend(); ++it) {
-      ::unlink(it->c_str());
-      ::rmdir(it->c_str());
-    }
-    ::rmdir(root_.c_str());
+    if (root_.empty()) return;
+    ::nftw(root_.c_str(),
+           [](const char* p, const struct stat*, int, struct FTW*) {
+             ::remove(p);  // on continue quoi qu'il arrive : un reste
+             return 0;     // tetu ne doit pas retenir tout le reste
+           },
+           16, FTW_DEPTH | FTW_PHYS);
   }
   Tree(const Tree&) = delete;
   Tree& operator=(const Tree&) = delete;
@@ -48,19 +65,16 @@ class Tree {
     const std::string p = root_ + "/" + rel;
     const int fd = ::open(p.c_str(), O_CREAT | O_WRONLY | O_CLOEXEC, 0600);
     if (fd >= 0) ::close(fd);
-    made_.push_back(p);
     return p;
   }
   std::string dir(const std::string& rel) {
     const std::string p = root_ + "/" + rel;
     ::mkdir(p.c_str(), 0700);
-    made_.push_back(p);
     return p;
   }
 
  private:
   std::string root_;
-  std::vector<std::string> made_;
 };
 
 KeyEvent ch(char32_t c) { return KeyEvent{Key::Char, c, 0}; }

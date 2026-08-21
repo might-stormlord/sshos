@@ -351,3 +351,57 @@ TEST(update_state_accepts_both_ends_of_the_percentage) {
   CHECK_EQ(parse("schema=1\nprogress=0\n").progress, 0);
   CHECK_EQ(parse("schema=1\nprogress=100\n").progress, 100);
 }
+
+// --- LE FAIT, ET RIEN QUE « 1 » -----------------------------------------
+//
+// `restart_pending` dit qu'un binaire est pose et que ce n'est pas celui qui
+// tourne. Comme les numeros de version et le pourcentage, la valeur vient
+// d'un script et passe par un fichier editable a la main : on ne devine pas.
+// « 1 » et rien d'autre. (Campagne de mutation, M1.)
+TEST(update_state_reads_the_restart_fact_only_as_one) {
+  CHECK(parse("schema=1\nrestart_pending=1\n").restart_pending);
+
+  // Tout le reste est faux -- y compris « 0 », « true » et « oui », qui
+  // seraient les erreurs naturelles d'une edition a la main.
+  for (const char* v : {"0", "", "true", "oui", "yes", "2", "01", "1.0"}) {
+    const std::string raw =
+        std::string("schema=1\nrestart_pending=") + v + "\n";
+    CHECK(!parse(raw).restart_pending);
+  }
+
+  // L'ESPACE AUTOUR EST TOLERE, comme pour toute autre cle : l'analyseur
+  // rogne cle et valeur avant de les lire. C'est une tolerance uniforme et
+  // deliberee, pas un relachement propre a ce champ -- un fichier edite a la
+  // main garde souvent une espace apres le signe.
+  CHECK(parse("schema=1\nrestart_pending= 1\n").restart_pending);
+  CHECK(parse("schema=1\n restart_pending =1 \n").restart_pending);
+}
+
+// LA CLE PRESENTE FAIT AUTORITE, ET LA MIGRATION NE JOUE QUE SUR SON
+// ABSENCE.
+//
+// Un fichier ecrit par un script anterieur n'a pas la cle, mais son
+// `status=restart-pending` dit la meme chose : on la reconstruit, sinon la
+// mise a jour qui INTRODUIT la cle perdrait le redemarrage qu'elle vient
+// elle-meme de mettre en attente -- au pire moment possible.
+//
+// Mais quand la cle est la et dit non, c'est elle qui gagne : sans quoi la
+// migration deviendrait un « toujours vrai » des que le statut le redit, et
+// le fait ne pourrait plus jamais retomber. (Campagne de mutation, M5.)
+TEST(update_state_migrates_only_when_the_restart_key_is_absent) {
+  // Absente + le statut le dit : on reconstruit.
+  CHECK(parse("schema=1\nstatus=restart-pending\n").restart_pending);
+
+  // Presente et negative : elle fait autorite, meme contre le statut.
+  CHECK(!parse("schema=1\nstatus=restart-pending\nrestart_pending=\n")
+             .restart_pending);
+  CHECK(!parse("schema=1\nstatus=restart-pending\nrestart_pending=0\n")
+             .restart_pending);
+
+  // Absente et le statut ne dit rien : rien a reconstruire.
+  CHECK(!parse("schema=1\nstatus=up-to-date\n").restart_pending);
+
+  // Et l'ordre des lignes n'y change rien.
+  CHECK(!parse("schema=1\nrestart_pending=\nstatus=restart-pending\n")
+             .restart_pending);
+}

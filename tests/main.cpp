@@ -1,3 +1,4 @@
+#include <ftw.h>
 #include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -519,10 +520,32 @@ struct SeedOnce {
 // scenarios golden, et la meme parade : on pointe la variable sur un
 // repertoire jetable, une fois, pour tout le binaire. Les cas qui VEULENT
 // un fichier d'etat la reposent eux-memes (voir UpdateFixture).
+char g_xdg_dir[] = "/tmp/sshos-tests-xdg-XXXXXX";
+bool g_xdg_made = false;
+
 void isolate_from_the_real_installation() {
-  static char dir[] = "/tmp/sshos-tests-xdg-XXXXXX";
-  if (::mkdtemp(dir) == nullptr) return;
-  ::setenv("XDG_DATA_HOME", dir, 1);
+  if (::mkdtemp(g_xdg_dir) == nullptr) return;
+  g_xdg_made = true;
+  ::setenv("XDG_DATA_HOME", g_xdg_dir, 1);
+}
+
+// ET ON LE REPREND EN PARTANT. Il n'etait jamais retire : un repertoire
+// abandonne par LANCEMENT du binaire de tests, avec ce que les cas y avaient
+// ecrit. 370 d'entre eux dormaient dans /tmp le 21 aout 2026, depuis le 13 --
+// sur un tmpfs de 2,7 Go qu'une compilation d'essai a deja rempli une fois.
+//
+// PAS D'atexit(), ET C'EST LA TOUTE LA SUBTILITE : le lanceur est un
+// superviseur qui forke un ouvrier, et l'ouvrier sort par std::exit(0), qui
+// deroule les atexit. Il effacerait le repertoire sous les pieds des lots
+// suivants. Seul le superviseur atteint la fin de main().
+void reclaim_the_isolation_dir() {
+  if (!g_xdg_made) return;
+  ::nftw(g_xdg_dir,
+         [](const char* p, const struct stat*, int, struct FTW*) {
+           ::remove(p);
+           return 0;
+         },
+         16, FTW_DEPTH | FTW_PHYS);
 }
 
 int main(int argc, char** argv) {
@@ -688,6 +711,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  reclaim_the_isolation_dir();
   std::printf("\n%d cas, %d en echec, %d assertions echouees\n", ran,
               failed_cases, th::failures());
   return th::failures() == 0 ? 0 : 1;
