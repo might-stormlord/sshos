@@ -1,4 +1,40 @@
-# ssh_os 2.0 — dossier de reprise
+# termos — dossier de reprise
+
+> ## ⚠️ LE PROJET S'APPELLE `termos` DEPUIS LE 21 AOÛT 2026
+>
+> Il s'appelait `ssh_os 2.0` / `sshos`. Trois commits ont fait la bascule :
+> le contrat d'installation (`c3c6c63`), la construction et la CI (`2e622b2`),
+> les chaînes vues par l'utilisateur (`b09639e`).
+>
+> **Ce qui a changé :** la commande (`termos`), le binaire, le nom du socket
+> abstrait (`\0termos/<uid>/<boot_id>`), les variables `TERMOS_*`, les chemins
+> d'installation (`~/.local/bin/termos`, `~/.local/share/termos/`), les URL du
+> dépôt, le libellé du panneau, la signature de fond, et les deux cibles
+> exécutables de CMake (`termos`, `termos_tests`).
+>
+> **Ce qui N'A PAS changé, et c'est délibéré :** le namespace C++ `sshos`
+> (1 978 occurrences dans 129 fichiers, invisible hors du dépôt), la cible
+> `sshos_core`, `project(sshos)`, les sockets abstraits et chemins temporaires
+> des tests, et **les plans et specs datés de `docs/superpowers/`** — ce sont
+> des documents d'archive qui décrivent ce qui a été fait sous le nom de
+> l'époque. Les réécrire falsifierait l'histoire du projet et casserait
+> quatorze références croisées.
+>
+> ⚠️ **`kBanned` (`src/pty/env.cpp`) liste les QUATRE noms**, anciens compris.
+> Un lanceur `~/.local/bin/sshos` survivant dans un `PATH` suffirait sinon à
+> faire descendre `SSHOS_BOOT_ID` dans chaque shell du bureau, où un binaire de
+> l'époque recalculerait l'ancien nom de socket : `sshos --kill` tapé là
+> tuerait la session. Gardé par
+> `child_env_still_bans_the_pre_rename_desktop_identity` — **ne pas « nettoyer »
+> ces deux entrées en les croyant mortes.**
+>
+> ⚠️ **Le nom d'un socket UNIX abstrait est figé au `bind()`, dans le noyau.**
+> Il n'existe donc AUCUN chemin de migration qui préserve une session vivante à
+> travers ce renommage : une installation d'avant garde son démon sur
+> `\0sshos/…`, invisible au binaire neuf, qui en démarrerait un second.
+> `tools/install.sh` arrête l'ancien démon puis retire ses cinq fichiers —
+> l'arrêt AVANT le retrait, un démon dont on efface le binaire ne peut plus se
+> relancer.
 
 > Document destiné à un contexte neuf. Il suppose zéro connaissance préalable de la
 > conversation qui a produit le projet. Tout ce qui suit a été vérifié, pas supposé :
@@ -1318,7 +1354,7 @@ Tous ont été rencontrés pour de vrai, plusieurs fois. Ils font perdre des heu
 
 | Piège | Parade |
 |---|---|
-| **`ps` / `pgrep -f` matche sa propre ligne de commande.** Survenu **3 fois**, dont un « défaut reproduit » entièrement faux. | **Ne jamais identifier un processus par correspondance de nom.** Utiliser `/proc/PID/cwd`, ou `sshos --status` (qui s'appuie sur `SO_PEERCRED`). |
+| **`ps` / `pgrep -f` matche sa propre ligne de commande.** Survenu **3 fois**, dont un « défaut reproduit » entièrement faux. | **Ne jamais identifier un processus par correspondance de nom.** Utiliser `/proc/PID/cwd`, ou **`~/.local/bin/termos --status`** (qui s'appuie sur `SO_PEERCRED`). ⚠️ **Le LANCEUR, jamais le binaire nu** : `~/.local/libexec/termos --status` répond « aucun demon » alors que le bureau tourne. Seul le lanceur pose `TERMOS_BOOT_ID` ; le binaire appelé directement compose un autre nom de socket et conclut à juste titre qu'il n'y a personne — sur un nom qui n'a jamais existé. Même famille que le piège ci-dessus, et il a menti au premier essai le 21 août. |
 | **`grep -i FAIL`** matche le nom de test `..._after_failed_explicit_release`. | Filtrer sur la ligne de bilan, pas sur une sous-chaîne. |
 | **`$PPID` est figé à l'initialisation du shell.** Mesuré `$PPID=2757136` (parent déjà mort) contre un ppid réel de `1`. A produit un test instable à 2/30. | `$(cut -d' ' -f4 /proc/$$/stat)`. |
 | **`dash` réinitialise le masque de signaux hérité**, mais **pas** les dispositions `SIG_IGN`. | Tester avec `/bin/cp`, pas `sh -c grep`. |
